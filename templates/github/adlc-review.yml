@@ -1,0 +1,42 @@
+# ADLC adversarial-review lane — runs the independent reviewer on EACH PR.
+# This is the file that makes the review automatic on PR creation.
+#
+# Triggers when a PR is opened/reopened/marked ready. Add 'synchronize' to the types below
+# if you also want a re-review on every push to the PR (more thorough, more Actions minutes).
+#
+# Fresh context + read-only: the reviewer sees only the diff + the criteria and tries to
+# break it (break assumptions · enforce contracts · prevent the echo chamber).
+#
+# PREREQUISITES: the same secrets as the other lanes — CLAUDE_CODE_OAUTH_TOKEN +
+# ADLC_DISPATCH_TOKEN. NOTE: a pull_request from a FORK gets no secrets, so this is meant for
+# the Builder bot's same-repo branches; for outside/fork PRs, gate on a label instead.
+name: ADLC adversarial review
+
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run adversarial reviewer
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.ADLC_DISPATCH_TOKEN }}
+          prompt: |
+            You are the ADLC adversarial-reviewer. Review PR #${{ github.event.pull_request.number }}
+            in fresh context, read-only, seeing ONLY the diff plus the linked ADR / task
+            breakdown / ACs. Load the adversarial-reviewer agent definition and the
+            adlc:code-review + project-conventions + adlc:security-gate skills. Apply the three
+            pillars (break assumptions · enforce contracts · prevent the echo chamber), then
+            post findings as a single PR comment. Never edit code, never change labels, never merge.

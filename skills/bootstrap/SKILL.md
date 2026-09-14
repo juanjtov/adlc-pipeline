@@ -66,6 +66,12 @@ detected values pre-selected as the recommended option. Cover:
 3. **Commands** — the exact shell commands for **test**, **type-check/lint**, **build**,
    and **run/dev** (pre-filled from detected scripts). These go verbatim into
    `project-conventions` so every agent runs the right thing.
+3a. **Test battery / CI** — offer both paths explicitly, because many orgs already run their
+   own CI: **(a) Propose it** — run the `test-strategy` skill to scan the repo + PRD and
+   propose the CI battery (layers, commands, required-check names) and scaffold `adlc-ci.yml`;
+   recommended for greenfield or thin coverage. **(b) Keep ours** — the org already has a CI
+   battery; then don't run `test-strategy` and don't copy `adlc-ci.yml` — just record their
+   existing required-check names so the lanes/gate reference the right ones.
 4. **Deploy & data** — deploy target (Vercel / Cloud Run / AWS / Fly / Docker / none yet),
    environments (dev/staging/prod), and the database/persistence + migration approach.
 5. **Roles & tenancy** — the product's user roles, and whether it is multi-tenant /
@@ -167,8 +173,14 @@ machine: `stage:intake`, `gate:stories`, `stage:design`, `stage:build`, `stage:q
 running** — this writes to their GitHub repo.
 
 **Full-automation only:** copy the lane workflows into `.github/workflows/`
-(`adlc-builder.yml`, `adlc-qa.yml`), filled with the repo's required-check names and the
-Principal's handle in the author allowlist. **Auto-triggering needs no GitHub Pro** — set up
+(`adlc-builder.yml`, `adlc-qa.yml`, and `adlc-review.yml` — which runs the adversarial
+reviewer automatically on each PR), filled with the repo's required-check names and the
+Principal's handle in the author allowlist. Also copy **`adlc-diff-scope.yml`** (fails a PR
+that touches files outside its stage's allowed paths — the path-level half of author/verifier
+separation). For the test battery, follow the Phase 1 choice: if the user picked **propose it**,
+run the `test-strategy` skill, then copy **`adlc-ci.yml`** filled with the chosen setup +
+commands (these are the required checks); if they picked **keep ours**, skip `adlc-ci.yml` and
+plug their existing check names into the lanes and (public) branch protection. **Auto-triggering needs no GitHub Pro** — set up
 the merge gate according to the repo's visibility (the Phase 1 choice):
 
 - **Public repo** → don't copy the tripwire. Print the branch-protection setup as a Principal

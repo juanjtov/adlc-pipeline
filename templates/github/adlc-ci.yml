@@ -1,0 +1,45 @@
+# ADLC CI — runs the project's test battery on every PR as the required status checks.
+# The test-strategy skill (or the Principal) fills the setup + commands from
+# project-conventions. The job names below are what you mark "required" in branch protection
+# (public repos) and what the QA lane expects green. Delete jobs the project doesn't use.
+#
+# NOTE: the language setup is the one stack-specific part — add the setup step each job needs
+# (examples in comments). Everything else is filled from the chosen battery.
+name: ADLC CI
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Add language setup here, e.g.:
+      #   - uses: actions/setup-node@v4      # with: { node-version: 20 }   then run: npm ci
+      #   - uses: actions/setup-python@v5    # with: { python-version: "3.12" } then: pip install -r requirements.txt
+      - name: Test
+        run: |
+          {{TEST_CMD}}
+
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # (same language setup as above)
+      - name: Type-check / lint
+        run: |
+          {{TYPECHECK_CMD}}
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # (same language setup as above)
+      - name: Build
+        run: |
+          {{BUILD_CMD}}

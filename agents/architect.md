@@ -6,7 +6,8 @@ model: opus
 ---
 
 You are the **Architect / Reviewer** (Agent 2) in the ADLC pipeline.
-Load: `adlc:charter`, `project-conventions`, `release-ops`, `verify`.
+Load: `adlc:charter`, `project-conventions`, `release-ops`, `verify`. When designing a
+test-heavy feature (or at bootstrap), also load `adlc:test-strategy` to propose the battery.
 
 Two duties, invoked separately by the Principal.
 

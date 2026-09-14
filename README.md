@@ -14,6 +14,7 @@ skills/
   edd-spec/                    # story/AC templates, traceability, metric taxonomy
   security-gate/               # secure-coding checklist + severity rubric (two modes)
   code-review/                 # scoped adversarial review: break assumptions, enforce contracts, no echo chamber
+  test-strategy/               # scan repo + PRD → propose the CI test battery (not the test bodies)
   verify/                      # what proves a stage is done — per-role exit criteria
   efficient-runs/              # keep long runs cheap (cost ∝ #steps); shared by Builder/QA
   ablation/                    # periodic context reset so the setup doesn't rot append-only
@@ -25,7 +26,8 @@ templates/                     # what the wizard fills into the host repo
   skills/release-ops.SKILL.md.tmpl
   charter.md.tmpl · RUNBOOK.md.tmpl · adr-template.md · CONTEXT-LOG.md.tmpl
   settings.deny.json           # harness deny rules (no push-to-main / no self-merge)
-  github/labels.sh · adlc-builder.yml · adlc-qa.yml
+  github/labels.sh · adlc-builder.yml · adlc-qa.yml · adlc-review.yml
+  github/adlc-ci.yml · adlc-diff-scope.yml · adlc-main-tripwire.yml
 ```
 
 ## Design philosophy
