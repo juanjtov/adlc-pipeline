@@ -58,6 +58,13 @@ printf '%s' "$LF" | grep -q '"severity":"Critical"' && ok "parses severity" || b
 printf '%s' "$LF" | grep -q '"pr":42' && ok "tags pr number" || bad "tags pr number"
 eq "" "empty when no findings" "$(printf 'nothing here\n' | bash "$S/adlc-log-findings.sh" 1 review)"
 
+echo "cost/latency:"
+CO=$(printf 'adlc-builder 120 5000 0.10\nadlc-qa 80 3000 0.06\nadlc-builder 60 2000 0.04\n' | bash "$S/adlc-cost.sh")
+printf '%s\n' "$CO" | grep -qE 'adlc-builder +2 +180 +90\.0 +7000' && ok "per-lane rollup (runs/total/avg/tokens)" || bad "per-lane rollup"
+printf '%s\n' "$CO" | grep -qE 'TOTAL +3 +260' && ok "pipeline total latency" || bad "pipeline total latency"
+LO=$(printf 'adlc-review 30\nadlc-review 10\n' | bash "$S/adlc-cost.sh")
+printf '%s\n' "$LO" | grep -qE 'adlc-review +2 +40 +20\.0' && ok "latency-only (no tokens)" || bad "latency-only"
+
 echo ""
 echo "== $pass passed, $fail failed =="
 [ "$fail" -eq 0 ]

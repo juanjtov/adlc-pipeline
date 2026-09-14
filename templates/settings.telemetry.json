@@ -1,0 +1,11 @@
+{
+  "_comment": "OPT-IN token/cost/latency telemetry. Merge this `env` block into the host repo's .claude/settings.json to make Claude Code export per-session usage (input/output tokens, cost, and duration) over OpenTelemetry. This is how you get TRUE per-agent token+cost: each agent run is its own session/trace, and service.name lets you group a whole pipeline execution. Requires an OTel collector/backend reachable at the endpoint (run one locally → your metrics store, e.g. Cloud Monitoring / Grafana / Honeycomb). Latency alone (no collector) is available deterministically from GitHub Actions run durations via adlc-cost.sh.",
+  "env": {
+    "CLAUDE_CODE_ENABLE_TELEMETRY": "1",
+    "OTEL_METRICS_EXPORTER": "otlp",
+    "OTEL_LOGS_EXPORTER": "otlp",
+    "OTEL_EXPORTER_OTLP_PROTOCOL": "grpc",
+    "OTEL_EXPORTER_OTLP_ENDPOINT": "http://localhost:4317",
+    "OTEL_RESOURCE_ATTRIBUTES": "service.name=adlc,adlc.repo={{PROJECT_NAME}}"
+  }
+}

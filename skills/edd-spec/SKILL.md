@@ -96,3 +96,9 @@ The `retro` (via `.adlc/scripts/adlc-log-findings.sh`) reads those lines from PR
 Comments are durable, per-repo, and native (never an agent self-report file). The `retro` ranks
 the materialized ledger to add durable guards; the `ablation` skill prunes context they no
 longer justify.
+
+**Cost & wall-clock capture.** Latency per lane and per pipeline run is deterministic from
+GitHub Actions run durations — `adlc-cost.sh` rolls it up (no extra infra). **Token count and
+cost per agent** come from opt-in **OpenTelemetry** (`settings.telemetry.json`): Claude Code
+exports per-session tokens + cost + duration to your OTel collector, and `service.name` groups
+a whole pipeline execution. Enable OTel when you have a collector; latency works without one.

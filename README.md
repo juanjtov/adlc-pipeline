@@ -27,12 +27,13 @@ templates/                     # what the wizard fills into the host repo
   skills/release-ops.SKILL.md.tmpl
   charter.md.tmpl · RUNBOOK.md.tmpl · adr-template.md · CONTEXT-LOG.md.tmpl
   settings.deny.json           # harness deny rules (no push-to-main / no self-merge)
+  settings.telemetry.json      # opt-in OTel env for per-agent token/cost/latency
   github/labels.sh · adlc-builder.yml · adlc-qa.yml · adlc-review.yml · adlc-fix.yml
   github/adlc-intake.yml · adlc-design.yml        # auto-start (autopilot) lanes
   github/adlc-ci.yml · adlc-diff-scope.yml · adlc-main-tripwire.yml · adlc-retro.yml
   github/ISSUE_TEMPLATE/requirement.yml           # file a requirement → pipeline starts
   scripts/  adlc-diff-scope.sh · adlc-tripwire-check.sh · adlc-fix-cap.sh · adlc-verdict.sh
-            adlc-log-findings.sh · adlc-doctor.sh · adlc-metrics.sh   # deterministic guardrail logic
+            adlc-log-findings.sh · adlc-doctor.sh · adlc-metrics.sh · adlc-cost.sh   # deterministic logic
   hooks/pre-commit             # local diff-scope guard (reuses adlc-diff-scope.sh)
 tests/run.sh                   # unit tests for the guardrail scripts (bash, no deps)
 ```
@@ -76,10 +77,11 @@ and files an evidence-backed issue (`adlc:plugin-suggestion`) into the shared pl
 (`ADLC_PLUGIN_REPO`, default `juanjtov/adlc-pipeline`) — so improvements found in one of your
 projects can be curated into the plugin and reach them all. Only from repos you own/share.
 
-**Not yet tracked:** token count, latency, and cost per agent / per pipeline run. `adlc-metrics.sh`
-derives delivery/quality signals from GitHub (acceptance, cycle time, finding classes) but not
-spend — that needs harness telemetry (Claude Code OpenTelemetry export, or parsing each lane's
-Actions usage). A known gap, not wired.
+**Cost / latency / tokens.** Latency per lane and per pipeline run is tracked deterministically
+by `adlc-cost.sh` (from GitHub Actions run durations — no extra infra). Token count and cost per
+agent come from **opt-in OpenTelemetry** (`settings.telemetry.json`): Claude Code exports
+per-session tokens + cost + duration to your OTel collector, and `service.name` groups a whole
+pipeline run. Enable it when you have a collector; latency works without one.
 
 ### Two layers, on purpose
 

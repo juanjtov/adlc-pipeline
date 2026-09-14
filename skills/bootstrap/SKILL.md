@@ -76,7 +76,10 @@ detected values pre-selected as the recommended option. Cover:
    (`.adlc/metrics/`) and the reviewer/QA/security skills log findings by class; for full
    automation it also copies `adlc-retro.yml` + `.adlc/scripts/adlc-metrics.sh` so a scheduled
    (and manual `/adlc:retro`) pass proposes durable fixes from recurring findings and prunes
-   stale context. Opt-out if you don't want the ledger.
+   stale context. Opt-out if you don't want the ledger. Also offer **cost tracking**: latency
+   per lane/pipeline works out of the box (`adlc-cost.sh`, from Actions run times); for **token +
+   cost per agent**, offer to merge `settings.telemetry.json`'s OTel env into `.claude/settings.json`
+   — it needs an OTel collector, so it's opt-in.
 4. **Deploy & data** — deploy target (Vercel / Cloud Run / AWS / Fly / Docker / none yet),
    environments (dev/staging/prod), and the database/persistence + migration approach.
 5. **Roles & tenancy** — the product's user roles, and whether it is multi-tenant /
