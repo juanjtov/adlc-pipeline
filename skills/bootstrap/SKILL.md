@@ -72,6 +72,11 @@ detected values pre-selected as the recommended option. Cover:
    recommended for greenfield or thin coverage. **(b) Keep ours** — the org already has a CI
    battery; then don't run `test-strategy` and don't copy `adlc-ci.yml` — just record their
    existing required-check names so the lanes/gate reference the right ones.
+3b. **Self-improvement loop** — enable it? If yes, the wizard creates the metrics ledger
+   (`.adlc/metrics/`) and the reviewer/QA/security skills log findings by class; for full
+   automation it also copies `adlc-retro.yml` + `.adlc/scripts/adlc-metrics.sh` so a scheduled
+   (and manual `/adlc:retro`) pass proposes durable fixes from recurring findings and prunes
+   stale context. Opt-out if you don't want the ledger.
 4. **Deploy & data** — deploy target (Vercel / Cloud Run / AWS / Fly / Docker / none yet),
    environments (dev/staging/prod), and the database/persistence + migration approach.
 5. **Roles & tenancy** — the product's user roles, and whether it is multi-tenant /
@@ -180,7 +185,13 @@ that touches files outside its stage's allowed paths — the path-level half of 
 separation). For the test battery, follow the Phase 1 choice: if the user picked **propose it**,
 run the `test-strategy` skill, then copy **`adlc-ci.yml`** filled with the chosen setup +
 commands (these are the required checks); if they picked **keep ours**, skip `adlc-ci.yml` and
-plug their existing check names into the lanes and (public) branch protection. **Auto-triggering needs no GitHub Pro** — set up
+plug their existing check names into the lanes and (public) branch protection.
+
+If the **self-improvement loop** is enabled (Phase 1): create `.adlc/metrics/` (with a
+`.gitkeep`) so the reviewer/QA/security skills can append the finding ledger, and — for full
+automation — copy `adlc-retro.yml` and `.adlc/scripts/adlc-metrics.sh`. Tell the user the
+retro is **propose-only** (it opens a PR through the gates) and runs on the workflow's schedule
+or on demand via `/adlc:retro`. **Auto-triggering needs no GitHub Pro** — set up
 the merge gate according to the repo's visibility (the Phase 1 choice):
 
 - **Public repo** → don't copy the tripwire. Print the branch-protection setup as a Principal

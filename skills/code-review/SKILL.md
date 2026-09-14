@@ -45,6 +45,8 @@ Principal with rationale.
 ## Output format
 
 Verdict (**PASS** / **CHANGES REQUESTED**), then per finding:
-`severity · file:line · failing input→result · pillar · required fix`,
-then a **structured-disagreement note**: the strongest counter-case you tested and what the
-evidence showed. Post it as a single PR comment.
+`severity · class · file:line · failing input→result · pillar · required fix`
+(class from the `adlc:edd-spec` vocabulary), then a **structured-disagreement note**: the
+strongest counter-case you tested and what the evidence showed. Post it as a single PR comment,
+and append one ledger line per finding to `.adlc/metrics/findings.jsonl` (schema in
+`adlc:edd-spec`) so the `retro` loop can compound recurring classes into durable guards.

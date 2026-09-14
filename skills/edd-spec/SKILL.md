@@ -67,3 +67,23 @@ Every story ships with **edge cases** (empty/error/permission-denied states) and
 
 Record per-story rows during the pilot (a `docs/adlc/BASELINE_METRICS.md` is a good home);
 these baselines set the staged-autonomy thresholds later (charter §2.5).
+
+## Capture & finding classes (feeds the `retro` self-improvement loop)
+
+Every finding from the adversarial reviewer, QA, or the security gate is logged with a
+**class**, so recurring failure types can be found and turned into durable guards (see the
+`retro` skill). Append one JSON line per finding to `.adlc/metrics/findings.jsonl`:
+
+```
+{"ts":"<ISO8601>","pr":<n>,"issue":<n>,"stage":"review|qa|security",
+ "class":"<class>","severity":"Critical|High|Medium|Low","file":"<path>",
+ "outcome":"fixed|waived|escaped"}
+```
+
+**Finding classes:** `tenant-leak` · `authz-gap` · `injection` · `secret-in-code` ·
+`hallucinated-api` · `missing-edge-case` · `logic-contradiction` · `contract-violation`
+(ADR / diff-scope) · `flaky-test` · `perf-regression` · `other`.
+
+Capture is deterministic and append-only (never agent self-report as a system of record).
+The `retro` skill ranks these to add durable guards; the `ablation` skill prunes context they
+no longer justify.

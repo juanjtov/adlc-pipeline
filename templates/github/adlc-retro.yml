@@ -1,0 +1,40 @@
+# ADLC retro — the scheduled half of the self-improvement loop.
+# Runs the retro on a cadence: reads the metrics + finding ledger, and opens a PROPOSAL PR
+# with durable fixes (regression tests / checks / conventions) + context pruning. It NEVER
+# auto-applies — the PR goes through the normal gates (QA + adversarial review).
+#
+# PREREQUISITES: CLAUDE_CODE_OAUTH_TOKEN + ADLC_DISPATCH_TOKEN (the dispatch token so the
+# proposal PR is bot-authored and can trigger the review/CI lanes). Also add `jq` if your
+# metrics script needs it (ubuntu-latest has it).
+name: ADLC retro
+
+on:
+  schedule:
+    - cron: "0 15 * * 1"   # Mondays 15:00 UTC — adjust cadence to taste
+  workflow_dispatch: {}     # allow a manual run from the Actions tab
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: read
+
+jobs:
+  retro:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run the retro (opens a proposal PR)
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.ADLC_DISPATCH_TOKEN }}
+          prompt: |
+            Run the ADLC self-improvement retro. Load the `retro` skill and follow it:
+            compute metrics (run .adlc/scripts/adlc-metrics.sh), read .adlc/metrics/findings.jsonl
+            and CONTEXT-LOG.md, rank recurring failure classes, and open ONE proposal PR that
+            adds the cheapest durable fixes (regression tests > CI checks > conventions > gotcha),
+            prunes zero-hit context lines, and logs every change in CONTEXT-LOG.md. Never
+            auto-merge; never bypass the gates. If nothing recurs, open no PR and say so.

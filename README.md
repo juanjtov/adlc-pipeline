@@ -15,6 +15,7 @@ skills/
   security-gate/               # secure-coding checklist + severity rubric (two modes)
   code-review/                 # scoped adversarial review: break assumptions, enforce contracts, no echo chamber
   test-strategy/               # scan repo + PRD → propose the CI test battery (not the test bodies)
+  retro/                       # self-improvement loop: recurring findings → durable guards (propose-only)
   verify/                      # what proves a stage is done — per-role exit criteria
   efficient-runs/              # keep long runs cheap (cost ∝ #steps); shared by Builder/QA
   ablation/                    # periodic context reset so the setup doesn't rot append-only
@@ -27,7 +28,8 @@ templates/                     # what the wizard fills into the host repo
   charter.md.tmpl · RUNBOOK.md.tmpl · adr-template.md · CONTEXT-LOG.md.tmpl
   settings.deny.json           # harness deny rules (no push-to-main / no self-merge)
   github/labels.sh · adlc-builder.yml · adlc-qa.yml · adlc-review.yml
-  github/adlc-ci.yml · adlc-diff-scope.yml · adlc-main-tripwire.yml
+  github/adlc-ci.yml · adlc-diff-scope.yml · adlc-main-tripwire.yml · adlc-retro.yml
+  scripts/adlc-metrics.sh      # GitHub-derived self-improvement metrics
 ```
 
 ## Design philosophy
@@ -41,6 +43,17 @@ skill) rather than enumerating steps; hard prohibitions are reserved for genuine
 areas (merge/deploy/push/cross-gate) and otherwise enforced structurally by `tools:` grants
 and deny rules; and the `ablation` skill + `CONTEXT-LOG.md` exist so the setup gets pruned,
 not just appended to.
+
+## Self-improvement loop
+
+The pipeline compounds knowledge every run. Every reviewer/QA/security finding is logged by
+**class** to `.adlc/metrics/findings.jsonl`; the **`retro`** skill (manual `/adlc:retro` or the
+scheduled `adlc-retro.yml`) ranks recurring classes and opens a **propose-only** PR that turns
+each into the cheapest *durable* guard — **a regression test first, then a CI check, then a
+convention, and only last a prose gotcha** — while pruning context lines that never prevented a
+failure (`ablation`). Knowledge accumulates in versioned tests/checks/conventions, not model
+memory, so each run starts from a higher floor without the context bloating. The proposal is a
+normal PR: it passes through the QA gate and the adversarial reviewer like any other change.
 
 ### Two layers, on purpose
 
