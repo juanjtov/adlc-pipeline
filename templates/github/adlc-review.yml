@@ -14,7 +14,7 @@ name: ADLC adversarial review
 
 on:
   pull_request:
-    types: [opened, reopened, ready_for_review]
+    types: [opened, reopened, ready_for_review, synchronize]   # synchronize ⇒ re-review after fix-loop pushes
 
 permissions:
   contents: read
@@ -39,4 +39,7 @@ jobs:
             breakdown / ACs. Load the adversarial-reviewer agent definition and the
             adlc:code-review + project-conventions + adlc:security-gate skills. Apply the three
             pillars (break assumptions · enforce contracts · prevent the echo chamber), then
-            post findings as a single PR comment. Never edit code, never change labels, never merge.
+            post findings as a single PR comment. If your verdict is CHANGES REQUESTED (a
+            confirmed Critical/High), ALSO submit a formal `gh pr review --request-changes` so the
+            fix loop sends it back to the Builder; otherwise submit `gh pr review --approve`. Never
+            edit code, never change labels, never merge.

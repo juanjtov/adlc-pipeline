@@ -22,6 +22,7 @@ create "gate:deploy"   "FBCA04" "GATE 2 — Principal: merge · deploy · migrat
 create "adlc:auto"     "C5DEF5" "Auto-run the Analyst on this issue (auto-start; you still approve Gate 1)"
 create "adlc:autopilot" "5319E7" "Full autopilot: also auto-approve Gate 1 — only Gate 2 (merge/deploy) is human"
 create "bug"           "D73A4A" "Defect filed by Ops — lands at stage:intake with telemetry"
+create "needs:human"   "E99695" "Fix loop capped out (3 rounds) — a human must step in on this PR"
 
 echo "Done. State machine:"
 echo "  stage:intake → gate:stories → stage:design → stage:build → stage:qa → gate:deploy"

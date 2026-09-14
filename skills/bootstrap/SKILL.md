@@ -203,9 +203,19 @@ automation — copy `adlc-retro.yml` and `.adlc/scripts/adlc-metrics.sh`. Tell t
 retro is **propose-only** (it opens a PR through the gates) and runs on the workflow's schedule
 or on demand via `/adlc:retro`.
 
-For **full automation**, also copy `adlc-architect-review.yml` — it runs the conformance review
-on each Builder PR and advances `stage:build → stage:qa` on approval, so the chain flows to QA
-with no manual hop. Fill in `{{BUILDER_BOT}}` (the bot identity that authors Builder PRs).
+For **full automation**, also copy `adlc-architect-review.yml` (conformance review + the
+`stage:build → stage:qa` handoff) and `adlc-fix.yml` (the fix loop: a "changes requested" review
+re-invokes the Builder to fix on the same branch, re-reviews, and repeats until clean — capped
+at 3 rounds, then it adds `needs:human`). With these, a flagged PR loops back to the Builder on
+its own and the human only reads + merges the clean PR.
+
+**Allowlists — fill them, never leave a literal placeholder** (a leftover placeholder means
+that lane never fires). Every lane guards on two accounts: `{{PRINCIPAL}}` (who may auto-trigger)
+and `{{BUILDER_BOT}}` (the account the Builder uses to open PRs). Offer the user both ways:
+- **(a) Auto-fill** — take `{{PRINCIPAL}}` from the Phase 1 handle and `{{BUILDER_BOT}}` from the
+  GitHub App / dispatch-token identity (or the Principal's own handle if they run it themselves),
+  and replace both across every copied workflow.
+- **(b) Manual** — leave them for the user to edit by hand (also how they add teammates later).
 
 If **auto-start** or **full autopilot** is chosen (Phase 1): copy `adlc-intake.yml`,
 `adlc-design.yml`, and `.github/ISSUE_TEMPLATE/requirement.yml`, and set the template's labels

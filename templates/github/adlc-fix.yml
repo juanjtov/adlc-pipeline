@@ -1,0 +1,61 @@
+# ADLC fix loop — closes the review → fix → re-review cycle so the human only reads + merges.
+# When a reviewer (architect conformance OR the adversarial reviewer) submits "changes
+# requested" on a Builder PR, this re-invokes the Builder to fix the findings on the SAME
+# branch. The push re-runs the reviews; the loop repeats until the PR is clean — then it waits
+# for your merge (Gate 2). A cap stops runaway loops: after 3 changes-requested rounds it
+# escalates to a human (adds `needs:human`) instead of fixing again.
+#
+# PREREQUISITES: CLAUDE_CODE_OAUTH_TOKEN + ADLC_DISPATCH_TOKEN.
+name: ADLC fix loop
+
+on:
+  pull_request_review:
+    types: [submitted]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  fix:
+    if: >
+      github.event.review.state == 'changes_requested' &&
+      contains(fromJSON('["{{PRINCIPAL}}","{{BUILDER_BOT}}"]'), github.event.pull_request.user.login)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.ref }}
+          token: ${{ secrets.ADLC_DISPATCH_TOKEN }}
+
+      - name: Loop cap (escalate after 3 rounds)
+        id: cap
+        env:
+          GH_TOKEN: ${{ secrets.ADLC_DISPATCH_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          rounds=$(gh pr view "$PR" --json reviews \
+                    --jq '[.reviews[] | select(.state=="CHANGES_REQUESTED")] | length' 2>/dev/null || echo 0)
+          echo "changes_requested_rounds=$rounds"
+          if [ "${rounds:-0}" -ge 3 ]; then
+            gh pr comment "$PR" --body "⚠️ ADLC fix loop: 3 changes-requested rounds without passing — escalating to a human. The Builder will not auto-fix again on this PR."
+            gh pr edit "$PR" --add-label "needs:human" || true
+            echo "stop=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "stop=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Builder addresses the review
+        if: steps.cap.outputs.stop == 'false'
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.ADLC_DISPATCH_TOKEN }}
+          prompt: |
+            You are the ADLC Builder. PR #${{ github.event.pull_request.number }} received
+            "changes requested". Read the review(s) and the adversarial-reviewer findings on the
+            PR, fix them WITHIN the declared diff scope, keep the AC-traced tests green, and push
+            the fixes to the same branch. Load the builder agent definition + project-conventions
+            + adlc:security-gate. Do not merge, do not change labels — pushing re-runs the reviews.
