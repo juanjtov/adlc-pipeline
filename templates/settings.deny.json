@@ -1,0 +1,16 @@
+{
+  "_comment": "Merge the permissions.deny entries below into the host repo's .claude/settings.json. These enforce charter §2 at the harness level: no agent session can push to main, force-push, or merge a PR. Keep any existing deny entries and other settings intact.",
+  "permissions": {
+    "deny": [
+      "Bash(git push origin main)",
+      "Bash(git push origin main:*)",
+      "Bash(git push -u origin main)",
+      "Bash(git push --force:*)",
+      "Bash(git push -f:*)",
+      "Bash(git push --force-with-lease:*)",
+      "Bash(gh pr merge:*)",
+      "Bash(gh api -X PUT repos/*/merge:*)",
+      "Bash(gh api --method PUT repos/*/merge:*)"
+    ]
+  }
+}

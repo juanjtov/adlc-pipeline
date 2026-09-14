@@ -1,0 +1,14 @@
+{
+  "name": "adlc-pipeline",
+  "owner": { "name": "juanjtov" },
+  "metadata": {
+    "description": "Marketplace hosting the ADLC (Agentic SDLC) pipeline plugin."
+  },
+  "plugins": [
+    {
+      "name": "adlc",
+      "source": "./",
+      "description": "A portable four-agent software-delivery pipeline (Analyst → Architect → Builder → QA/Ops) with human gates, plus a dual-mode bootstrap wizard that adapts it to any repo — greenfield PRD or mature codebase."
+    }
+  ]
+}

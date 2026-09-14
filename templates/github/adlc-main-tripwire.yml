@@ -1,0 +1,58 @@
+# ADLC main-branch tripwire — the Free-plan substitute for branch protection.
+#
+# On a PRIVATE repo on GitHub Free you can't require status checks or block direct pushes
+# to main server-side (that needs Pro/Team). This backstop runs on every push to main and
+# FAILS — and opens an alert issue — if a pushed commit didn't arrive through a merged PR,
+# i.e. someone pushed straight to main and bypassed the QA gate + Gate 2.
+#
+# On a PUBLIC repo, use real branch protection instead and you don't need this file.
+#
+# Enforcement of record is still `.claude/settings.json` (no agent can push to main or
+# self-merge); this catches a HUMAN doing it by hand, after the fact.
+name: ADLC main tripwire
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  detect-direct-push:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Flag commits not linked to a merged PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          repo="${{ github.repository }}"
+          before="${{ github.event.before }}"
+          after="${{ github.event.after }}"
+          # New-branch pushes report an all-zero "before"; scope to the new commit then.
+          if [ -z "${before//0/}" ]; then range="$after -n 1"; else range="$before..$after"; fi
+
+          direct=""
+          for sha in $(git rev-list --no-merges $range 2>/dev/null); do
+            pulls=$(gh api "repos/$repo/commits/$sha/pulls" --jq 'length' 2>/dev/null || echo 0)
+            [ "$pulls" = "0" ] && direct="$direct $sha"
+          done
+
+          if [ -n "$direct" ]; then
+            echo "::error::Direct push to main detected (bypassed the QA gate):$direct"
+            gh issue create \
+              --title "⚠️ Direct push to main — bypassed the QA gate" \
+              --label "bug" \
+              --body "These commits reached \`main\` with no associated merged PR:$direct
+
+          Gate 2 requires merges go through the QA gate and Principal approval. If this was
+          unintended, revert and re-land through a PR. (ADLC tripwire — the Free-plan stand-in
+          for branch protection.)"
+            exit 1
+          fi
+          echo "✓ All pushed commits arrived via a PR."

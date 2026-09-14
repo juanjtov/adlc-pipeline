@@ -1,0 +1,58 @@
+# ADLC Builder lane — full-automation mode only.
+# Fires when an issue enters stage:build and runs the Builder agent on it.
+#
+# PREREQUISITES (set these before enabling; see the bootstrap Phase 3 checklist):
+#   - Secret CLAUDE_CODE_OAUTH_TOKEN  (run `claude setup-token` — Claude subscription, no API key)
+#   - Secret ADLC_DISPATCH_TOKEN  (a PAT or GitHub App token). The default GITHUB_TOKEN
+#     deliberately CANNOT trigger another workflow, so any label change made here would NOT
+#     fire the next lane. Using this token also makes the Builder's PRs authored by the bot,
+#     which is what keeps author/verifier separation real under automation.
+#   - The merge gate — NO GitHub Pro required:
+#       * PUBLIC repo  → enable branch protection on main (free) as the hard gate;
+#       * PRIVATE repo → add adlc-main-tripwire.yml (the Free-plan stand-in) instead.
+#     Actions auto-triggering itself is free on both (public = unlimited minutes,
+#     private = ~2,000 min/month).
+#   - Untrusted-input discipline: only act on issues authored by the allowlist below.
+#
+# This is a STARTING TEMPLATE. The reliable baseline is the manual RUNBOOK; adopt
+# automation once the local recipe is proven. Adapt commands/paths to this repo.
+name: ADLC Builder
+
+on:
+  issues:
+    types: [labeled]
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  build:
+    # Only on stage:build, and only for issues opened by the Principal / allowlist (§2.7)
+    if: >
+      github.event.label.name == 'stage:build' &&
+      contains(fromJSON('["{{PRINCIPAL}}"]'), github.event.issue.user.login)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Builder agent
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.ADLC_DISPATCH_TOKEN }}   # PR authored by the bot; handoffs trigger next lane
+          # The action invokes the plugin's builder agent on this issue. The agent branches,
+          # implements within declared diff scope, writes AC-traced tests, runs the project
+          # commands from the project-conventions skill, and opens a PR. It never merges.
+          prompt: |
+            You are the ADLC Builder. Implement issue #${{ github.event.issue.number }}
+            following its task breakdown and ADR. Load the builder agent definition and the
+            project-conventions + adlc:security-gate skills. Open a PR; never merge.
+
+      # After the PR is opened, Architect review advances stage:build → stage:qa. Whatever
+      # makes that label change — a review workflow or the Principal — must use a PAT/App
+      # token (not the default GITHUB_TOKEN) for the QA lane below to fire. A human flipping
+      # the label in the UI always triggers it.

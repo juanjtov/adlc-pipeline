@@ -1,0 +1,51 @@
+---
+name: project-conventions
+description: "{{PROJECT_NAME}} stack specifics the code does NOT reveal — the exact commands, user roles + tenancy, the data-access and auth seams to reuse, and real gotchas. Load at the start of every ADLC role session. Stack essentials only; read the code for the rest."
+---
+
+# {{PROJECT_NAME}} conventions
+
+This skill holds **only what an agent can't derive by reading the repo**. Process rules are
+in `adlc:charter`; what proves a change is done is in `verify`. Do not add an architecture
+essay, a directory tree, a dependency list, or generic "write clean code" — the model reads
+those from the code. If a section here would be true of any repo, cut it.
+
+## Commands (use these verbatim — this is the pass/fail signal)
+
+| Purpose | Command |
+|---|---|
+| Test | `{{TEST_CMD}}` |
+| Type-check / lint | `{{TYPECHECK_CMD}}` |
+| Build | `{{BUILD_CMD}}` |
+| Run / dev | `{{RUN_CMD}}` |
+| Eval suite (if any) | `{{EVAL_CMD}}` |
+
+Test directory (QA's write scope; AC-traced tests live here): `{{TEST_DIR}}`
+
+## Roles & tenancy (drives stories, ACs, and the security gate)
+
+- User roles: {{ROLES}}
+- Multi-tenant / row-scoped: {{IS_MULTITENANT}} — scope key: `{{SCOPE_KEY}}`
+  (every scoped query filters by this; `adlc:security-gate` treats a missing filter as Critical)
+
+## Seams to reuse (name the thing, don't describe it)
+
+- Data access: {{DATA_ACCESS_SEAM}}  <!-- e.g. "Repository Pattern in src/db/repositories.py; no raw SQL in handlers" -->
+- Auth/session validation to reuse: `{{AUTH_DEPENDENCY}}`  <!-- the dependency/middleware, not how it works -->
+- Query placeholder syntax: {{SQL_PLACEHOLDER}}  <!-- e.g. asyncpg $1,$2 -->
+- Schema source of truth & migration approach: {{MIGRATION_APPROACH}}
+
+## Gotchas (non-obvious; cut any the code already makes clear)
+
+{{GOTCHAS}}
+
+## Domain glossary (only terms with a repo-specific meaning)
+
+{{GLOSSARY}}
+
+## Working conventions (Principal-set; override harness defaults)
+
+- No AI-attribution trailers on commits/PRs; no auto-commit/auto-push without approval.
+- Propose before any irreversible action; plan before implementing.
+
+<!-- Keep this skill lean. Periodically re-test each line against the ablation keep/cut test. -->

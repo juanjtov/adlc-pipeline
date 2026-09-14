@@ -1,0 +1,55 @@
+# {{PROJECT_NAME}} — ADLC Runbook (manual / local recipe)
+
+How the Principal drives the pipeline by hand. This is the reliable baseline; it needs no
+GitHub Actions. Each stage: apply the label → invoke the agent → review the output →
+advance. Agents never advance through a gate; you do.
+
+## Stage 1 — Intake → stories (Product Analyst)
+
+1. Create a GitHub issue describing the requirement; label it `stage:intake`.
+2. Invoke the **product-analyst** agent with the issue number.
+3. It posts stories + testable ACs and moves the issue to `gate:stories`.
+4. **Gate 1 (you):** accept or return. On accept, apply `stage:design`.
+
+## Stage 2 — Design (Architect, duty 1)
+
+1. Invoke the **architect** agent on the `stage:design` issue.
+2. It writes `docs/adr/NNNN-*.md` + a task breakdown comment + blast-radius check, then
+   advances to `stage:build`.
+3. Review the ADR. (You accept ADRs; the Architect never accepts its own.)
+
+## Stage 3 — Build (Builder)
+
+1. Invoke the **builder** agent on the `stage:build` issue.
+2. It branches `feat/<n>-<slug>`, implements within the declared diff scope, writes
+   AC-traced tests, runs the project's test/build commands, and opens a PR.
+3. If you run the Builder in an **isolated worktree**, hand it the ADR path so it commits
+   the ADR onto its branch (an ADR written only in the main checkout is invisible to the
+   branch and gets stranded off the PR).
+
+## Stage 4 — Design-conformance review (Architect, duty 2)
+
+1. Invoke the **architect** agent on the Builder's PR.
+2. It reviews for diff-scope + design conformance and submits `--approve` /
+   `--request-changes`. On approval, you (or CI) advance the issue `stage:build → stage:qa`.
+
+## Stage 5 — QA gate (QA & Release/Ops)
+
+1. Invoke the **qa-release-ops** agent on the `stage:qa` PR.
+2. It verifies AC coverage, writes missing tests, runs the full battery, and runs the
+   **adversarial security gate**. For UI changes it runs browser verification.
+3. You run `/security-review` on the PR branch and post findings.
+4. On a clean verdict it adds `gate:deploy` and posts a **Proposed Action Card**.
+
+## Gate 2 — Merge + deploy (you)
+
+1. Review the Action Card. Merge the PR (agents can't — `gh pr merge` is deny-listed).
+2. Deploy per the `release-ops` skill. Destructive migration? Separate, approved, never
+   coupled with the deploy.
+3. Tell the QA agent "deploy N happened" for the post-deploy watch.
+
+## Isolated-worktree recipe (optional, for parallel Builder/QA)
+
+Run Builder/QA in a `git worktree` off the branch so their edits don't collide with your
+main checkout. Wire the agent's `cd` into the worktree in its first Bash call; verify
+against the **serving checkout** (the worktree), not a stale main.

@@ -1,0 +1,46 @@
+# ADLC QA lane — full-automation mode only.
+# Fires when an issue enters stage:qa and runs the QA & Release/Ops agent on its PR.
+#
+# PREREQUISITES: same as adlc-builder.yml — CLAUDE_CODE_OAUTH_TOKEN + ADLC_DISPATCH_TOKEN
+# secrets, the merge gate (PUBLIC → branch protection; PRIVATE → adlc-main-tripwire.yml;
+# no GitHub Pro needed either way), and the author allowlist. Adapt required-check names to CI.
+#
+# QA writes only tests, runs the full battery + adversarial security gate, and on a clean
+# verdict posts a Proposed Action Card and adds gate:deploy. It never merges or deploys.
+name: ADLC QA
+
+on:
+  issues:
+    types: [labeled]
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  qa:
+    if: >
+      github.event.label.name == 'stage:qa' &&
+      contains(fromJSON('["{{PRINCIPAL}}"]'), github.event.issue.user.login)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Required checks this lane expects to be green on the PR (must match CI job names):
+      #   {{REQUIRED_CHECKS}}
+
+      - name: Run QA & Release/Ops agent
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.ADLC_DISPATCH_TOKEN }}   # label/comment ops act as the bot
+          prompt: |
+            You are ADLC QA & Release/Ops. Gate the PR linked to issue
+            #${{ github.event.issue.number }}. Load the qa-release-ops agent definition and
+            the project-conventions + adlc:edd-spec + adlc:security-gate + release-ops skills.
+            Verify AC coverage, run the full test battery (paste real output), run the
+            adversarial security gate. On a clean verdict, add gate:deploy and post a
+            Proposed Action Card. Never merge, never deploy.

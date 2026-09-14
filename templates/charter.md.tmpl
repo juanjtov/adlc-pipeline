@@ -1,0 +1,46 @@
+# {{PROJECT_NAME}} — Agentic SDLC (ADLC)
+
+**Status:** adopted {{DATE}} · **Principal:** {{PRINCIPAL}} · **Automation level:** {{AUTOMATION_LEVEL}}
+
+This project runs the Agentic SDLC pipeline. The **process rules are portable** and live in
+the `adlc:charter` skill (operating principles, the four roles, the label state machine, the
+permission matrix, the two gates). Read that skill first. This document records the
+**project-specific decisions** layered on top.
+
+## How work flows
+
+```
+stage:intake → gate:stories → stage:design → stage:build → stage:qa → gate:deploy
+  Analyst         Gate 1        Architect      Builder       QA/Ops      Gate 2 → deploy
+```
+
+Agents move work up to a gate; only the Principal moves it through a gate. Execution source
+of truth = GitHub issues. Run the pipeline per `docs/adlc/RUNBOOK.md`.
+
+## Project skills
+
+| Skill | Role | Owns |
+|---|---|---|
+| `adlc:charter` | all | portable process rules (this pipeline) |
+| `project-conventions` | all | stack, commands, roles, data layer, auth |
+| `adlc:edd-spec` | Analyst, QA/Ops | story/AC templates, traceability, metrics |
+| `adlc:security-gate` | Builder, QA/Ops | secure-coding checklist + gate |
+| `release-ops` | Architect, QA/Ops | deploy, rollback, migration safety |
+{{UI_SKILLS_ROW}}
+
+## Decision log
+
+| # | Decision | Outcome |
+|---|---|---|
+| 1 | Mode at adoption | {{MODE}} |
+| 2 | Stack | {{STACK}} |
+| 3 | Deploy target | {{DEPLOY_TARGET}} |
+| 4 | Automation level | {{AUTOMATION_LEVEL}} |
+| 5 | Required CI check names | {{REQUIRED_CHECKS}} |
+| 6 | Multi-tenant / scope key | {{TENANCY}} |
+
+## Working conventions (override harness defaults)
+
+- No AI-attribution trailers on commits/PRs; no auto-commit/auto-push without approval.
+- Author/verifier separation: no agent verifies, merges, or deploys its own work.
+- Propose-before-write for every irreversible action.

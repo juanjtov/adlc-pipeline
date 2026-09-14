@@ -1,0 +1,58 @@
+---
+name: release-ops
+description: "{{PROJECT_NAME}} deploy runbook, rollback procedure, migration safety, and incident triage. Load for the Architect (design-time deploy implications) and QA/Ops (Gate 2 proposals + post-deploy ops)."
+---
+
+# Release Ops — {{PROJECT_NAME}}
+
+Used by: **architect** (design-time), **qa-release-ops** (Gate 2 + ops).
+Every deploy/migration is a **Proposed Action Card** — agents never execute these; the
+Principal does (charter §2.2).
+
+## Topology
+
+{{DEPLOY_TOPOLOGY}}
+<!-- e.g. Frontend → Vercel; API → Cloud Run (region, project); DB → Neon (which branch is prod);
+     object storage buckets; which env var holds the prod connection string. -->
+
+Environments: {{ENVIRONMENTS}}
+
+## Deploy
+
+- Command(s): {{DEPLOY_CMD}}
+- Who: the **Principal** (or explicit per-issue delegation). Agents propose, never deploy.
+- After a deploy, QA/Ops runs the post-deploy watch (below).
+
+## Rollback (forward-only mindset)
+
+- Immediate: {{ROLLBACK_STEP}} <!-- e.g. Cloud Run: route traffic to previous revision <name> -->
+- A code rollback does **not** revert a database migration. Production recovery from a bad
+  migration is a **new forward migration**, not a downgrade.
+
+## Migration safety (design authority: your ADR)
+
+- **Additive** (`CREATE TABLE`, nullable/defaulted `ADD COLUMN`, widening, idempotent
+  reference-data upserts): rides the normal deploy path; no Action Card.
+- **Destructive** (`DROP`, `RENAME`, type-narrowing, `SET NOT NULL` without default,
+  validated constraints, whole-table backfills): a **hard stop for every agent**. Post the
+  destructive-migration Action Card and wait for the Principal. Never couple a destructive
+  migration with a code deploy. Ambiguous ⇒ destructive.
+
+## Proposed Action Card (Gate 2)
+
+```
+## Proposed Action Card — Gate 2
+Action:     <merge PR #N to main · deploy {{DEPLOY_TARGET}} · run migration>
+Risk:       low|medium|high + one-line rationale
+Evidence:   test summary line · eval pass rate · security verdict · CI links
+Migrations: none | additive | DESTRUCTIVE (details + backup/rollback plan)
+Rollback:   {{ROLLBACK_STEP}}
+Awaiting:   Principal approval
+```
+
+## Post-deploy monitoring
+
+- First 30 minutes: {{MONITOR_CMD}} <!-- log/error-rate query for the deploy target -->
+- Incident: triage severity; if the deploy caused it, propose rollback (Action Card) and
+  file a bug → `stage:intake` with telemetry attached. Escalate the highest severity to the
+  Principal immediately.

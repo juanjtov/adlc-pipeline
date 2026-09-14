@@ -1,0 +1,27 @@
+# {{PROJECT_NAME}}
+
+{{ONE_LINE_WHAT_AND_WHO}}
+<!-- One or two sentences: what this repo is and who uses it. Nothing more. -->
+
+## Commands
+- test: `{{TEST_CMD}}`          <!-- prefer a single test over the full suite -->
+- type-check/lint: `{{TYPECHECK_CMD}}`
+- build: `{{BUILD_CMD}}`
+- run/dev: `{{RUN_CMD}}`
+{{EXTRA_COMMANDS}}
+<!-- only commands the model cannot guess: required env vars, a language version, a setup step -->
+
+## Gotchas
+{{GOTCHAS}}
+<!-- non-obvious conventions the code does NOT reveal, environment quirks, traps that look
+     safe and aren't. If there are none yet, leave this empty — do not invent gotchas. -->
+
+## This repo runs the Agentic SDLC (ADLC)
+- Process rules (roles, the label state machine, the two gates): the `adlc:charter` skill.
+- Stack specifics (roles, tenancy, data/auth): the `project-conventions` skill.
+- What proves a change is done: the `verify` skill.
+- How to run the pipeline by hand: `docs/adlc/RUNBOOK.md`.
+- Prune this context periodically: the `ablation` skill → `CONTEXT-LOG.md`.
+
+<!-- Last ablation: {{DATE}}. Next due: {{ABLATION_NEXT}}. Re-added lines logged in CONTEXT-LOG.md.
+     Keep this file short — if a section grows past a few lines, it's a skill, not a gotcha. -->
