@@ -1,0 +1,35 @@
+# OpenTelemetry Collector config for ADLC token/cost/latency capture.
+# Receives what Claude Code exports (metrics + logs over OTLP) and makes it visible three ways:
+#   - debug    → prints to the collector's stdout (quick sanity: `docker compose logs -f`)
+#   - file     → appends to ./data/telemetry.jsonl (durable, greppable, feeds your own rollups)
+#   - prometheus → live scrape endpoint at :8889 (point Grafana/Prometheus here if you want charts)
+# Claude Code emits no traces here (only metrics + logs), matching settings.telemetry.json.
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317   # must match OTEL_EXPORTER_OTLP_ENDPOINT in settings.telemetry.json
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch: {}
+
+exporters:
+  debug:
+    verbosity: normal
+  file:
+    path: /data/telemetry.jsonl
+  prometheus:
+    endpoint: 0.0.0.0:8889
+
+service:
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [debug, file, prometheus]
+    logs:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [debug, file]

@@ -36,6 +36,7 @@ templates/                     # what the wizard fills into the host repo
             adlc-log-findings.sh · adlc-doctor.sh · adlc-metrics.sh · adlc-cost.sh   # deterministic logic
   hooks/pre-commit             # local diff-scope guard (reuses adlc-diff-scope.sh)
 tests/run.sh                   # unit tests for the guardrail scripts (bash, no deps)
+telemetry/                     # ready-to-run local OTel collector (docker compose) for token/cost
 ```
 
 ## Design philosophy
@@ -81,7 +82,8 @@ projects can be curated into the plugin and reach them all. Only from repos you 
 by `adlc-cost.sh` (from GitHub Actions run durations — no extra infra). Token count and cost per
 agent come from **opt-in OpenTelemetry** (`settings.telemetry.json`): Claude Code exports
 per-session tokens + cost + duration to your OTel collector, and `service.name` groups a whole
-pipeline run. Enable it when you have a collector; latency works without one.
+pipeline run. A ready-to-run collector ships in `telemetry/` (`docker compose up -d`); latency
+works without one.
 
 ### Two layers, on purpose
 
