@@ -19,7 +19,8 @@ create "stage:qa"      "B60205" "Agent 4 — QA/Release-Ops: tests + security ga
 create "gate:stories"  "FBCA04" "GATE 1 — Principal: story approval"
 create "gate:deploy"   "FBCA04" "GATE 2 — Principal: merge · deploy · migration"
 # Pipeline control
-create "adlc:auto"     "C5DEF5" "Opt this issue into auto-triggering (full-automation mode)"
+create "adlc:auto"     "C5DEF5" "Auto-run the Analyst on this issue (auto-start; you still approve Gate 1)"
+create "adlc:autopilot" "5319E7" "Full autopilot: also auto-approve Gate 1 — only Gate 2 (merge/deploy) is human"
 create "bug"           "D73A4A" "Defect filed by Ops — lands at stage:intake with telemetry"
 
 echo "Done. State machine:"

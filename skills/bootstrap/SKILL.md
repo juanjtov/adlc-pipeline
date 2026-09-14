@@ -96,12 +96,16 @@ detected values pre-selected as the recommended option. Cover:
    Full automation (either kind) needs two secrets — `CLAUDE_CODE_OAUTH_TOKEN` and a
    `ADLC_DISPATCH_TOKEN` (PAT/App token) — see Phase 3. Best added once the local recipe
    is proven.
-7b. **Auto-start (autopilot)** — offer this for full automation: the user files a requirement
-   (via the `Requirement (ADLC autopilot)` issue template) and the pipeline **starts
-   immediately** — `adlc-intake.yml` runs the Analyst on file, `adlc-design.yml` runs the
-   Architect once Gate 1 is approved. It still stops at the two human gates
-   (`gate:stories`, `gate:deploy`), and only allowlisted authors auto-trigger. Off ⇒ stages are
-   started by applying `stage:*` labels by hand.
+7b. **Autonomy level** (for full automation) — offer three, in increasing hands-off order.
+   All keep **Gate 2 (merge + deploy) human** — merge/deploy is never automated — and only
+   allowlisted authors can auto-trigger:
+   - **Label-driven** (default) — stages start by applying `stage:*` labels by hand.
+   - **Auto-start** — filing a requirement (the `adlc:auto` label / issue template) runs the
+     Analyst immediately and flows to build; **you still approve Gate 1** (stories) and Gate 2.
+   - **Full autopilot** — the `adlc:autopilot` label additionally **auto-approves Gate 1**, so
+     the pipeline runs all the way to a QA-approved, adversarially-reviewed PR and your **only**
+     step is reviewing + merging that PR at Gate 2. (Auto-advance is done by the workflow, not
+     the Analyst — the Principal opts in per issue via the label.)
 8. **Project identity** — project name and the Principal's GitHub handle.
 
 If an answer is missing or contradictory, ask a follow-up rather than guessing.
@@ -199,12 +203,19 @@ automation — copy `adlc-retro.yml` and `.adlc/scripts/adlc-metrics.sh`. Tell t
 retro is **propose-only** (it opens a PR through the gates) and runs on the workflow's schedule
 or on demand via `/adlc:retro`.
 
-If **auto-start (autopilot)** is enabled (Phase 1): copy `adlc-intake.yml`, `adlc-design.yml`,
-and `.github/ISSUE_TEMPLATE/requirement.yml` (that template applies `adlc:auto`, so filing it
-starts the pipeline). Confirm the author allowlist is filled in. Tell the user the honest flow:
-filing → Analyst → **Gate 1 (you approve)** → Architect → build → PR + adversarial review run
-automatically; then advancing `stage:build → stage:qa` is still the Principal's step (or add an
-architect-review lane) before the QA lane and **Gate 2 (you approve + deploy)**. **Auto-triggering needs no GitHub Pro** — set up
+For **full automation**, also copy `adlc-architect-review.yml` — it runs the conformance review
+on each Builder PR and advances `stage:build → stage:qa` on approval, so the chain flows to QA
+with no manual hop. Fill in `{{BUILDER_BOT}}` (the bot identity that authors Builder PRs).
+
+If **auto-start** or **full autopilot** is chosen (Phase 1): copy `adlc-intake.yml`,
+`adlc-design.yml`, and `.github/ISSUE_TEMPLATE/requirement.yml`, and set the template's labels
+per the level — `adlc:auto` for auto-start, **plus `adlc:autopilot`** for full autopilot (that
+label is what makes `adlc-intake.yml` auto-approve Gate 1). Confirm the author allowlist, then
+describe the honest flow:
+- **Auto-start:** file → Analyst → **Gate 1 (you approve)** → Architect → build → PR
+  (adversarial + architect review + CI) → QA → **Gate 2 (you merge + deploy)**.
+- **Full autopilot:** file → the whole chain runs → you review and merge the QA-approved,
+  adversarially-reviewed PR at **Gate 2**. That's your only step; merge/deploy is never automated. **Auto-triggering needs no GitHub Pro** — set up
 the merge gate according to the repo's visibility (the Phase 1 choice):
 
 - **Public repo** → don't copy the tripwire. Print the branch-protection setup as a Principal

@@ -1,0 +1,56 @@
+# ADLC architect-review lane — design-conformance review on each Builder PR, and the
+# build → qa handoff. Runs the Architect's review duty; on an APPROVED review it advances the
+# linked issue stage:build → stage:qa (dispatch token) so the QA lane fires. This is the hop
+# that lets the chain flow to QA without a manual step — required for full automation / autopilot.
+#
+# It runs alongside adlc-review.yml (the adversarial reviewer): conformance vs. breaking-it are
+# complementary. PREREQUISITES: CLAUDE_CODE_OAUTH_TOKEN + ADLC_DISPATCH_TOKEN.
+name: ADLC architect review
+
+on:
+  pull_request:
+    types: [opened, ready_for_review, synchronize]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  review:
+    # Only Builder-bot / allowlisted PRs (fork PRs get no secrets anyway).
+    if: contains(fromJSON('["{{PRINCIPAL}}","{{BUILDER_BOT}}"]'), github.event.pull_request.user.login)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Architect conformance review
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.ADLC_DISPATCH_TOKEN }}
+          prompt: |
+            You are the ADLC Architect (review duty). Review PR
+            #${{ github.event.pull_request.number }} for declared-diff-scope + design conformance
+            against the ADR and task breakdown. Load the architect agent definition and
+            project-conventions. Submit `gh pr review --approve` (conformant) or
+            `--request-changes` with specific comments. Do NOT change labels — the workflow does.
+
+      - name: Advance to QA on approval (build → qa)
+        env:
+          GH_TOKEN: ${{ secrets.ADLC_DISPATCH_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          decision=$(gh pr view "$PR" --json reviewDecision --jq '.reviewDecision')
+          # Linked issue via "Closes #N" (closingIssuesReferences); falls back to first #N in body.
+          issue=$(gh pr view "$PR" --json closingIssuesReferences \
+                    --jq '.closingIssuesReferences[0].number // empty')
+          [ -z "$issue" ] && issue=$(gh pr view "$PR" --json body --jq '.body' | grep -oiE '#[0-9]+' | head -1 | tr -d '#')
+          if [ "$decision" = "APPROVED" ] && [ -n "$issue" ]; then
+            gh issue edit "$issue" --remove-label stage:build --add-label stage:qa
+            echo "Architect approved → issue #$issue advanced to stage:qa (QA lane will fire)."
+          else
+            echo "Not advancing (decision=$decision, issue=${issue:-none}). Builder iterates on changes."
+          fi

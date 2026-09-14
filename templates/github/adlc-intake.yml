@@ -41,3 +41,21 @@ jobs:
             completeness check FIRST — if the requirement is ambiguous or malformed, post numbered
             clarifying questions and STOP. Otherwise post stories / ACs / edge cases / out-of-scope
             and move the issue to gate:stories. Never advance past a gate (Gate 1 is the human's).
+
+      # FULL AUTOPILOT only: issues labelled adlc:autopilot auto-approve Gate 1 so the pipeline
+      # runs to a QA-approved PR and the ONLY human step is Gate 2 (merge/deploy). The agent
+      # never does this — the Principal opts in per-issue via the label, and the workflow acts.
+      - name: Auto-advance Gate 1 (full autopilot)
+        if: contains(github.event.issue.labels.*.name, 'adlc:autopilot')
+        env:
+          GH_TOKEN: ${{ secrets.ADLC_DISPATCH_TOKEN }}
+        run: |
+          # Advance only if the Analyst actually produced stories (reached gate:stories); if it
+          # stopped at Step 0 for clarifying questions, the issue stays at stage:intake.
+          labels=$(gh issue view ${{ github.event.issue.number }} --json labels --jq '.labels[].name')
+          if echo "$labels" | grep -qx 'gate:stories'; then
+            gh issue edit ${{ github.event.issue.number }} --remove-label gate:stories --add-label stage:design
+            echo "Full autopilot: Gate 1 auto-approved → stage:design. Gate 2 remains the only human step."
+          else
+            echo "Analyst paused for clarification — not auto-advancing."
+          fi
