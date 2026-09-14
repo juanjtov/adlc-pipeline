@@ -96,6 +96,12 @@ detected values pre-selected as the recommended option. Cover:
    Full automation (either kind) needs two secrets — `CLAUDE_CODE_OAUTH_TOKEN` and a
    `ADLC_DISPATCH_TOKEN` (PAT/App token) — see Phase 3. Best added once the local recipe
    is proven.
+7b. **Auto-start (autopilot)** — offer this for full automation: the user files a requirement
+   (via the `Requirement (ADLC autopilot)` issue template) and the pipeline **starts
+   immediately** — `adlc-intake.yml` runs the Analyst on file, `adlc-design.yml` runs the
+   Architect once Gate 1 is approved. It still stops at the two human gates
+   (`gate:stories`, `gate:deploy`), and only allowlisted authors auto-trigger. Off ⇒ stages are
+   started by applying `stage:*` labels by hand.
 8. **Project identity** — project name and the Principal's GitHub handle.
 
 If an answer is missing or contradictory, ask a follow-up rather than guessing.
@@ -191,7 +197,14 @@ If the **self-improvement loop** is enabled (Phase 1): create `.adlc/metrics/` (
 `.gitkeep`) so the reviewer/QA/security skills can append the finding ledger, and — for full
 automation — copy `adlc-retro.yml` and `.adlc/scripts/adlc-metrics.sh`. Tell the user the
 retro is **propose-only** (it opens a PR through the gates) and runs on the workflow's schedule
-or on demand via `/adlc:retro`. **Auto-triggering needs no GitHub Pro** — set up
+or on demand via `/adlc:retro`.
+
+If **auto-start (autopilot)** is enabled (Phase 1): copy `adlc-intake.yml`, `adlc-design.yml`,
+and `.github/ISSUE_TEMPLATE/requirement.yml` (that template applies `adlc:auto`, so filing it
+starts the pipeline). Confirm the author allowlist is filled in. Tell the user the honest flow:
+filing → Analyst → **Gate 1 (you approve)** → Architect → build → PR + adversarial review run
+automatically; then advancing `stage:build → stage:qa` is still the Principal's step (or add an
+architect-review lane) before the QA lane and **Gate 2 (you approve + deploy)**. **Auto-triggering needs no GitHub Pro** — set up
 the merge gate according to the repo's visibility (the Phase 1 choice):
 
 - **Public repo** → don't copy the tripwire. Print the branch-protection setup as a Principal

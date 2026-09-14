@@ -1,0 +1,43 @@
+# ADLC intake (AUTO-START) — the "prompt a requirement and the pipeline starts" option.
+# Fires when a requirement issue is opened (or gets the `adlc:auto` label) by an allowlisted
+# author, and runs the Product Analyst immediately: it posts stories + testable ACs and moves
+# the issue to `gate:stories` — where it STOPS for your Gate 1 approval (human, by design).
+#
+# SAFETY: gated to the Principal/allowlist AND the `adlc:auto` label, so a stranger's issue —
+# or a bug/question — never auto-starts an autonomous run. File via the "Requirement (ADLC
+# autopilot)" issue template (it applies `adlc:auto`) to start instantly.
+name: ADLC intake (auto-start)
+
+on:
+  issues:
+    types: [opened, labeled]
+
+permissions:
+  contents: read
+  issues: write
+
+# De-dupe if both the opened+labeled events land for one issue.
+concurrency:
+  group: adlc-intake-${{ github.event.issue.number }}
+  cancel-in-progress: true
+
+jobs:
+  intake:
+    if: >
+      contains(github.event.issue.labels.*.name, 'adlc:auto') &&
+      contains(fromJSON('["{{PRINCIPAL}}"]'), github.event.issue.user.login)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run Product Analyst
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.ADLC_DISPATCH_TOKEN }}
+          prompt: |
+            You are the ADLC Product Analyst. Turn issue #${{ github.event.issue.number }} into
+            user stories with testable acceptance criteria. Load the product-analyst agent
+            definition and the project-conventions + adlc:edd-spec skills. Do the Step-0
+            completeness check FIRST — if the requirement is ambiguous or malformed, post numbered
+            clarifying questions and STOP. Otherwise post stories / ACs / edge cases / out-of-scope
+            and move the issue to gate:stories. Never advance past a gate (Gate 1 is the human's).

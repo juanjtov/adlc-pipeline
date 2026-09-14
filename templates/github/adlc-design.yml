@@ -1,0 +1,39 @@
+# ADLC design lane — runs the Architect when an issue enters stage:design (i.e. right after
+# your Gate 1 approval). Part of the auto-start / full-flow option: it keeps the chain moving
+# intake → (Gate 1, human) → design → build, so you don't hand-invoke the Architect.
+#
+# stage:design is applied by the Principal at Gate 1 — so this automates the *work*, not the
+# gate. PREREQUISITES: CLAUDE_CODE_OAUTH_TOKEN + ADLC_DISPATCH_TOKEN (the dispatch token so the
+# Architect's advance to stage:build fires the builder lane).
+name: ADLC design
+
+on:
+  issues:
+    types: [labeled]
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  design:
+    if: >
+      github.event.label.name == 'stage:design' &&
+      contains(fromJSON('["{{PRINCIPAL}}"]'), github.event.issue.user.login)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Run Architect (design)
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.ADLC_DISPATCH_TOKEN }}
+          prompt: |
+            You are the ADLC Architect (design duty). For issue #${{ github.event.issue.number }}
+            write the ADR (docs/adr/NNNN-*.md, status Proposed) + a task-breakdown comment with a
+            declared diff scope per task + a blast-radius check, then advance stage:design →
+            stage:build. Load the architect agent definition and the project-conventions +
+            release-ops + verify skills. Only advance after the ADR + breakdown exist. Never merge.

@@ -28,7 +28,9 @@ templates/                     # what the wizard fills into the host repo
   charter.md.tmpl · RUNBOOK.md.tmpl · adr-template.md · CONTEXT-LOG.md.tmpl
   settings.deny.json           # harness deny rules (no push-to-main / no self-merge)
   github/labels.sh · adlc-builder.yml · adlc-qa.yml · adlc-review.yml
+  github/adlc-intake.yml · adlc-design.yml        # auto-start (autopilot) lanes
   github/adlc-ci.yml · adlc-diff-scope.yml · adlc-main-tripwire.yml · adlc-retro.yml
+  github/ISSUE_TEMPLATE/requirement.yml           # file a requirement → pipeline starts
   scripts/adlc-metrics.sh      # GitHub-derived self-improvement metrics
 ```
 
@@ -125,3 +127,10 @@ Full automation (either kind) needs two repo secrets: `CLAUDE_CODE_OAUTH_TOKEN`
 a GitHub App token). The dispatch token is required because a workflow's default `GITHUB_TOKEN`
 can't trigger another workflow — without it a lane's handoff wouldn't fire the next lane — and
 it makes the Builder's PRs authored by the bot, keeping author/verifier separation real.
+
+**Auto-start (optional, on top of full automation).** Add `adlc-intake.yml` + `adlc-design.yml`
++ the `Requirement (ADLC autopilot)` issue template, and **filing a requirement starts the
+pipeline immediately** — the Analyst runs on file, the Architect runs once you approve Gate 1,
+and it flows through build + review. It still stops at the two human gates (`gate:stories`,
+`gate:deploy`), and only allowlisted authors can auto-trigger. Without this, stages are started
+by applying `stage:*` labels by hand.

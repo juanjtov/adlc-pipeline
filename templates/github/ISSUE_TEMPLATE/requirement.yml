@@ -1,0 +1,37 @@
+name: Requirement (ADLC autopilot)
+description: File a requirement to auto-start the ADLC pipeline (runs the Product Analyst immediately).
+labels: ["adlc:auto", "stage:intake"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Filing this **starts the pipeline**: the Product Analyst turns it into user stories +
+        acceptance criteria, then stops at **Gate 1** for your approval. Only issues from an
+        allowlisted author auto-run (see `adlc-intake.yml`).
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What problem are we solving, and for whom?
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+      description: What should be true when this is done? Measurable if possible.
+    validations:
+      required: true
+  - type: input
+    id: roles
+    attributes:
+      label: Users / roles affected
+    validations:
+      required: false
+  - type: textarea
+    id: out_of_scope
+    attributes:
+      label: Out of scope
+      description: What this requirement deliberately excludes.
+    validations:
+      required: false
