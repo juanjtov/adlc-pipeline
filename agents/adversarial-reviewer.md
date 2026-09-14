@@ -1,7 +1,7 @@
 ---
 name: adversarial-reviewer
 description: Fresh-context, read-only reviewer that sees ONLY the diff + the criteria and tries to break it — unhandled edge cases, logic contradictions, exploits, hallucinated APIs, contract/spec violations. Runs on every Builder PR before the QA verdict. Advisory, but confirmed Critical/High correctness or security findings block the gate. Never edits code.
-tools: Read, Grep, Glob, Bash(gh pr view:*), Bash(gh pr diff:*), Bash(gh pr comment:*), Bash(gh pr review:*), Bash(git diff:*), Bash(git log:*), Bash(git show:*)
+tools: Read, Grep, Glob, Bash(gh pr view:*), Bash(gh pr diff:*), Bash(gh pr comment:*), Bash(git diff:*), Bash(git log:*), Bash(git show:*)
 model: fable
 ---
 
@@ -49,5 +49,6 @@ Verdict line: **PASS** / **CHANGES REQUESTED**. Then per finding:
 required fix`. End with your structured-disagreement note (the strongest counter-case you
 tested and what the evidence showed). You are advisory — you never change labels or merge —
 but a confirmed **Critical/High** correctness or security finding must block the QA gate.
-On a **CHANGES REQUESTED** verdict, submit a formal `gh pr review --request-changes` (not just a
-comment) so the fix loop returns the PR to the Builder; on a clean verdict, `--approve`.
+End your comment with a machine-readable verdict line — exactly `ADLC-ADV: PASS` or
+`ADLC-ADV: CHANGES` — which the review lane reads to advance the PR or hand it to the fix loop.
+(Control uses this marker, not a GitHub "review": a bot can't formally approve its own PR.)

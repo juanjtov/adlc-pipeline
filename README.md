@@ -27,7 +27,7 @@ templates/                     # what the wizard fills into the host repo
   skills/release-ops.SKILL.md.tmpl
   charter.md.tmpl · RUNBOOK.md.tmpl · adr-template.md · CONTEXT-LOG.md.tmpl
   settings.deny.json           # harness deny rules (no push-to-main / no self-merge)
-  github/labels.sh · adlc-builder.yml · adlc-qa.yml · adlc-review.yml · adlc-architect-review.yml · adlc-fix.yml
+  github/labels.sh · adlc-builder.yml · adlc-qa.yml · adlc-review.yml · adlc-fix.yml
   github/adlc-intake.yml · adlc-design.yml        # auto-start (autopilot) lanes
   github/adlc-ci.yml · adlc-diff-scope.yml · adlc-main-tripwire.yml · adlc-retro.yml
   github/ISSUE_TEMPLATE/requirement.yml           # file a requirement → pipeline starts
@@ -138,7 +138,9 @@ by applying `stage:*` labels by hand.
 **Full autopilot** goes one further: the `adlc:autopilot` label **auto-approves Gate 1**, so
 the pipeline runs the whole chain — intake → design → build → adversarial + architect review →
 QA — to a QA-approved PR, and your **only** step is reviewing and merging it at **Gate 2**.
-Merge and deploy are never automated. (`adlc-architect-review.yml` is the lane that carries
-build → qa; it ships with full automation.) If a review flags something, **`adlc-fix.yml`**
-sends the PR back to the Builder to fix and re-review automatically — capped at 3 rounds, then it
-tags `needs:human` — so what reaches you is a clean PR to read and merge.
+Merge and deploy are never automated. `adlc-review.yml` runs both reviews (adversarial +
+architect conformance) and carries build → qa **from the agents' verdicts, not GitHub's review
+decision** — so you can enable branch protection's "require a human approval" and it gates only
+the final merge. If a review flags something, **`adlc-fix.yml`** sends the PR back to the Builder
+to fix and re-review automatically — capped at 3 rounds, then it tags `needs:human` — so what
+reaches you is a clean PR to read and merge.

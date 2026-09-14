@@ -188,11 +188,15 @@ machine: `stage:intake`, `gate:stories`, `stage:design`, `stage:build`, `stage:q
 running** — this writes to their GitHub repo.
 
 **Full-automation only:** copy the lane workflows into `.github/workflows/`
-(`adlc-builder.yml`, `adlc-qa.yml`, and `adlc-review.yml` — which runs the adversarial
-reviewer automatically on each PR), filled with the repo's required-check names and the
-Principal's handle in the author allowlist. Also copy **`adlc-diff-scope.yml`** (fails a PR
-that touches files outside its stage's allowed paths — the path-level half of author/verifier
-separation). For the test battery, follow the Phase 1 choice: if the user picked **propose it**,
+(`adlc-builder.yml`, `adlc-qa.yml`, and `adlc-review.yml`), filled with the repo's
+required-check names and the author allowlist. `adlc-review.yml` runs **both** reviews on each
+PR — adversarial then architect conformance — and does the `stage:build → stage:qa` handoff
+**from the agents' PASS/CHANGES verdicts, not from GitHub's review decision**; on CHANGES it
+labels the PR `adlc:changes-requested` for the fix loop. Because control doesn't depend on
+GitHub's review state, you may enable branch protection's **"require a human approval"** — it
+then gates only the final MERGE, and the pipeline still flows to a finished, QA'd PR. Also copy
+**`adlc-diff-scope.yml`** (fails a PR that touches files outside its stage's allowed paths — the
+path-level half of author/verifier separation). For the test battery, follow the Phase 1 choice: if the user picked **propose it**,
 run the `test-strategy` skill, then copy **`adlc-ci.yml`** filled with the chosen setup +
 commands (these are the required checks); if they picked **keep ours**, skip `adlc-ci.yml` and
 plug their existing check names into the lanes and (public) branch protection.
@@ -203,11 +207,12 @@ automation — copy `adlc-retro.yml` and `.adlc/scripts/adlc-metrics.sh`. Tell t
 retro is **propose-only** (it opens a PR through the gates) and runs on the workflow's schedule
 or on demand via `/adlc:retro`.
 
-For **full automation**, also copy `adlc-architect-review.yml` (conformance review + the
-`stage:build → stage:qa` handoff) and `adlc-fix.yml` (the fix loop: a "changes requested" review
-re-invokes the Builder to fix on the same branch, re-reviews, and repeats until clean — capped
-at 3 rounds, then it adds `needs:human`). With these, a flagged PR loops back to the Builder on
-its own and the human only reads + merges the clean PR.
+For **full automation**, also copy `adlc-fix.yml` (the fix loop). The review lane
+(`adlc-review.yml`, above) does the `stage:build → stage:qa` handoff on a clean verdict and
+labels `adlc:changes-requested` otherwise; the fix loop fires on that label, re-invokes the
+Builder to fix on the same branch, and the push re-runs the review — repeating until clean,
+capped at 3 rounds (then it adds `needs:human`). With these, a flagged PR loops back to the
+Builder on its own and the human only reads + merges the clean PR.
 
 **Allowlists — fill them, never leave a literal placeholder** (a leftover placeholder means
 that lane never fires). Every lane guards on two accounts: `{{PRINCIPAL}}` (who may auto-trigger)

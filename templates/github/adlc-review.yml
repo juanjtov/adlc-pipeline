@@ -1,45 +1,85 @@
-# ADLC adversarial-review lane — runs the independent reviewer on EACH PR.
-# This is the file that makes the review automatic on PR creation.
+# ADLC review lane — runs BOTH independent reviews on each Builder PR (adversarial first, then
+# architect conformance), then decides the build → qa handoff FROM THE AGENTS' VERDICTS, not
+# from GitHub's aggregate review decision. Why:
+#   * You can safely enable branch protection "require a human approval" — it then gates ONLY the
+#     final MERGE, while the pipeline still flows to a finished, QA'd PR.
+#   * Identity-safe: a bot can't formally approve/request-changes on its own PR, so control never
+#     depends on GitHub review state. Each agent ends its comment with a PASS/CHANGES marker and
+#     the workflow reads it. On CHANGES the PR is labelled `adlc:changes-requested` → the fix loop.
 #
-# Triggers when a PR is opened/reopened/marked ready. Add 'synchronize' to the types below
-# if you also want a re-review on every push to the PR (more thorough, more Actions minutes).
-#
-# Fresh context + read-only: the reviewer sees only the diff + the criteria and tries to
-# break it (break assumptions · enforce contracts · prevent the echo chamber).
-#
-# PREREQUISITES: the same secrets as the other lanes — CLAUDE_CODE_OAUTH_TOKEN +
-# ADLC_DISPATCH_TOKEN. NOTE: a pull_request from a FORK gets no secrets, so this is meant for
-# the Builder bot's same-repo branches; for outside/fork PRs, gate on a label instead.
-name: ADLC adversarial review
+# PREREQUISITES: CLAUDE_CODE_OAUTH_TOKEN + ADLC_DISPATCH_TOKEN. Fill the {{PRINCIPAL}} /
+# {{BUILDER_BOT}} allowlist (the accounts whose PRs may be auto-reviewed).
+name: ADLC review
 
 on:
   pull_request:
-    types: [opened, reopened, ready_for_review, synchronize]   # synchronize ⇒ re-review after fix-loop pushes
+    types: [opened, ready_for_review, synchronize]
 
 permissions:
   contents: read
+  issues: write
   pull-requests: write
 
 jobs:
-  review:
+  adversarial:
+    if: contains(fromJSON('["{{PRINCIPAL}}","{{BUILDER_BOT}}"]'), github.event.pull_request.user.login)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      - name: Run adversarial reviewer
+      - name: Adversarial review
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.ADLC_DISPATCH_TOKEN }}
           prompt: |
             You are the ADLC adversarial-reviewer. Review PR #${{ github.event.pull_request.number }}
-            in fresh context, read-only, seeing ONLY the diff plus the linked ADR / task
-            breakdown / ACs. Load the adversarial-reviewer agent definition and the
-            adlc:code-review + project-conventions + adlc:security-gate skills. Apply the three
-            pillars (break assumptions · enforce contracts · prevent the echo chamber), then
-            post findings as a single PR comment. If your verdict is CHANGES REQUESTED (a
-            confirmed Critical/High), ALSO submit a formal `gh pr review --request-changes` so the
-            fix loop sends it back to the Builder; otherwise submit `gh pr review --approve`. Never
-            edit code, never change labels, never merge.
+            in fresh context, read-only, seeing ONLY the diff + the linked ADR/task breakdown/ACs.
+            Load the adversarial-reviewer agent definition + adlc:code-review + project-conventions
+            + adlc:security-gate. Apply the three pillars. Post findings as ONE PR comment whose
+            LAST line is exactly `ADLC-ADV: PASS` (nothing blocking) or `ADLC-ADV: CHANGES` (a
+            confirmed Critical/High). Never edit code, never merge, never change labels.
+
+  architect:
+    needs: adversarial
+    if: contains(fromJSON('["{{PRINCIPAL}}","{{BUILDER_BOT}}"]'), github.event.pull_request.user.login)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Architect conformance review
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.ADLC_DISPATCH_TOKEN }}
+          prompt: |
+            You are the ADLC Architect (review duty). Review PR #${{ github.event.pull_request.number }}
+            for declared-diff-scope + design conformance vs the ADR/task breakdown, and also read the
+            adversarial-reviewer's latest findings comment. Load the architect agent definition +
+            project-conventions. Post ONE comment whose LAST line is exactly `ADLC-ARCH: PASS` or
+            `ADLC-ARCH: CHANGES`. Do NOT change labels — the next step does.
+
+      - name: Advance or flag (from both verdicts)
+        env:
+          GH_TOKEN: ${{ secrets.ADLC_DISPATCH_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          latest() { gh pr view "$PR" --json comments \
+            --jq "[.comments[] | select(.body | test(\"$1:\"))] | last | .body" 2>/dev/null \
+            | grep -oE "$1: (PASS|CHANGES)" | grep -oE '(PASS|CHANGES)' | tail -1; }
+          adv=$(latest ADLC-ADV); arch=$(latest ADLC-ARCH)
+          echo "adversarial=$adv architect=$arch"
+          if [ "$adv" = "PASS" ] && [ "$arch" = "PASS" ]; then
+            issue=$(gh pr view "$PR" --json closingIssuesReferences --jq '.closingIssuesReferences[0].number // empty')
+            [ -z "$issue" ] && issue=$(gh pr view "$PR" --json body --jq '.body' | grep -oiE '#[0-9]+' | head -1 | tr -d '#')
+            gh pr edit "$PR" --remove-label "adlc:changes-requested" 2>/dev/null || true
+            if [ -n "$issue" ]; then
+              gh issue edit "$issue" --remove-label stage:build --add-label stage:qa
+              echo "Both reviews PASS → issue #$issue advanced to stage:qa (QA lane fires)."
+            fi
+          else
+            gh pr edit "$PR" --add-label "adlc:changes-requested"
+            echo "Not clean (adv=$adv arch=$arch) → labelled adlc:changes-requested (fix loop runs)."
+          fi
