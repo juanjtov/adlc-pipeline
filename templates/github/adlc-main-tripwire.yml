@@ -1,14 +1,10 @@
-# ADLC main-branch tripwire — the Free-plan substitute for branch protection.
-#
-# On a PRIVATE repo on GitHub Free you can't require status checks or block direct pushes
-# to main server-side (that needs Pro/Team). This backstop runs on every push to main and
-# FAILS — and opens an alert issue — if a pushed commit didn't arrive through a merged PR,
-# i.e. someone pushed straight to main and bypassed the QA gate + Gate 2.
-#
-# On a PUBLIC repo, use real branch protection instead and you don't need this file.
-#
-# Enforcement of record is still `.claude/settings.json` (no agent can push to main or
-# self-merge); this catches a HUMAN doing it by hand, after the fact.
+# ADLC main-branch tripwire — the Free-plan substitute for branch protection on PRIVATE repos.
+# On every push to main it FAILS (and opens an alert issue) if a pushed commit didn't arrive
+# through a merged PR — i.e. someone pushed straight to main, bypassing the QA gate + Gate 2.
+# The decision is `.adlc/scripts/adlc-tripwire-check.sh` (unit-tested); this workflow just
+# resolves each commit's PR association via `gh api` and pipes it in.
+# On a PUBLIC repo use real branch protection instead. Enforcement of record is still the
+# `.claude/settings.json` deny rules; this catches a HUMAN pushing by hand, after the fact.
 name: ADLC main tripwire
 
 on:
@@ -26,33 +22,32 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
       - name: Flag commits not linked to a merged PR
         env:
           GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.event.after }}
         run: |
-          repo="${{ github.repository }}"
-          before="${{ github.event.before }}"
-          after="${{ github.event.after }}"
+          chmod +x .adlc/scripts/adlc-tripwire-check.sh
           # New-branch pushes report an all-zero "before"; scope to the new commit then.
-          if [ -z "${before//0/}" ]; then range="$after -n 1"; else range="$before..$after"; fi
+          if [ -z "${BEFORE//0/}" ]; then range="$AFTER -n 1"; else range="$BEFORE..$AFTER"; fi
 
-          direct=""
-          for sha in $(git rev-list --no-merges $range 2>/dev/null); do
-            pulls=$(gh api "repos/$repo/commits/$sha/pulls" --jq 'length' 2>/dev/null || echo 0)
-            [ "$pulls" = "0" ] && direct="$direct $sha"
-          done
-
-          if [ -n "$direct" ]; then
-            echo "::error::Direct push to main detected (bypassed the QA gate):$direct"
+          # Build "<sha> <pr_count>" lines for each non-merge commit, then let the script decide.
+          lines=$(for sha in $(git rev-list --no-merges $range 2>/dev/null); do
+                    n=$(gh api "repos/$REPO/commits/$sha/pulls" --jq 'length' 2>/dev/null || echo 0)
+                    echo "$sha $n"
+                  done)
+          result=$(printf '%s\n' "$lines" | .adlc/scripts/adlc-tripwire-check.sh) || {
+            shas=${result#DIRECT:}
+            echo "::error::Direct push to main detected (bypassed the QA gate):$shas"
             gh issue create \
               --title "⚠️ Direct push to main — bypassed the QA gate" \
               --label "bug" \
-              --body "These commits reached \`main\` with no associated merged PR:$direct
+              --body "These commits reached \`main\` with no associated merged PR:$shas
 
-          Gate 2 requires merges go through the QA gate and Principal approval. If this was
-          unintended, revert and re-land through a PR. (ADLC tripwire — the Free-plan stand-in
-          for branch protection.)"
+          Gate 2 requires merges go through the QA gate and Principal approval. If unintended,
+          revert and re-land through a PR. (ADLC tripwire — the Free-plan stand-in for branch protection.)"
             exit 1
-          fi
-          echo "✓ All pushed commits arrived via a PR."
+          }
+          echo "$result"

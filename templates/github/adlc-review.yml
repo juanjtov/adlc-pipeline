@@ -66,10 +66,10 @@ jobs:
           GH_TOKEN: ${{ secrets.ADLC_DISPATCH_TOKEN }}
           PR: ${{ github.event.pull_request.number }}
         run: |
-          latest() { gh pr view "$PR" --json comments \
-            --jq "[.comments[] | select(.body | test(\"$1:\"))] | last | .body" 2>/dev/null \
-            | grep -oE "$1: (PASS|CHANGES)" | grep -oE '(PASS|CHANGES)' | tail -1; }
-          adv=$(latest ADLC-ADV); arch=$(latest ADLC-ARCH)
+          chmod +x .adlc/scripts/adlc-verdict.sh
+          bodies=$(gh pr view "$PR" --json comments --jq '.comments[].body')
+          adv=$(printf '%s\n' "$bodies" | .adlc/scripts/adlc-verdict.sh ADLC-ADV)
+          arch=$(printf '%s\n' "$bodies" | .adlc/scripts/adlc-verdict.sh ADLC-ARCH)
           echo "adversarial=$adv architect=$arch"
           if [ "$adv" = "PASS" ] && [ "$arch" = "PASS" ]; then
             issue=$(gh pr view "$PR" --json closingIssuesReferences --jq '.closingIssuesReferences[0].number // empty')

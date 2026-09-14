@@ -31,7 +31,10 @@ templates/                     # what the wizard fills into the host repo
   github/adlc-intake.yml · adlc-design.yml        # auto-start (autopilot) lanes
   github/adlc-ci.yml · adlc-diff-scope.yml · adlc-main-tripwire.yml · adlc-retro.yml
   github/ISSUE_TEMPLATE/requirement.yml           # file a requirement → pipeline starts
-  scripts/adlc-metrics.sh      # GitHub-derived self-improvement metrics
+  scripts/  adlc-diff-scope.sh · adlc-tripwire-check.sh · adlc-fix-cap.sh · adlc-verdict.sh
+            adlc-doctor.sh · adlc-metrics.sh        # the deterministic guardrail logic
+  hooks/pre-commit             # local diff-scope guard (reuses adlc-diff-scope.sh)
+tests/run.sh                   # unit tests for the guardrail scripts (bash, no deps)
 ```
 
 ## Design philosophy
@@ -45,6 +48,14 @@ skill) rather than enumerating steps; hard prohibitions are reserved for genuine
 areas (merge/deploy/push/cross-gate) and otherwise enforced structurally by `tools:` grants
 and deny rules; and the `ablation` skill + `CONTEXT-LOG.md` exist so the setup gets pruned,
 not just appended to.
+
+**Deterministic where it matters.** The *mechanical* guardrails — path scope, direct-push
+detection, the fix-loop cap, the verdict parse, setup validation — are small shell scripts in
+`scripts/`, **unit-tested** (`tests/run.sh`), and called by both CI and a **local pre-commit
+hook** so they enforce identically on your machine and in Actions. `adlc-doctor.sh` validates a
+host repo's setup (deny rules, unfilled placeholders, skills, labels). Judgment guardrails
+(design conformance, security severity) stay as skills + the adversarial review — those can't
+be made deterministic without losing the point.
 
 ## Self-improvement loop
 

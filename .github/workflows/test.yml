@@ -1,0 +1,13 @@
+# The plugin's own CI: runs the guardrail unit tests on every push/PR so the deterministic
+# guardrails (diff-scope, tripwire, fix-cap, verdict, doctor) can't regress.
+name: test
+
+on: [push, pull_request]
+
+jobs:
+  guardrail-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run guardrail tests
+        run: bash tests/run.sh

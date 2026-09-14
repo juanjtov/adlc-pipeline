@@ -166,6 +166,14 @@ Create/write:
    `ablation` skill reads on each reset; it keeps the generated context from rotting into
    append-only.
 
+8b. `.adlc/scripts/` + the local guard — copy `templates/scripts/*.sh` to `.adlc/scripts/`
+   (chmod +x). These are the **deterministic guardrails** (`adlc-diff-scope`, `adlc-tripwire-check`,
+   `adlc-fix-cap`, `adlc-verdict`, `adlc-metrics`, `adlc-doctor`) that the workflows and the local
+   hook call — one unit-tested source of truth, not prose. Then install the **local diff-scope
+   guard**: copy `templates/hooks/pre-commit` to `.git/hooks/pre-commit` (chmod +x) — **ask first
+   if a pre-commit hook already exists** — so the Builder's declared scope is enforced on every
+   local commit, not only in CI.
+
 9. **UI projects only** (frontend detected): note that the `design-system` and
    `verify-frontend-change` skills are expected by the Builder/QA agents when frontend
    code changes. If the repo lacks them, offer to scaffold a minimal `design-system` skill
@@ -280,10 +288,11 @@ automation is live.
 
 ## Phase 4 — Verify & first run
 
-1. **Self-check.** Confirm the files exist and are well-formed: the two project skills, the
-   settings deny rules, the charter + RUNBOOK + ADR, CLAUDE.md (with the ablation-date
-   comment) + CONTEXT-LOG.md, and (if chosen) the labels and workflows. Report a short
-   checklist with ✅/⬜.
+1. **Self-check.** Run `.adlc/scripts/adlc-doctor.sh` and report its output — it deterministically
+   checks the deny rules, unfilled `{{...}}` placeholders, the project skills, and (with gh) the
+   state-machine labels. Also confirm the charter + RUNBOOK + ADR, CLAUDE.md (with the
+   ablation-date comment), CONTEXT-LOG.md, and (if chosen) the workflows exist. Report a short
+   ✅/⬜ checklist.
 2. **Offer the first pipeline run:**
    - **Greenfield:** offer to turn the PRD into the first intake issue — create a
      `stage:intake` GitHub issue (ask before creating) summarizing the first slice of the

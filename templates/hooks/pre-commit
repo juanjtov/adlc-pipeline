@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# ADLC local diff-scope guard — enforces the Builder's declared scope (.adlc/scope.txt) on
+# staged files in LOCAL mode, using the SAME script the CI diff-scope lane uses (single source
+# of truth). No-ops if the scripts or a scope file aren't present. The bootstrap wizard installs
+# this to .git/hooks/pre-commit (chmod +x).
+set -euo pipefail
+DIR="$(git rev-parse --show-toplevel)"
+SCRIPT="$DIR/.adlc/scripts/adlc-diff-scope.sh"
+[ -x "$SCRIPT" ] || exit 0   # scripts not installed → skip
+
+if ! git diff --cached --name-only | "$SCRIPT" build "$DIR/.adlc/scope.txt"; then
+  echo "✗ commit blocked: files staged outside the declared diff scope (.adlc/scope.txt)." >&2
+  echo "  Widen the scope with the Architect, or split the change." >&2
+  exit 1
+fi

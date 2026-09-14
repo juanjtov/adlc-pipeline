@@ -33,9 +33,10 @@ jobs:
       - name: Loop cap (count prior fix rounds)
         id: cap
         run: |
-          n=$(git log --grep='^adlc-fix:' --oneline | wc -l | tr -d ' ')
-          echo "prior_fix_rounds=$n"
-          if [ "${n:-0}" -ge 3 ]; then echo "stop=true" >> "$GITHUB_OUTPUT"; else echo "stop=false" >> "$GITHUB_OUTPUT"; fi
+          chmod +x .adlc/scripts/adlc-fix-cap.sh
+          d=$(git log --format='%s' | .adlc/scripts/adlc-fix-cap.sh 3)
+          echo "decision=$d"
+          if [ "$d" = "STOP" ]; then echo "stop=true" >> "$GITHUB_OUTPUT"; else echo "stop=false" >> "$GITHUB_OUTPUT"; fi
 
       - name: Escalate to a human (cap reached)
         if: steps.cap.outputs.stop == 'true'

@@ -1,11 +1,9 @@
 # ADLC diff-scope check — the path-level half of author/verifier separation.
-# Fails a PR whose changed files fall outside the scope allowed for its stage:
-#   - stage:design PRs (Architect) → docs/** only
-#   - stage:qa  commits (QA/Ops)   → the test dirs only
-#   - stage:build PRs (Builder)    → the declared per-task scope. That scope lives in the
-#     Architect's task-breakdown comment (prose). This check enforces it strictly only if the
-#     Architect also wrote a machine-readable allowlist to `.adlc/scope.txt` (one path prefix
-#     per line); otherwise Builder scope is enforced by the Architect's review (advisory here).
+# Fails a PR whose changed files fall outside the scope allowed for its stage. The actual
+# check is `.adlc/scripts/adlc-diff-scope.sh` (shared with the local pre-commit hook and unit-
+# tested), so CI and local enforce identically:
+#   stage:design → docs/ only · stage:qa → $ADLC_TEST_DIRS · stage:build → .adlc/scope.txt globs
+#   (if the Architect wrote one; otherwise advisory, enforced by the review).
 name: ADLC diff-scope
 
 on:
@@ -21,32 +19,22 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with: { fetch-depth: 0 }
+        with:
+          fetch-depth: 0
       - name: Enforce declared diff scope
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
-          # test dirs allowed for QA-stage PRs (regex alternation), e.g. tests|python_backend/tests
-          TEST_DIRS: "{{TEST_DIR_REGEX}}"
+          # test dirs allowed for qa-stage PRs (regex alternation), e.g. tests|backend/tests
+          ADLC_TEST_DIRS: "{{TEST_DIR_REGEX}}"
         run: |
+          chmod +x .adlc/scripts/adlc-diff-scope.sh
           labels=$(gh pr view "$PR" --json labels --jq '.labels[].name' | tr '\n' ' ')
-          files=$(gh pr diff "$PR" --name-only)
-          fail=0
-          deny() { echo "::error file=$1::'$1' is outside the allowed scope for this stage"; fail=1; }
-
+          stage=other
           case "$labels" in
-            *stage:design*)
-              for f in $files; do echo "$f" | grep -qE '^docs/' || deny "$f"; done ;;
-            *stage:qa*)
-              for f in $files; do echo "$f" | grep -qE "^($TEST_DIRS)" || deny "$f"; done ;;
-            *stage:build*)
-              if [ -f .adlc/scope.txt ]; then
-                pattern=$(paste -sd '|' .adlc/scope.txt)
-                for f in $files; do echo "$f" | grep -qE "^($pattern)" || deny "$f"; done
-              else
-                echo "No .adlc/scope.txt — Builder scope enforced by Architect review (advisory)."
-              fi ;;
-            *)
-              echo "No ADLC stage label — skipping scope check." ;;
+            *stage:design*) stage=design ;;
+            *stage:qa*)     stage=qa ;;
+            *stage:build*)  stage=build ;;
           esac
-          exit $fail
+          echo "stage=$stage"
+          gh pr diff "$PR" --name-only | .adlc/scripts/adlc-diff-scope.sh "$stage"
