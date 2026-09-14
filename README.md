@@ -32,7 +32,7 @@ templates/                     # what the wizard fills into the host repo
   github/adlc-ci.yml · adlc-diff-scope.yml · adlc-main-tripwire.yml · adlc-retro.yml
   github/ISSUE_TEMPLATE/requirement.yml           # file a requirement → pipeline starts
   scripts/  adlc-diff-scope.sh · adlc-tripwire-check.sh · adlc-fix-cap.sh · adlc-verdict.sh
-            adlc-doctor.sh · adlc-metrics.sh        # the deterministic guardrail logic
+            adlc-log-findings.sh · adlc-doctor.sh · adlc-metrics.sh   # deterministic guardrail logic
   hooks/pre-commit             # local diff-scope guard (reuses adlc-diff-scope.sh)
 tests/run.sh                   # unit tests for the guardrail scripts (bash, no deps)
 ```
@@ -59,14 +59,27 @@ be made deterministic without losing the point.
 
 ## Self-improvement loop
 
-The pipeline compounds knowledge every run. Every reviewer/QA/security finding is logged by
-**class** to `.adlc/metrics/findings.jsonl`; the **`retro`** skill (manual `/adlc:retro` or the
-scheduled `adlc-retro.yml`) ranks recurring classes and opens a **propose-only** PR that turns
-each into the cheapest *durable* guard — **a regression test first, then a CI check, then a
-convention, and only last a prose gotcha** — while pruning context lines that never prevented a
-failure (`ablation`). Knowledge accumulates in versioned tests/checks/conventions, not model
-memory, so each run starts from a higher floor without the context bloating. The proposal is a
-normal PR: it passes through the QA gate and the adversarial reviewer like any other change.
+The pipeline compounds knowledge every run. Every reviewer/QA/security finding is emitted as a
+machine-readable `ADLC-FINDING: <severity> | <class> | <file>` line **in the PR comment** — the
+durable, per-repo store (a read-only reviewer can write a comment; a CI file-commit would trip
+the tripwire). The **`retro`** skill (manual `/adlc:retro` or the scheduled `adlc-retro.yml`)
+**materializes** `.adlc/metrics/findings.jsonl` from those comments via `adlc-log-findings.sh`,
+ranks recurring classes, and opens a **propose-only** PR that turns each into the cheapest
+*durable* guard — **a regression test first, then a CI check, then a convention, and only last a
+prose gotcha** — while pruning context lines that never prevented a failure (`ablation`).
+Knowledge accumulates in versioned tests/checks/conventions, not model memory, so each run
+starts from a higher floor without the context bloating.
+
+**Cross-project learning.** The loop compounds *inside each repo* by default. When a lesson is
+general (a new attack class, a better default, a guardrail gap), the retro tags it `scope: plugin`
+and files an evidence-backed issue (`adlc:plugin-suggestion`) into the shared plugin repo
+(`ADLC_PLUGIN_REPO`, default `juanjtov/adlc-pipeline`) — so improvements found in one of your
+projects can be curated into the plugin and reach them all. Only from repos you own/share.
+
+**Not yet tracked:** token count, latency, and cost per agent / per pipeline run. `adlc-metrics.sh`
+derives delivery/quality signals from GitHub (acceptance, cycle time, finding classes) but not
+spend — that needs harness telemetry (Claude Code OpenTelemetry export, or parsing each lane's
+Actions usage). A known gap, not wired.
 
 ### Two layers, on purpose
 

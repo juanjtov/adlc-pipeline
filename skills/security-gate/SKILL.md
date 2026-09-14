@@ -77,7 +77,7 @@ adversarial: try fetching another tenant's object path.
 
 QA/Ops verdict format: finding → file:line → severity → **class** (`adlc:edd-spec` vocabulary,
 e.g. `tenant-leak`, `injection`) → attack demonstrated (or "theoretical") → required fix.
-Append one ledger line per finding to `.adlc/metrics/findings.jsonl` so the `retro` loop can
-compound recurring classes. The Principal additionally runs Claude Code's
+Add a machine-readable line per finding — `ADLC-FINDING: <severity> | <class> | <file>` — to the
+comment; the `retro` loop materializes the findings ledger from these comment lines. The Principal additionally runs Claude Code's
 `/security-review` on the PR branch before Gate 2 (subscription-billed, no API key) — it
 complements, never replaces, the adversarial pass.

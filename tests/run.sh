@@ -50,6 +50,14 @@ printf 'if: "someuser"\n' > "$FIX/.github/workflows/adlc-x.yml"
 ADLC_DOCTOR_SKIP_LABELS=1 bash "$S/adlc-doctor.sh" "$FIX" >/dev/null 2>&1; check 0 "passes when filled + skills + deny present" $?
 rm -rf "$FIX"
 
+echo "log-findings:"
+LF=$(printf 'prose\nADLC-FINDING: High | hallucinated-api | src/x.py\nADLC-FINDING: Critical | tenant-leak | src/y.py\n' | bash "$S/adlc-log-findings.sh" 42 review)
+eq 2 "logs 2 findings"          "$(printf '%s\n' "$LF" | grep -c '"class"')"
+printf '%s' "$LF" | grep -q '"class":"hallucinated-api"' && ok "parses class" || bad "parses class"
+printf '%s' "$LF" | grep -q '"severity":"Critical"' && ok "parses severity" || bad "parses severity"
+printf '%s' "$LF" | grep -q '"pr":42' && ok "tags pr number" || bad "tags pr number"
+eq "" "empty when no findings" "$(printf 'nothing here\n' | bash "$S/adlc-log-findings.sh" 1 review)"
+
 echo ""
 echo "== $pass passed, $fail failed =="
 [ "$fail" -eq 0 ]

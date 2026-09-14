@@ -70,20 +70,29 @@ these baselines set the staged-autonomy thresholds later (charter §2.5).
 
 ## Capture & finding classes (feeds the `retro` self-improvement loop)
 
-Every finding from the adversarial reviewer, QA, or the security gate is logged with a
-**class**, so recurring failure types can be found and turned into durable guards (see the
-`retro` skill). Append one JSON line per finding to `.adlc/metrics/findings.jsonl`:
+Every finding from the adversarial reviewer, QA, or the security gate carries a **class**, so
+recurring failure types can be found and turned into durable guards (see the `retro` skill).
+
+**The store is the PR comments.** A read-only reviewer can post a comment but can't write repo
+files, and a CI push of a ledger to `main` would trip the tripwire — so reviewers emit one
+machine-readable line per finding **inside their PR comment**:
 
 ```
-{"ts":"<ISO8601>","pr":<n>,"issue":<n>,"stage":"review|qa|security",
- "class":"<class>","severity":"Critical|High|Medium|Low","file":"<path>",
- "outcome":"fixed|waived|escaped"}
+ADLC-FINDING: <severity> | <class> | <file>
+```
+
+The `retro` (via `.adlc/scripts/adlc-log-findings.sh`) reads those lines from PR comments and
+**materializes** the ledger `.adlc/metrics/findings.jsonl` on demand — one object per finding:
+
+```
+{"ts":"<ISO8601>","pr":<n>,"stage":"review|qa|security",
+ "severity":"Critical|High|Medium|Low","class":"<class>","file":"<path>"}
 ```
 
 **Finding classes:** `tenant-leak` · `authz-gap` · `injection` · `secret-in-code` ·
 `hallucinated-api` · `missing-edge-case` · `logic-contradiction` · `contract-violation`
 (ADR / diff-scope) · `flaky-test` · `perf-regression` · `other`.
 
-Capture is deterministic and append-only (never agent self-report as a system of record).
-The `retro` skill ranks these to add durable guards; the `ablation` skill prunes context they
-no longer justify.
+Comments are durable, per-repo, and native (never an agent self-report file). The `retro` ranks
+the materialized ledger to add durable guards; the `ablation` skill prunes context they no
+longer justify.

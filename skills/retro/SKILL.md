@@ -14,8 +14,15 @@ Inputs (all deterministic — never agent self-report):
 - **GitHub-derived metrics** — run `${CLAUDE_PROJECT_DIR}/.adlc/scripts/adlc-metrics.sh` (or the
   copy under the plugin templates) for first-pass acceptance, iterations-to-green, cycle time
   per stage, and change failure signals from PRs / CI / labels.
-- **Finding ledger** — `.adlc/metrics/findings.jsonl` (every reviewer/QA/security finding,
-  tagged with a **class** from `adlc:edd-spec`).
+- **Finding ledger** — **materialize it first** from the PR comments (the durable store):
+  ```
+  : > .adlc/metrics/findings.jsonl
+  for pr in $(gh pr list --state all --limit 50 --json number --jq '.[].number'); do
+    gh pr view "$pr" --json comments --jq '.comments[].body' \
+      | .adlc/scripts/adlc-log-findings.sh "$pr" review >> .adlc/metrics/findings.jsonl
+  done
+  ```
+  This reads every `ADLC-FINDING: <severity> | <class> | <file>` line the reviewers left.
 - **`CONTEXT-LOG.md`** — what's already been added and why.
 
 ## Step 1 — Rank
@@ -53,6 +60,29 @@ candidates, and appends a row to `CONTEXT-LOG.md` for every change (date · laye
 class + evidence that earned it, or the zero-hit reason for a removal). Summarize the top
 failure classes and the metric trend in the PR body. The Principal reviews it like any PR —
 this proposal is itself subject to the QA gate and the adversarial reviewer.
+
+## Step 5 — Promote plugin-general lessons (cross-project learning)
+
+Decide a **scope** for each recurring lesson:
+- **`scope: project`** — specific to this repo (its stack, its data model). Fix it locally (above).
+- **`scope: plugin`** — general enough to belong in the shared plugin: a new `security-gate`
+  attack class, a better default in a template, a wizard/guardrail gap, a missing finding class.
+
+For a **plugin-scope** lesson, don't edit the plugin from here — file an evidence-backed issue
+into the shared plugin repo so its own pipeline can curate it:
+
+```
+gh issue create --repo "${ADLC_PLUGIN_REPO:-juanjtov/adlc-pipeline}" \
+  --label adlc:plugin-suggestion \
+  --title "<class>: <one-line general improvement>" \
+  --body "Seen in $(gh repo view --json nameWithOwner --jq .nameWithOwner): <class>, <count> occurrences.
+Example: <finding>. Proposed general change: <skill/template/script>."
+```
+
+This aggregates suggestions from **all your own projects** into one backlog; accepted ones
+land in the plugin and reach every project on the next `/adlc:init` refresh or
+`claude plugin update`. **Privacy:** only file from repos you own / are entitled to share — never
+copy another team's findings into the shared plugin.
 
 ## Cadence
 
