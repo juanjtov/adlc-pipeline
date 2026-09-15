@@ -11,6 +11,7 @@ a PRD) or a mature codebase — and be running in minutes.
 agents/                        # the 4 role agents + adversarial-reviewer (stack-agnostic)
 skills/
   charter/                     # portable process rules: principles, roles, state machine, gates
+  triage/                      # size an issue → fast lane (trivial) vs full pipeline
   edd-spec/                    # story/AC templates, traceability, metric taxonomy
   security-gate/               # secure-coding checklist + severity rubric (two modes)
   code-review/                 # scoped adversarial review: break assumptions, enforce contracts, no echo chamber
@@ -30,11 +31,14 @@ templates/                     # what the wizard fills into the host repo
   settings.telemetry.json      # opt-in OTel env for per-agent token/cost/latency
   github/labels.sh · adlc-builder.yml · adlc-qa.yml · adlc-review.yml · adlc-fix.yml
   github/adlc-intake.yml · adlc-design.yml        # auto-start (autopilot) lanes
+  github/adlc-fast.yml                            # ← fast lane for trivial changes
   github/adlc-ci.yml · adlc-diff-scope.yml · adlc-main-tripwire.yml · adlc-retro.yml
   github/ISSUE_TEMPLATE/requirement.yml           # file a requirement → pipeline starts
   scripts/  adlc-diff-scope.sh · adlc-tripwire-check.sh · adlc-fix-cap.sh · adlc-verdict.sh
             adlc-log-findings.sh · adlc-doctor.sh · adlc-metrics.sh · adlc-cost.sh
-            adlc-cache.sh   # deterministic logic (adlc-cache.sh = prompt-cache hit-rate rollup)
+            adlc-cache.sh · adlc-triage.sh   # deterministic logic
+            #   adlc-cache.sh  = prompt-cache hit-rate rollup
+            #   adlc-triage.sh = fast-lane eligibility cap (size + sensitive-path)
   hooks/pre-commit             # local diff-scope guard (reuses adlc-diff-scope.sh)
 tests/run.sh                   # unit tests for the guardrail scripts (bash, no deps)
 telemetry/                     # ready-to-run local OTel collector (docker compose) for token/cost
@@ -137,14 +141,35 @@ In the target repository:
 ## The pipeline
 
 ```
-stage:intake → gate:stories → stage:design → stage:build → stage:qa → gate:deploy
-  Analyst         Gate 1        Architect      Builder       QA/Ops      Gate 2 → deploy
+full:  stage:intake → gate:stories → stage:design → stage:build → stage:qa → gate:deploy
+         Analyst         Gate 1        Architect      Builder       QA/Ops      Gate 2 → deploy
+fast:  stage:intake → (triage) → stage:fast ─────────────────────────────→ gate:deploy
+         Analyst sizes it       Builder + adversarial/security review         Gate 2 → deploy
 ```
 
 Core rules (full text in the `charter` skill): author/verifier separation (no agent
 verifies/merges/deploys its own work), propose-before-write for every irreversible action,
 deterministic permissions (agent `tools:` + deny rules + diff-scope CI), and agents move
 work *up to* a gate but never *through* it. GitHub issues are the execution source of truth.
+
+### Fast lane (trivial changes)
+
+Not every change earns the full four-agent path. On intake the Analyst **triages** (the `triage`
+skill): a small, local, non-sensitive change — a copy fix, a config tweak, an obvious one-file
+bug — is recommended for `stage:fast`, which **skips the Architect/ADR and Gate 1** and goes
+straight to a scoped build + a single adversarial/security review, then the human merge gate.
+Everything that makes a change safe is kept:
+
+- **Author/verifier separation** — an independent adversarial + security review still runs.
+- **A deterministic cap** — `adlc-triage.sh` re-checks the *real* diff (≤ 5 files / ≤ 40 lines by
+  default, and nothing touching migrations, auth, infra, CI, deps, or secrets). Over-cap or
+  sensitive ⇒ the change is **bounced back to the full pipeline** (`stage:design`). So a
+  mis-triage — or a crafted issue arguing it's "trivial" — can't smuggle a big change through.
+- **Gate 2 (human merge)** — never skipped, on any lane.
+
+An issue reaches `stage:fast` only by a human applying the label (manual or after the Analyst's
+recommendation) or, under `adlc:autopilot`, the workflow applying it from the triage marker — the
+same opt-in that already auto-approves Gate 1. The Analyst never routes there itself.
 
 ## Automation modes
 
