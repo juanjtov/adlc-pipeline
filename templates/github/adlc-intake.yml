@@ -35,27 +35,45 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.ADLC_DISPATCH_TOKEN }}
           prompt: |
-            You are the ADLC Product Analyst. Turn issue #${{ github.event.issue.number }} into
-            user stories with testable acceptance criteria. Load the product-analyst agent
-            definition and the project-conventions + adlc:edd-spec skills. Do the Step-0
-            completeness check FIRST — if the requirement is ambiguous or malformed, post numbered
-            clarifying questions and STOP. Otherwise post stories / ACs / edge cases / out-of-scope
-            and move the issue to gate:stories. Never advance past a gate (Gate 1 is the human's).
+            You are the ADLC Product Analyst. Triage issue #${{ github.event.issue.number }} and
+            turn it into stories (or a change brief). Load the product-analyst agent definition and
+            the triage + project-conventions + adlc:edd-spec skills. Do the Step-0 completeness
+            check FIRST — if the requirement is ambiguous or malformed, post numbered clarifying
+            questions and STOP. Otherwise triage (emit an `ADLC-TRIAGE: FAST|FULL` verdict line),
+            post the story set (FULL) or the change brief (FAST), and move the issue to
+            gate:stories. Never apply a stage:* label (routing past Gate 1 is the human's / autopilot's).
 
-      # FULL AUTOPILOT only: issues labelled adlc:autopilot auto-approve Gate 1 so the pipeline
-      # runs to a QA-approved PR and the ONLY human step is Gate 2 (merge/deploy). The agent
-      # never does this — the Principal opts in per-issue via the label, and the workflow acts.
-      - name: Auto-advance Gate 1 (full autopilot)
+      # FULL AUTOPILOT only: issues labelled adlc:autopilot auto-approve Gate 1 so the FULL pipeline
+      # runs to a QA-approved PR and the ONLY human step is Gate 2 (merge/deploy). The agent never
+      # does this — the Principal opts in per-issue via the label, and the workflow acts.
+      #
+      # LANE CHOICE IS ALWAYS THE HUMAN'S. Autopilot never STARTS the fast lane: the fast lane skips
+      # design + Gate 1, so taking it is an explicit human approval, even under autopilot. On a FAST
+      # recommendation the workflow PAUSES at gate:stories and waits for the Principal to apply
+      # stage:fast (approve the fast lane) or stage:design (take the full pipeline). On FULL it
+      # auto-approves Gate 1 into the full pipeline as before — nothing safety-relevant is skipped there.
+      - name: Auto-advance Gate 1 — full lane only (fast lane waits for human approval)
         if: contains(github.event.issue.labels.*.name, 'adlc:autopilot')
         env:
           GH_TOKEN: ${{ secrets.ADLC_DISPATCH_TOKEN }}
+          N: ${{ github.event.issue.number }}
         run: |
-          # Advance only if the Analyst actually produced stories (reached gate:stories); if it
-          # stopped at Step 0 for clarifying questions, the issue stays at stage:intake.
-          labels=$(gh issue view ${{ github.event.issue.number }} --json labels --jq '.labels[].name')
-          if echo "$labels" | grep -qx 'gate:stories'; then
-            gh issue edit ${{ github.event.issue.number }} --remove-label gate:stories --add-label stage:design
-            echo "Full autopilot: Gate 1 auto-approved → stage:design. Gate 2 remains the only human step."
+          # Advance only if the Analyst actually finished (reached gate:stories); if it stopped at
+          # Step 0 for clarifying questions, the issue stays at stage:intake.
+          labels=$(gh issue view "$N" --json labels --jq '.labels[].name')
+          if ! echo "$labels" | grep -qx 'gate:stories'; then
+            echo "Analyst paused for clarification — not auto-advancing."; exit 0
+          fi
+          # Read the last triage verdict from the Analyst's comments (deterministic parse).
+          # `|| true`: with no marker the grep exits 1, and the step's `set -eo pipefail` would
+          # otherwise abort here — stalling the issue at gate:stories. Same guard as adlc-verdict.sh.
+          triage=$(gh issue view "$N" --json comments --jq '.comments[].body' \
+            | grep -oE 'ADLC-TRIAGE:[[:space:]]*(FAST|FULL)' | grep -oE '(FAST|FULL)' | tail -1 || true)
+          if [ "$triage" = "FAST" ]; then
+            # Do NOT start the fast lane. Leave it at gate:stories for the human to approve the lane.
+            gh issue comment "$N" --body "🚦 Triaged **FAST** — the fast lane is *recommended*. It skips design + Gate 1, so the **lane is yours to approve**: apply \`stage:fast\` to take it, or \`stage:design\` for the full pipeline. Autopilot will not start the fast lane on its own."
+            echo "Autopilot: triaged FAST → left at gate:stories for human lane approval (fast lane never auto-starts)."
           else
-            echo "Analyst paused for clarification — not auto-advancing."
+            gh issue edit "$N" --remove-label gate:stories --add-label stage:design
+            echo "Autopilot: triaged FULL → Gate 1 auto-approved → stage:design. Gate 2 remains the only human step."
           fi

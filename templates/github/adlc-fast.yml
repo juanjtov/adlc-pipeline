@@ -1,0 +1,149 @@
+# ADLC fast lane — full-automation mode only.
+# The short path for TRIVIAL, low-blast-radius changes: it skips the Architect/ADR and Gate 1,
+# but keeps everything that makes a change safe — author/verifier separation (an independent
+# adversarial + security review), a deterministic size/sensitivity cap, and the human MERGE gate
+# (Gate 2). It never merges or deploys.
+#
+#   stage:fast ─▶ Builder makes the scoped change + a test, opens a PR (labelled lane:fast)
+#              ─▶ cap re-checks the REAL diff; over-cap or sensitive ⇒ bounced to stage:design
+#              ─▶ adversarial + security review; PASS ⇒ gate:deploy · CHANGES ⇒ fix loop
+#
+# HOW AN ISSUE REACHES stage:fast — the LANE IS ALWAYS HUMAN-APPROVED; the fast lane never
+# auto-starts (not even under autopilot), because taking it skips design + Gate 1. Two ways, both
+# a human applying the label — never the agent, never autopilot:
+#   1. A human applies `stage:fast` directly (their own triage — cheapest; the Analyst never runs).
+#   2. A human applies it to approve the Analyst's FAST recommendation at gate:stories.
+# Under `adlc:autopilot`, a FAST recommendation PAUSES at gate:stories for that approval; autopilot
+# auto-approves Gate 1 into the FULL pipeline only (see adlc-intake.yml).
+#
+# PREREQUISITES: identical to adlc-builder.yml — CLAUDE_CODE_OAUTH_TOKEN + ADLC_DISPATCH_TOKEN,
+# the merge gate (PUBLIC → branch protection; PRIVATE → adlc-main-tripwire.yml), the author
+# allowlist. This is a STARTING TEMPLATE — adapt commands/paths and the cap env to this repo.
+name: ADLC fast lane
+
+on:
+  issues:
+    types: [labeled]
+  # `labeled` matters: the Builder opens the PR and adds `lane:fast` in a SECOND api call, so the
+  # label is NOT in the `opened` payload — review_gate must also fire when the label lands.
+  pull_request:
+    types: [opened, ready_for_review, synchronize, labeled]
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+# One review_gate run per PR at a time (opened+labeled can arrive together).
+concurrency:
+  group: adlc-fast-${{ github.event.pull_request.number || github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  # ── Build the scoped change (no ADR — works from the Analyst's change brief on the issue) ──
+  build:
+    if: >
+      github.event_name == 'issues' &&
+      github.event.label.name == 'stage:fast' &&
+      contains(fromJSON('["{{PRINCIPAL}}"]'), github.event.issue.user.login)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Run Builder (fast lane)
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.ADLC_DISPATCH_TOKEN }}   # PR authored by the bot; keeps author/verifier separation
+          prompt: |
+            You are the ADLC Builder on the FAST LANE. Implement issue
+            #${{ github.event.issue.number }} from its change brief — there is NO ADR. Load the
+            builder agent definition and the triage + project-conventions + adlc:security-gate +
+            verify skills. Write the declared scope to .adlc/scope.txt (the cap + diff-scope check
+            enforce it), stay strictly within it, add at least one test carrying the brief's S1-AC1
+            id, and run the project's pass/fail command (paste the real summary). Open the PR with
+            `gh pr create` targeting main, body starting `Closes #${{ github.event.issue.number }}`,
+            and add the label `lane:fast`. Never merge. If the change turns out to need more than
+            the brief's scope, STOP and comment that it should go to the full pipeline instead.
+
+  # ── Cap + adversarial/security review + gate handoff (only for lane:fast PRs) ──
+  review_gate:
+    # Runs on a lane:fast PR. On a `labeled` event, only when the label added IS lane:fast —
+    # so re-labeling the PR (e.g. adlc:changes-requested from the fix loop) doesn't re-fire it;
+    # the fix loop's push re-fires it via `synchronize` instead.
+    if: >
+      github.event_name == 'pull_request' &&
+      contains(github.event.pull_request.labels.*.name, 'lane:fast') &&
+      (github.event.action != 'labeled' || github.event.label.name == 'lane:fast') &&
+      contains(fromJSON('["{{PRINCIPAL}}","{{BUILDER_BOT}}"]'), github.event.pull_request.user.login)
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.ADLC_DISPATCH_TOKEN }}
+      PR: ${{ github.event.pull_request.number }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve the linked issue
+        id: link
+        run: |
+          issue=$(gh pr view "$PR" --json closingIssuesReferences --jq '.closingIssuesReferences[0].number // empty')
+          [ -z "$issue" ] && issue=$(gh pr view "$PR" --json body --jq '.body' | grep -oiE '#[0-9]+' | head -1 | tr -d '#')
+          echo "issue=$issue" >> "$GITHUB_OUTPUT"
+
+      # THE deterministic backstop: re-check the real diff. Over-cap or sensitive ⇒ full pipeline.
+      - name: Fast-lane cap (real diff)
+        id: cap
+        run: |
+          chmod +x .adlc/scripts/adlc-triage.sh
+          base=$(git merge-base origin/${{ github.base_ref }} HEAD 2>/dev/null || echo "origin/${{ github.base_ref }}")
+          if git diff --numstat "$base"...HEAD | .adlc/scripts/adlc-triage.sh > /tmp/cap.out 2> /tmp/cap.err; then
+            echo "eligible=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "eligible=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Bounce to the full pipeline (cap exceeded)
+        if: steps.cap.outputs.eligible == 'false'
+        run: |
+          reason=$(cat /tmp/cap.err || echo "exceeds the fast-lane cap")
+          gh pr comment "$PR" --body "⏫ This change $reason — routing to the **full pipeline** for real design. The Architect will pick up this branch and add an ADR + task breakdown."
+          gh pr edit "$PR" --remove-label lane:fast || true
+          if [ -n "${{ steps.link.outputs.issue }}" ]; then
+            gh issue edit "${{ steps.link.outputs.issue }}" --remove-label stage:fast --add-label stage:design || true
+          fi
+
+      - name: Adversarial + security review
+        if: steps.cap.outputs.eligible == 'true'
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.ADLC_DISPATCH_TOKEN }}
+          prompt: |
+            You are the ADLC adversarial-reviewer on a FAST-LANE PR #${{ github.event.pull_request.number }}.
+            Review in fresh context, read-only, seeing ONLY the diff + the issue's change brief
+            (there is no ADR — do not ask for one). Load the adversarial-reviewer agent definition +
+            adlc:code-review + project-conventions + adlc:security-gate. Apply the three pillars,
+            walking every security-gate attack class against the diff. Post findings as ONE PR
+            comment whose LAST line is exactly `ADLC-ADV: PASS` (nothing blocking) or
+            `ADLC-ADV: CHANGES` (a confirmed Critical/High). Never edit code, never merge, never
+            change labels — the next step does.
+
+      - name: Advance to Gate 2 or hand to the fix loop
+        if: steps.cap.outputs.eligible == 'true'
+        run: |
+          chmod +x .adlc/scripts/adlc-verdict.sh
+          adv=$(gh pr view "$PR" --json comments --jq '.comments[].body' | .adlc/scripts/adlc-verdict.sh ADLC-ADV)
+          echo "adversarial=$adv"
+          if [ "$adv" = "PASS" ]; then
+            gh pr edit "$PR" --remove-label "adlc:changes-requested" 2>/dev/null || true
+            if [ -n "${{ steps.link.outputs.issue }}" ]; then
+              gh issue edit "${{ steps.link.outputs.issue }}" --remove-label stage:fast --add-label gate:deploy || true
+            fi
+            gh pr comment "$PR" --body $'## Proposed Action Card — Gate 2 (fast lane)\nAction:     merge PR #'"$PR"$' to main\nRisk:       low — trivial change, within the deterministic fast-lane cap, adversarial + security review PASS\nEvidence:   see the review comment (PASS) and the CI checks on this PR\nMigrations: none (a migration would have forced the full pipeline)\nRollback:   revert the merge commit\nAwaiting:   Principal approval'
+          else
+            gh pr edit "$PR" --add-label "adlc:changes-requested" || true
+            echo "Adversarial review requested changes → fix loop runs (adlc-fix.yml)."
+          fi
