@@ -24,12 +24,42 @@ Set a distinct `service.name` per repo if you want to separate them.
   the ground truth; grep it.
 - **Charts (optional):** point Prometheus/Grafana at `localhost:8889/metrics`.
 
+## Cache hit-rate (money saved)
+The same `claude_code.token.usage` metric already tells you how well **prompt caching** is
+working: a `cacheRead` token bills ~0.1× an uncached `input` token, so the share of input
+served from cache is the discount you're getting. `.adlc/scripts/adlc-cache.sh` rolls it up.
+
+It reads one line per session (or per pipeline run) in the format below — produce those four
+columns from `telemetry.jsonl` by summing each key's `claude_code.token.usage` dataPoints by
+their `type` attribute. The exact OTLP JSON path shifts by collector/version, so treat the
+extraction as yours to write (the file output is the ground truth — grep it); the script only
+needs the columns:
+
+```
+<key>          <input>  <cacheRead>  <cacheCreation>
+adlc-builder      1500       12000            700
+adlc-qa           2000           0           1000
+```
+
+`key` is whatever you group by — `service.name` for a whole pipeline run, `session.id` for one
+agent. Then:
+
+```bash
+your_extraction_from_telemetry_jsonl | .adlc/scripts/adlc-cache.sh
+```
+
+Output is a per-agent table with a `read%` column and a TOTAL; a `!` marks any lane that read
+**0** from cache — a broken or cold prefix (see the `efficient-runs` skill for the fix). This is
+the ground truth that caching is on: check it after any change to `CLAUDE.md`, the skills, or an
+agent's tool set, since a cache regression is silent — requests still succeed, the bill is just
+higher.
+
 ## How it fits the pipeline
 - **Latency** needs none of this — `.adlc/scripts/adlc-cost.sh` derives per-lane and per-pipeline
   wall-clock from GitHub Actions run durations. Use the collector for **token + cost**, which only
   Claude Code knows.
 - The `retro` can read the rolled-up cost the same way it reads other metrics, to spot which
-  stage/agent dominates spend (e.g. an opus-vs-fable decision).
+  stage/agent dominates spend (e.g. an opus-vs-fable decision) — or a lane whose `read%` dropped.
 
 ## Stop / reset
 ```bash
