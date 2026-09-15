@@ -4,12 +4,28 @@ How the Principal drives the pipeline by hand. This is the reliable baseline; it
 GitHub Actions. Each stage: apply the label → invoke the agent → review the output →
 advance. Agents never advance through a gate; you do.
 
-## Stage 1 — Intake → stories (Product Analyst)
+## Stage 1 — Intake → triage → stories (Product Analyst)
 
 1. Create a GitHub issue describing the requirement; label it `stage:intake`.
 2. Invoke the **product-analyst** agent with the issue number.
-3. It posts stories + testable ACs and moves the issue to `gate:stories`.
-4. **Gate 1 (you):** accept or return. On accept, apply `stage:design`.
+3. It **triages** (the `triage` skill), posting an `ADLC-TRIAGE: FAST|FULL` verdict, then either
+   the full story set (FULL) or a change brief (FAST), and moves the issue to `gate:stories`.
+4. **Gate 1 (you):** accept or return. On accept, apply `stage:design` for the full pipeline —
+   **or, if it was triaged FAST and you agree, apply `stage:fast`** (the fast lane below).
+
+## Fast lane — trivial changes (skips design + Gate 1)
+
+For a small, local, non-sensitive change you can skip Stages 2 and 4. Apply `stage:fast`
+directly to a fresh issue (your own triage) or after the Analyst recommends FAST.
+
+1. Run the fast-lane cap on your intended scope first — `printf '<files>' | .adlc/scripts/adlc-triage.sh`
+   (FULL means it's too big or touches something sensitive → use the full pipeline instead).
+2. Invoke the **builder** agent on the `stage:fast` issue: it makes the scoped change + a test
+   (no ADR — it works from the change brief), writes `.adlc/scope.txt`, and opens a PR.
+3. Invoke the **adversarial-reviewer** on the PR (walk the `adlc:security-gate` classes). The cap
+   is enforced again on the real diff — an over-cap/sensitive diff goes to `stage:design`.
+4. On a PASS verdict, apply `gate:deploy`. **Gate 2 (you):** merge. On CHANGES, hand it back to
+   the Builder (the same fix cycle as the full lane).
 
 ## Stage 2 — Design (Architect, duty 1)
 

@@ -196,8 +196,8 @@ Only if a GitHub remote exists and `gh` is authenticated.
 **Labels (both automation levels need these):** propose running
 `${CLAUDE_PLUGIN_ROOT}/templates/github/labels.sh` (it `gh label create`s the state
 machine: `stage:intake`, `gate:stories`, `stage:design`, `stage:build`, `stage:qa`,
-`gate:deploy`, plus `adlc:auto` and a bug label). **Show the commands and ask before
-running** — this writes to their GitHub repo.
+`gate:deploy`, `stage:fast` + `lane:fast` for the fast lane, plus `adlc:auto` and a bug
+label). **Show the commands and ask before running** — this writes to their GitHub repo.
 
 **Full-automation only:** copy the lane workflows into `.github/workflows/`
 (`adlc-builder.yml`, `adlc-qa.yml`, and `adlc-review.yml`), filled with the repo's
@@ -218,6 +218,17 @@ If the **self-improvement loop** is enabled (Phase 1): create `.adlc/metrics/` (
 automation — copy `adlc-retro.yml` and `.adlc/scripts/adlc-metrics.sh`. Tell the user the
 retro is **propose-only** (it opens a PR through the gates) and runs on the workflow's schedule
 or on demand via `/adlc:retro`.
+
+For the **fast lane** (trivial changes skip design + Gate 1): copy `adlc-fast.yml` and
+`.adlc/scripts/adlc-triage.sh`. On intake the Analyst triages (the `triage` skill) and
+recommends `stage:fast` for a small, local, non-sensitive change; `adlc-fast.yml` runs a scoped
+build + an adversarial/security review, re-checks the **real diff** against the deterministic cap
+(`adlc-triage.sh` — tune `ADLC_FAST_MAX_FILES` / `ADLC_FAST_MAX_LINES` / `ADLC_FAST_DENY` to the
+repo), and bounces an over-cap or sensitive change back to `stage:design`. It ends at the human
+Gate 2 like everything else. **The lane is always human-approved**: the Analyst only *recommends*,
+and a human applies `stage:fast` to approve it — the fast lane never auto-starts, not even under
+`adlc:autopilot` (which pauses a FAST recommendation at `gate:stories` and auto-approves Gate 1
+into the full pipeline only). Make sure the user understands this before enabling autopilot.
 
 For **full automation**, also copy `adlc-fix.yml` (the fix loop). The review lane
 (`adlc-review.yml`, above) does the `stage:build → stage:qa` handoff on a clean verdict and
