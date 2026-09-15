@@ -225,8 +225,10 @@ recommends `stage:fast` for a small, local, non-sensitive change; `adlc-fast.yml
 build + an adversarial/security review, re-checks the **real diff** against the deterministic cap
 (`adlc-triage.sh` — tune `ADLC_FAST_MAX_FILES` / `ADLC_FAST_MAX_LINES` / `ADLC_FAST_DENY` to the
 repo), and bounces an over-cap or sensitive change back to `stage:design`. It ends at the human
-Gate 2 like everything else. Tell the user a human applies `stage:fast` (or `adlc:autopilot`
-routes it from the triage marker) — the Analyst never does.
+Gate 2 like everything else. **The lane is always human-approved**: the Analyst only *recommends*,
+and a human applies `stage:fast` to approve it — the fast lane never auto-starts, not even under
+`adlc:autopilot` (which pauses a FAST recommendation at `gate:stories` and auto-approves Gate 1
+into the full pipeline only). Make sure the user understands this before enabling autopilot.
 
 For **full automation**, also copy `adlc-fix.yml` (the fix loop). The review lane
 (`adlc-review.yml`, above) does the `stage:build → stage:qa` handoff on a clean verdict and

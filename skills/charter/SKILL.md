@@ -85,13 +85,16 @@ fast:  stage:intake → (triage) → stage:fast ──────────�
   author/verifier separation (an independent adversarial + security review), the human **Gate 2**
   merge, and a **deterministic cap** (`adlc-triage.sh`) that re-checks the real diff — an
   over-cap or sensitive change is bounced back to `stage:design`. The Analyst never routes to
-  `stage:fast` itself; a human applies it (or `adlc:autopilot` does, from the triage marker),
-  the same opt-in that auto-approves Gate 1. When in doubt, triage FULL.
+  `stage:fast` itself — **a human always approves the lane before it starts** (applies `stage:fast`
+  or `stage:design`). Even under `adlc:autopilot` the fast lane never auto-starts: autopilot
+  auto-approves Gate 1 into the *full* pipeline, but a `FAST` recommendation waits at `gate:stories`
+  for the Principal's lane approval. When in doubt, triage FULL.
 - **Agents may move work up to a gate, never through it.** An agent can apply the next
   `stage:*` label only for a stage→stage transition it owns (Architect's
   `stage:design → stage:build`). The label that *follows a gate*
   (`gate:stories → stage:design` or `stage:fast`, and the deploy past `gate:deploy`) is the
-  Principal's — or `adlc:autopilot` acting for them.
+  Principal's. `adlc:autopilot` may act for them into `stage:design` (the full pipeline) — but
+  **never into `stage:fast`**: choosing the fast lane is always an explicit human approval.
 - A stage is "done" only when its artifacts exist (stories on the issue, ADR + task
   breakdown written, PR opened, QA verdict posted) — advancing a bare label stalls the
   next agent.

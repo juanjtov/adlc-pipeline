@@ -62,14 +62,17 @@ without an ADR:
 - **Out of scope** — what this deliberately does not touch.
 
 Then stop at `gate:stories` with the recommendation visible. **You never apply `stage:fast`
-yourself** — taking the fast lane skips Gate 1, so a human confirms it (applies `stage:fast`) or
-sends it down the full pipeline (`stage:design`); under `adlc:autopilot` the workflow does that
-routing from your `ADLC-TRIAGE` marker. Either way the deterministic cap re-checks the real diff
-and bounces an over-cap or sensitive change back to the full pipeline.
+yourself, and the fast lane never auto-starts.** Taking the fast lane skips Gate 1, so **a human
+always approves the lane before it starts**: the Principal applies `stage:fast` (approve the fast
+lane) or `stage:design` (take the full pipeline). Even under `adlc:autopilot` this holds —
+autopilot auto-approves Gate 1 into the *full* pipeline, but a `FAST` recommendation waits at
+`gate:stories` for the human's lane approval. Once approved, the deterministic cap re-checks the
+real diff and bounces an over-cap or sensitive change back to the full pipeline.
 
 ## Why a proposal, not a decision
 
 External issue text is untrusted (charter §2.7). If triage could unilaterally shorten the path,
-a crafted issue could talk its way past design review. It can't: the routing is human- or
-autopilot-gated, the cap is deterministic and diff-based, and Gate 2 is always human — so the
-worst a bad FAST call does is add one bounce back to the full lane.
+a crafted issue could talk its way past design review. It can't: **the lane is always human-
+approved** (never agent- or autopilot-selected), the cap is deterministic and diff-based, and
+Gate 2 is always human — so the worst a bad FAST call does is put a recommendation in front of a
+human who declines it.
