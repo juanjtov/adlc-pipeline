@@ -35,7 +35,8 @@ everything after at full price. To keep the discount:
   project skills). A live timestamp, a run/commit id, or an unfilled `{{PLACEHOLDER}}` in
   the frozen prefix defeats caching for the whole run. Per-run specifics — the issue body,
   the PR diff, the failing output — belong in the task prompt, not in a persistent file.
-  `adlc-doctor.sh` fails the setup if it finds one, so this is enforced, not just advised.
+  `adlc-doctor.sh` catches the unambiguous cases (an unfilled placeholder, a live CI run-id
+  expansion); the rest is on you to keep out — verify with the hit-rate below.
 - **Don't switch model or tool set mid-run** — both sit at the front of the prefix; changing
   either rebuilds the cache from scratch. Each role already has a fixed model and `tools:`.
 - **Verify it, don't assume it.** With telemetry on, `adlc-cache.sh` reports cache-read %

@@ -15,6 +15,7 @@
 # or genuinely cold traffic). Verify a caching change here, not by assuming it worked.
 set -euo pipefail
 awk '
+  NF==0 { next }               # skip blank lines (a stray one would forge an empty-key row)
   { k=$1; inp=$2+0; rd=$3+0; cr=$4+0
     n[k]++; I[k]+=inp; R[k]+=rd; C[k]+=cr
     N++; II+=inp; RR+=rd; CC+=cr }
