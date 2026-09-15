@@ -22,13 +22,20 @@ name: ADLC fast lane
 on:
   issues:
     types: [labeled]
+  # `labeled` matters: the Builder opens the PR and adds `lane:fast` in a SECOND api call, so the
+  # label is NOT in the `opened` payload — review_gate must also fire when the label lands.
   pull_request:
-    types: [opened, ready_for_review, synchronize]
+    types: [opened, ready_for_review, synchronize, labeled]
 
 permissions:
   contents: write
   issues: write
   pull-requests: write
+
+# One review_gate run per PR at a time (opened+labeled can arrive together).
+concurrency:
+  group: adlc-fast-${{ github.event.pull_request.number || github.event.issue.number }}
+  cancel-in-progress: false
 
 jobs:
   # ── Build the scoped change (no ADR — works from the Analyst's change brief on the issue) ──
@@ -60,9 +67,13 @@ jobs:
 
   # ── Cap + adversarial/security review + gate handoff (only for lane:fast PRs) ──
   review_gate:
+    # Runs on a lane:fast PR. On a `labeled` event, only when the label added IS lane:fast —
+    # so re-labeling the PR (e.g. adlc:changes-requested from the fix loop) doesn't re-fire it;
+    # the fix loop's push re-fires it via `synchronize` instead.
     if: >
       github.event_name == 'pull_request' &&
       contains(github.event.pull_request.labels.*.name, 'lane:fast') &&
+      (github.event.action != 'labeled' || github.event.label.name == 'lane:fast') &&
       contains(fromJSON('["{{PRINCIPAL}}","{{BUILDER_BOT}}"]'), github.event.pull_request.user.login)
     runs-on: ubuntu-latest
     env:
