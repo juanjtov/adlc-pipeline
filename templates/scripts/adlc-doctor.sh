@@ -35,20 +35,26 @@ for s in project-conventions release-ops; do
 done
 
 # 4) Prompt-cache hygiene — the persistent prefix (CLAUDE.md + the skills the agents load)
-#    is the cached part of every request. Prefix caching is a byte-exact match, so a per-run
-#    value baked in here — a live timestamp, a CI run id, an unfilled placeholder — changes
-#    the prefix on every run and re-processes everything after it at full price. Per-run
-#    values belong in the task prompt (the volatile tail), never in a frozen context file.
+#    is the cached part of every request. Prefix caching is a byte-exact match, so a value
+#    that changes between runs baked in here re-processes everything after it at full price;
+#    such values belong in the task prompt (the volatile tail), not a frozen context file.
+#    A regex can't tell a live baked value from a documentation example (a `created_at`
+#    sample, a mention of GITHUB_SHA), so this scan is deliberately narrow: it flags only the
+#    two unambiguous, high-precision smells — an unfilled `{{PLACEHOLDER}}` (generation left
+#    the prefix non-final, so it changes once filled) and a *live expansion* of a CI run
+#    identifier (`$GITHUB_RUN_ID`, `${GITHUB_SHA}`, …), which has no business in frozen agent
+#    context. The broader rule (no baked timestamps/ids at all) is stated in the
+#    `efficient-runs` skill for humans; verify actual hit-rate with adlc-cache.sh.
 ctx=()
 for f in "${root}/CLAUDE.md" "${root}/.claude/CLAUDE.md"; do [ -f "$f" ] && ctx+=("$f"); done
 while IFS= read -r f; do [ -n "$f" ] && ctx+=("$f"); done < <(ls "${root}"/.claude/skills/*/SKILL.md 2>/dev/null || true)
 if [ "${#ctx[@]}" -gt 0 ]; then
-  # High-signal, per-run invalidators only (a bare date like 2026-09-15 is allowed — the
-  # ablation stamp is an intentional, rarely-changing value, not per-run).
-  inv='\{\{[A-Z_]+\}\}|[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:|\$\(date|`date|date \+%|GITHUB_RUN_ID|GITHUB_SHA|\$GITHUB_'
+  # Requires the `$`/`${` sigil on the CI ids so a bare prose mention ("CI sets GITHUB_SHA")
+  # and a static timestamp example ("2024-01-01T00:00:00Z") do NOT false-positive.
+  inv='\{\{[A-Z_]+\}\}|\$\{?GITHUB_(RUN_ID|RUN_NUMBER|RUN_ATTEMPT|SHA)'
   hits=$(grep -lE "$inv" "${ctx[@]}" 2>/dev/null || true)
   if [ -n "$hits" ]; then
-    note "prompt-cache: per-run value in a frozen context file (breaks prefix caching):"
+    note "prompt-cache: unfilled placeholder or live CI id in a frozen context file (breaks prefix caching):"
     printf '      %s\n' $hits
   else
     ok "prompt-cache: persistent prefix looks frozen"

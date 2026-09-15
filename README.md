@@ -89,8 +89,8 @@ works without one.
 **Prompt caching, kept honest.** The harness re-serves each run's stable prefix — the tool set,
 the loaded skills, and `CLAUDE.md` — from cache at ~0.1× input price, so cost really scales with
 how well that prefix stays frozen (the `efficient-runs` skill states the rule). Two deterministic
-guards keep the discount: `adlc-doctor.sh` fails a setup that bakes a per-run value (a live
-timestamp, a run/commit id, an unfilled placeholder) into a context file, and `adlc-cache.sh`
+guards keep the discount: `adlc-doctor.sh` fails a setup that leaves the unambiguous per-run
+smells (an unfilled placeholder, a live CI run-id expansion) in a context file, and `adlc-cache.sh`
 rolls up the `cacheRead` share per agent from the same telemetry — a lane reading 0 from cache
 flags a silent invalidator. Caching regressions are silent (requests still succeed, the bill just
 rises), so the metric is the point.
