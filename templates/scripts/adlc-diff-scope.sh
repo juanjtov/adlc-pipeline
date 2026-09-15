@@ -4,8 +4,8 @@
 #
 # Usage:  adlc-diff-scope.sh <stage> [scope-file]
 #   reads changed file paths on STDIN, one per line.
-#   stage: design → docs/ only · qa → $ADLC_TEST_DIRS regex · build → globs from scope-file
-#          (default .adlc/scope.txt); anything else → skip (exit 0).
+#   stage: design → docs/ only · qa → $ADLC_TEST_DIRS regex · build|fast → globs from
+#          scope-file (default .adlc/scope.txt); anything else → skip (exit 0).
 #   ADLC_TEST_DIRS (env): regex alternation for the qa stage, e.g. "tests|backend/tests".
 set -euo pipefail
 stage="${1:-}"; scope_file="${2:-.adlc/scope.txt}"
@@ -15,11 +15,11 @@ deny() { echo "out-of-scope (stage:$stage): $1" >&2; fail=1; }
 case "$stage" in
   design) pat='^docs/' ;;
   qa)     pat="^(${ADLC_TEST_DIRS:-tests})" ;;
-  build)
+  build|fast)
     if [ -f "$scope_file" ]; then
       pat="^($(paste -sd '|' "$scope_file"))"
     else
-      echo "no $scope_file — build-stage scope is advisory (skipped)"; exit 0
+      echo "no $scope_file — $stage-stage scope is advisory (skipped)"; exit 0
     fi ;;
   *) echo "no ADLC stage — skipped"; exit 0 ;;
 esac

@@ -22,7 +22,10 @@ permissions:
 
 jobs:
   adversarial:
-    if: contains(fromJSON('["{{PRINCIPAL}}","{{BUILDER_BOT}}"]'), github.event.pull_request.user.login)
+    # Skip fast-lane PRs — adlc-fast.yml owns their review + handoff (no double-advance).
+    if: >
+      !contains(github.event.pull_request.labels.*.name, 'lane:fast') &&
+      contains(fromJSON('["{{PRINCIPAL}}","{{BUILDER_BOT}}"]'), github.event.pull_request.user.login)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -43,7 +46,9 @@ jobs:
 
   architect:
     needs: adversarial
-    if: contains(fromJSON('["{{PRINCIPAL}}","{{BUILDER_BOT}}"]'), github.event.pull_request.user.login)
+    if: >
+      !contains(github.event.pull_request.labels.*.name, 'lane:fast') &&
+      contains(fromJSON('["{{PRINCIPAL}}","{{BUILDER_BOT}}"]'), github.event.pull_request.user.login)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

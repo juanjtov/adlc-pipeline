@@ -72,15 +72,26 @@ is what actually blocks an out-of-scope write.
 ## The label state machine (execution source of truth = GitHub issues)
 
 ```
-stage:intake → gate:stories → stage:design → stage:build → stage:qa → gate:deploy
-      A1            ⟂P            A2            A3           A4          ⟂P → deploy
+full:  stage:intake → gate:stories → stage:design → stage:build → stage:qa → gate:deploy
+          A1              ⟂P            A2            A3           A4          ⟂P → deploy
+fast:  stage:intake → (triage) → stage:fast ─────────────────────────────→ gate:deploy
+          A1                       A3 + adversarial/security review           ⟂P → deploy
 ```
 
 - `stage:*` = an agent is working; `gate:*` = work stops for the Principal.
+- **Fast lane (trivial changes).** On intake the Analyst triages (the `triage` skill): a
+  small, local, non-sensitive change is *recommended* for `stage:fast`, which skips the
+  Architect/ADR and Gate 1. It is safe because what it keeps is exactly what protects a change:
+  author/verifier separation (an independent adversarial + security review), the human **Gate 2**
+  merge, and a **deterministic cap** (`adlc-triage.sh`) that re-checks the real diff — an
+  over-cap or sensitive change is bounced back to `stage:design`. The Analyst never routes to
+  `stage:fast` itself; a human applies it (or `adlc:autopilot` does, from the triage marker),
+  the same opt-in that auto-approves Gate 1. When in doubt, triage FULL.
 - **Agents may move work up to a gate, never through it.** An agent can apply the next
   `stage:*` label only for a stage→stage transition it owns (Architect's
   `stage:design → stage:build`). The label that *follows a gate*
-  (`gate:stories → stage:design`, and the deploy past `gate:deploy`) is the Principal's.
+  (`gate:stories → stage:design` or `stage:fast`, and the deploy past `gate:deploy`) is the
+  Principal's — or `adlc:autopilot` acting for them.
 - A stage is "done" only when its artifacts exist (stories on the issue, ADR + task
   breakdown written, PR opened, QA verdict posted) — advancing a bare label stalls the
   next agent.

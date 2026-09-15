@@ -22,7 +22,23 @@ SF="$(mktemp)"; printf 'src/api/\nsrc/models/\n' > "$SF"
 printf 'src/api/x.py\n'             | bash "$S/adlc-diff-scope.sh" build "$SF" >/dev/null 2>&1; check 0 "build allows in-scope (scope file)" $?
 printf 'src/db/y.py\n'              | bash "$S/adlc-diff-scope.sh" build "$SF" >/dev/null 2>&1; check 1 "build denies out-of-scope (scope file)" $?
 printf 'x\n'                        | bash "$S/adlc-diff-scope.sh" build "/no/such/file" >/dev/null 2>&1; check 0 "build advisory when no scope file" $?
+printf 'src/api/x.py\n'             | bash "$S/adlc-diff-scope.sh" fast "$SF" >/dev/null 2>&1; check 0 "fast reuses build scope (in-scope)" $?
+printf 'src/db/y.py\n'              | bash "$S/adlc-diff-scope.sh" fast "$SF" >/dev/null 2>&1; check 1 "fast reuses build scope (out-of-scope)" $?
 rm -f "$SF"
+
+echo "triage (fast-lane cap):"
+printf 'src/a.py\nsrc/b.py\nREADME.md\n'      | bash "$S/adlc-triage.sh" >/dev/null 2>&1; check 0 "small safe change is fast-eligible" $?
+printf 'src/a.py\ndb/migrations/003.sql\n'    | bash "$S/adlc-triage.sh" >/dev/null 2>&1; check 1 "migrations force full" $?
+printf '.github/workflows/x.yml\n'            | bash "$S/adlc-triage.sh" >/dev/null 2>&1; check 1 "CI config forces full" $?
+printf 'package.json\n'                       | bash "$S/adlc-triage.sh" >/dev/null 2>&1; check 1 "dependency manifest forces full" $?
+printf 'src/author/model.py\n'                | bash "$S/adlc-triage.sh" >/dev/null 2>&1; check 0 "author/ dir not mistaken for auth/" $?
+printf 'a\nb\nc\nd\ne\nf\n'                    | bash "$S/adlc-triage.sh" >/dev/null 2>&1; check 1 "over file cap forces full" $?
+printf '30\t20\tsrc/a.py\n'                   | bash "$S/adlc-triage.sh" >/dev/null 2>&1; check 1 "over line cap (numstat) forces full" $?
+printf '10\t5\tsrc/a.py\n5\t2\tsrc/b.py\n'    | bash "$S/adlc-triage.sh" >/dev/null 2>&1; check 0 "small numstat is fast-eligible" $?
+printf -- '-\t-\tlogo.png\n'                  | bash "$S/adlc-triage.sh" >/dev/null 2>&1; check 1 "binary change forces full" $?
+eq FAST "prints FAST token" "$(printf 'src/a.py\n' | bash "$S/adlc-triage.sh" 2>/dev/null)"
+eq FULL "prints FULL token" "$(printf 'infra/main.tf\n' | bash "$S/adlc-triage.sh" 2>/dev/null)"
+ADLC_FAST_MAX_FILES=1 bash -c 'printf "a\nb\n" | bash "'"$S"'/adlc-triage.sh"' >/dev/null 2>&1; check 1 "env override tightens file cap" $?
 
 echo "verdict:"
 eq PASS    "last marker wins"        "$(printf 'ADLC-ADV: CHANGES\nblah\nADLC-ADV: PASS\n' | bash "$S/adlc-verdict.sh" ADLC-ADV)"

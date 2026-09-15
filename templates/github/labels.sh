@@ -15,6 +15,7 @@ create "stage:intake"  "0E8A16" "Agent 1 — Product Analyst: requirement → st
 create "stage:design"  "1D76DB" "Agent 2 — Architect: ADR + task breakdown + blast radius"
 create "stage:build"   "5319E7" "Agent 3 — Builder: code + unit tests → PR"
 create "stage:qa"      "B60205" "Agent 4 — QA/Release-Ops: tests + security gate"
+create "stage:fast"    "0FB889" "FAST LANE — trivial change: scoped build + adversarial/security review, skips design & Gate 1 (deterministically capped)"
 # Gate labels (work stops for the Principal)
 create "gate:stories"  "FBCA04" "GATE 1 — Principal: story approval"
 create "gate:deploy"   "FBCA04" "GATE 2 — Principal: merge · deploy · migration"
@@ -24,6 +25,8 @@ create "adlc:autopilot" "5319E7" "Full autopilot: also auto-approve Gate 1 — o
 create "bug"           "D73A4A" "Defect filed by Ops — lands at stage:intake with telemetry"
 create "adlc:changes-requested" "FBCA04" "A review flagged the PR — the fix loop returns it to the Builder"
 create "needs:human"   "E99695" "Fix loop capped out (3 rounds) — a human must step in on this PR"
+create "lane:fast"     "0FB889" "Marks a fast-lane PR so the full review lane defers to adlc-fast.yml (no collision)"
 
 echo "Done. State machine:"
-echo "  stage:intake → gate:stories → stage:design → stage:build → stage:qa → gate:deploy"
+echo "  full: stage:intake → gate:stories → stage:design → stage:build → stage:qa → gate:deploy"
+echo "  fast: stage:intake → (triage) → stage:fast ───────────────────────────→ gate:deploy"
