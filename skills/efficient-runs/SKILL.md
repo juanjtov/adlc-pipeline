@@ -23,3 +23,21 @@ times a step early in it. Fewer, denser steps are cheaper and faster.
 **Exception — evidence you must quote:** test summary lines, failing assertions, and
 security findings are always pasted verbatim from the real run, never summarized from
 memory and never trimmed to fit.
+
+## Keep the prefix frozen (prompt caching)
+
+The harness caches the request prefix — the tool set, the skills you load, and `CLAUDE.md`
+— and re-serves it at a fraction of the input price on every later step of the run. That
+cache is a byte-exact prefix match, so a single changing byte early in it re-processes
+everything after at full price. To keep the discount:
+
+- **Don't bake per-run values into files the agents load as context** (`CLAUDE.md`, the
+  project skills). A live timestamp, a run/commit id, or an unfilled `{{PLACEHOLDER}}` in
+  the frozen prefix defeats caching for the whole run. Per-run specifics — the issue body,
+  the PR diff, the failing output — belong in the task prompt, not in a persistent file.
+  `adlc-doctor.sh` catches the unambiguous cases (an unfilled placeholder, a live CI run-id
+  expansion); the rest is on you to keep out — verify with the hit-rate below.
+- **Don't switch model or tool set mid-run** — both sit at the front of the prefix; changing
+  either rebuilds the cache from scratch. Each role already has a fixed model and `tools:`.
+- **Verify it, don't assume it.** With telemetry on, `adlc-cache.sh` reports cache-read %
+  per agent; a lane reading 0 from cache means a silent invalidator crept into the prefix.

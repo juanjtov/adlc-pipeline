@@ -33,7 +33,8 @@ templates/                     # what the wizard fills into the host repo
   github/adlc-ci.yml · adlc-diff-scope.yml · adlc-main-tripwire.yml · adlc-retro.yml
   github/ISSUE_TEMPLATE/requirement.yml           # file a requirement → pipeline starts
   scripts/  adlc-diff-scope.sh · adlc-tripwire-check.sh · adlc-fix-cap.sh · adlc-verdict.sh
-            adlc-log-findings.sh · adlc-doctor.sh · adlc-metrics.sh · adlc-cost.sh   # deterministic logic
+            adlc-log-findings.sh · adlc-doctor.sh · adlc-metrics.sh · adlc-cost.sh
+            adlc-cache.sh   # deterministic logic (adlc-cache.sh = prompt-cache hit-rate rollup)
   hooks/pre-commit             # local diff-scope guard (reuses adlc-diff-scope.sh)
 tests/run.sh                   # unit tests for the guardrail scripts (bash, no deps)
 telemetry/                     # ready-to-run local OTel collector (docker compose) for token/cost
@@ -84,6 +85,15 @@ agent come from **opt-in OpenTelemetry** (`settings.telemetry.json`): Claude Cod
 per-session tokens + cost + duration to your OTel collector, and `service.name` groups a whole
 pipeline run. A ready-to-run collector ships in `telemetry/` (`docker compose up -d`); latency
 works without one.
+
+**Prompt caching, kept honest.** The harness re-serves each run's stable prefix — the tool set,
+the loaded skills, and `CLAUDE.md` — from cache at ~0.1× input price, so cost really scales with
+how well that prefix stays frozen (the `efficient-runs` skill states the rule). Two deterministic
+guards keep the discount: `adlc-doctor.sh` fails a setup that leaves the unambiguous per-run
+smells (an unfilled placeholder, a live CI run-id expansion) in a context file, and `adlc-cache.sh`
+rolls up the `cacheRead` share per agent from the same telemetry — a lane reading 0 from cache
+flags a silent invalidator. Caching regressions are silent (requests still succeed, the bill just
+rises), so the metric is the point.
 
 ### Two layers, on purpose
 
