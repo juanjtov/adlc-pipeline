@@ -8,11 +8,13 @@
 #              ─▶ cap re-checks the REAL diff; over-cap or sensitive ⇒ bounced to stage:design
 #              ─▶ adversarial + security review; PASS ⇒ gate:deploy · CHANGES ⇒ fix loop
 #
-# HOW AN ISSUE REACHES stage:fast (three ways, all human- or autopilot-gated — never the agent):
-#   1. A human applies `stage:fast` directly (manual triage — cheapest; the Analyst never runs).
-#   2. A human applies it after the Analyst recommends FAST at gate:stories (assisted triage).
-#   3. Under `adlc:autopilot`, adlc-intake.yml auto-applies it from the Analyst's ADLC-TRIAGE
-#      marker (auto triage) — the same opt-in that already auto-approves Gate 1.
+# HOW AN ISSUE REACHES stage:fast — the LANE IS ALWAYS HUMAN-APPROVED; the fast lane never
+# auto-starts (not even under autopilot), because taking it skips design + Gate 1. Two ways, both
+# a human applying the label — never the agent, never autopilot:
+#   1. A human applies `stage:fast` directly (their own triage — cheapest; the Analyst never runs).
+#   2. A human applies it to approve the Analyst's FAST recommendation at gate:stories.
+# Under `adlc:autopilot`, a FAST recommendation PAUSES at gate:stories for that approval; autopilot
+# auto-approves Gate 1 into the FULL pipeline only (see adlc-intake.yml).
 #
 # PREREQUISITES: identical to adlc-builder.yml — CLAUDE_CODE_OAUTH_TOKEN + ADLC_DISPATCH_TOKEN,
 # the merge gate (PUBLIC → branch protection; PRIVATE → adlc-main-tripwire.yml), the author

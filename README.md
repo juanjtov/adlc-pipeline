@@ -160,6 +160,10 @@ bug — is recommended for `stage:fast`, which **skips the Architect/ADR and Gat
 straight to a scoped build + a single adversarial/security review, then the human merge gate.
 Everything that makes a change safe is kept:
 
+- **The lane is always human-approved** — the Analyst *recommends* a lane; it never routes itself,
+  and **the fast lane never auto-starts**. A human applies `stage:fast` to approve it (or
+  `stage:design` for the full pipeline). Even under `adlc:autopilot` the fast lane waits for that
+  approval — autopilot auto-approves Gate 1 into the *full* pipeline only.
 - **Author/verifier separation** — an independent adversarial + security review still runs.
 - **A deterministic cap** — `adlc-triage.sh` re-checks the *real* diff (≤ 5 files / ≤ 40 lines by
   default, and nothing touching migrations, auth, infra, CI, deps, or secrets). Over-cap or
@@ -167,9 +171,8 @@ Everything that makes a change safe is kept:
   mis-triage — or a crafted issue arguing it's "trivial" — can't smuggle a big change through.
 - **Gate 2 (human merge)** — never skipped, on any lane.
 
-An issue reaches `stage:fast` only by a human applying the label (manual or after the Analyst's
-recommendation) or, under `adlc:autopilot`, the workflow applying it from the triage marker — the
-same opt-in that already auto-approves Gate 1. The Analyst never routes there itself.
+So an issue reaches `stage:fast` only when a human applies the label — either as their own triage
+on a fresh issue, or to approve the Analyst's `FAST` recommendation at `gate:stories`.
 
 ## Automation modes
 
@@ -206,4 +209,6 @@ architect conformance) and carries build → qa **from the agents' verdicts, not
 decision** — so you can enable branch protection's "require a human approval" and it gates only
 the final merge. If a review flags something, **`adlc-fix.yml`** sends the PR back to the Builder
 to fix and re-review automatically — capped at 3 rounds, then it tags `needs:human` — so what
-reaches you is a clean PR to read and merge.
+reaches you is a clean PR to read and merge. Autopilot auto-approves Gate 1 into the **full**
+pipeline only; it never starts the **fast lane** (that skips design, so the lane choice stays an
+explicit human approval — a `FAST` recommendation waits at `gate:stories`).
