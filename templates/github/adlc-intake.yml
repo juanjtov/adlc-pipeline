@@ -60,8 +60,11 @@ jobs:
             echo "Analyst paused for clarification — not auto-advancing."; exit 0
           fi
           # Read the last triage verdict from the Analyst's comments (deterministic parse).
+          # `|| true`: with no marker the grep exits 1, and the step's `set -eo pipefail` would
+          # otherwise abort here — stalling the issue at gate:stories instead of the else-branch
+          # default (stage:design). Same guard as adlc-verdict.sh.
           triage=$(gh issue view "$N" --json comments --jq '.comments[].body' \
-            | grep -oE 'ADLC-TRIAGE:[[:space:]]*(FAST|FULL)' | grep -oE '(FAST|FULL)' | tail -1)
+            | grep -oE 'ADLC-TRIAGE:[[:space:]]*(FAST|FULL)' | grep -oE '(FAST|FULL)' | tail -1 || true)
           if [ "$triage" = "FAST" ]; then
             gh issue edit "$N" --remove-label gate:stories --add-label stage:fast
             echo "Full autopilot: triaged FAST → stage:fast (design + Gate 1 skipped; capped). Gate 2 still human."

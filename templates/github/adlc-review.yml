@@ -21,10 +21,38 @@ permissions:
   pull-requests: write
 
 jobs:
+  # Fast-lane PRs are owned by adlc-fast.yml — the full lane must defer, or it double-advances the
+  # issue. The PR's own `lane:fast` label is unreliable at `opened` (the Builder adds it in a
+  # second api call, after the PR is created), so route off the LINKED ISSUE's stage:fast, which
+  # is set before the PR exists. Belt-and-suspenders: also honor the PR label when it is present.
+  route:
+    if: contains(fromJSON('["{{PRINCIPAL}}","{{BUILDER_BOT}}"]'), github.event.pull_request.user.login)
+    runs-on: ubuntu-latest
+    outputs:
+      fast: ${{ steps.check.outputs.fast }}
+    steps:
+      - id: check
+        env:
+          GH_TOKEN: ${{ secrets.ADLC_DISPATCH_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          fast=false
+          pr_has=${{ contains(github.event.pull_request.labels.*.name, 'lane:fast') }}
+          [ "$pr_has" = "true" ] && fast=true
+          issue=$(gh pr view "$PR" --json closingIssuesReferences --jq '.closingIssuesReferences[0].number // empty')
+          [ -z "$issue" ] && issue=$(gh pr view "$PR" --json body --jq '.body' | grep -oiE '#[0-9]+' | head -1 | tr -d '#' || true)
+          if [ -n "$issue" ]; then
+            if gh issue view "$issue" --json labels --jq '.labels[].name' 2>/dev/null | grep -qx 'stage:fast'; then
+              fast=true
+            fi
+          fi
+          echo "fast=$fast" >> "$GITHUB_OUTPUT"
+          echo "fast-lane PR? $fast (issue #$issue)"
+
   adversarial:
-    # Skip fast-lane PRs — adlc-fast.yml owns their review + handoff (no double-advance).
+    needs: route
     if: >
-      !contains(github.event.pull_request.labels.*.name, 'lane:fast') &&
+      needs.route.outputs.fast != 'true' &&
       contains(fromJSON('["{{PRINCIPAL}}","{{BUILDER_BOT}}"]'), github.event.pull_request.user.login)
     runs-on: ubuntu-latest
     steps:
@@ -45,9 +73,9 @@ jobs:
             confirmed Critical/High). Never edit code, never merge, never change labels.
 
   architect:
-    needs: adversarial
+    needs: [route, adversarial]
     if: >
-      !contains(github.event.pull_request.labels.*.name, 'lane:fast') &&
+      needs.route.outputs.fast != 'true' &&
       contains(fromJSON('["{{PRINCIPAL}}","{{BUILDER_BOT}}"]'), github.event.pull_request.user.login)
     runs-on: ubuntu-latest
     steps:

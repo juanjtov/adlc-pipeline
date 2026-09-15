@@ -27,14 +27,17 @@ max_lines="${ADLC_FAST_MAX_LINES:-40}"
 # matter how few lines — because its blast radius isn't local.
 deny="${ADLC_FAST_DENY:-(^|/)(migrations?|auth|authz|security|infra|terraform|deploy|helm|k8s|kubernetes)/|(^|/)\.github/|(^|/)\.claude/|(^|/)(Dockerfile|docker-compose\.ya?ml)$|(^|/)(package\.json|package-lock\.json|yarn\.lock|pnpm-lock\.yaml|requirements[^/]*\.txt|Pipfile|Pipfile\.lock|poetry\.lock|pyproject\.toml|go\.mod|go\.sum|Gemfile|Gemfile\.lock|Cargo\.toml|Cargo\.lock|composer\.json|composer\.lock|pom\.xml|build\.gradle|build\.gradle\.kts)$|(^|/)\.?env(\.|$)|(^|/)secrets?(\.|/)}"
 
+tab=$(printf '\t')
 files=0; lines=0; reasons=()
 while IFS= read -r line; do
   [ -z "$line" ] && continue
-  # numstat form?  <added>\t<deleted>\t<path>
-  if printf '%s' "$line" | grep -qE '^[0-9-]+[[:space:]]+[0-9-]+[[:space:]]'; then
-    a=$(printf '%s' "$line" | awk '{print $1}')
-    d=$(printf '%s' "$line" | awk '{print $2}')
-    f=$(printf '%s' "$line" | awk '{print $3}')
+  # numstat form?  <added>\t<deleted>\t<path> — detect on the literal TABs numstat always uses,
+  # and split on tab (cut's default) so a path with SPACES stays intact. Splitting on whitespace
+  # (awk default) truncated "my dir/.env" to "my" and let sensitive paths past the cap.
+  if printf '%s' "$line" | grep -qE "^[0-9-]+${tab}[0-9-]+${tab}"; then
+    a=$(printf '%s' "$line" | cut -f1)
+    d=$(printf '%s' "$line" | cut -f2)
+    f=$(printf '%s' "$line" | cut -f3-)
     # binary files show as '-' in numstat — size is unknowable, so never fast-eligible
     if [ "$a" = "-" ] || [ "$d" = "-" ]; then reasons+=("binary change: $f"); fi
     [ "$a" = "-" ] && a=0
