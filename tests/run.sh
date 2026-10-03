@@ -2,7 +2,7 @@
 # Unit tests for the ADLC guardrail scripts. Plain bash, no dependencies.
 # Run: bash tests/run.sh   (exit 0 = all pass). These verify the deterministic guardrails
 # themselves — the same scripts CI and the local pre-commit hook call. The static checks at the
-# end lint what can't be executed here: the workflow templates' triggers.
+# end lint what can't be executed here: the workflow templates' triggers and the label set.
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 S="$ROOT/templates/scripts"
@@ -135,6 +135,13 @@ grp=$(flat '^  group: >-' '^  cancel-in-progress:'); grp=${grp#*"$pre"}; grp=${g
 jif=$(flat '^    if: >' '^    runs-on:');             jif=${jif%"$allow"*}
 [ -n "$jif" ] && eq "$jif" "adlc-intake.yml: concurrency group admits exactly the runs the job starts" "$grp" \
   || bad "adlc-intake.yml: could not read the job's if"
+
+echo "labels (static):"
+# GitHub rejects a label description over 100 characters (HTTP 422); under labels.sh's `set -e`
+# that aborts the script, so every label after the offending one is never created. Counted in
+# bytes, which can only over-count.
+long=$(LC_ALL=C awk -F'"' '/^create /{ if (length($6) > 100) printf "%s ", $2 }' "$ROOT/templates/github/labels.sh")
+eq "" "every label description fits GitHub's 100-character limit" "$long"
 
 echo ""
 echo "== $pass passed, $fail failed =="

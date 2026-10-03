@@ -4,7 +4,7 @@
 # Requires: gh authenticated against this repo (gh auth status).
 set -euo pipefail
 
-create() { # name color description
+create() { # name color description (GitHub rejects a description over 100 characters)
   gh label create "$1" --color "$2" --description "$3" --force >/dev/null
   echo "  ✓ $1"
 }
@@ -15,7 +15,7 @@ create "stage:intake"  "0E8A16" "Agent 1 — Product Analyst: requirement → st
 create "stage:design"  "1D76DB" "Agent 2 — Architect: ADR + task breakdown + blast radius"
 create "stage:build"   "5319E7" "Agent 3 — Builder: code + unit tests → PR"
 create "stage:qa"      "B60205" "Agent 4 — QA/Release-Ops: tests + security gate"
-create "stage:fast"    "0FB889" "FAST LANE — trivial change: scoped build + adversarial/security review, skips design & Gate 1 (deterministically capped)"
+create "stage:fast"    "0FB889" "FAST LANE — trivial change: scoped build + adversarial/security review, skips design & Gate 1"
 # Gate labels (work stops for the Principal)
 create "gate:stories"  "FBCA04" "GATE 1 — Principal: story approval"
 create "gate:deploy"   "FBCA04" "GATE 2 — Principal: merge · deploy · migration"
