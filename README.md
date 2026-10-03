@@ -220,4 +220,4 @@ reaches you is a clean PR to read and merge. Autopilot auto-approves Gate 1 into
 pipeline only; it never starts the **fast lane** (that skips design, so the lane choice stays an
 explicit human approval — a `FAST` recommendation waits at `gate:stories`). The label has to be
 on the issue before the Analyst starts (apply it when you file); added later, it does not advance
-an issue already waiting at Gate 1.
+an issue already waiting at Gate 1, and taking it off before the Analyst finishes opts back out.
