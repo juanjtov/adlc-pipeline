@@ -20,7 +20,7 @@ create "stage:fast"    "0FB889" "FAST LANE — trivial change: scoped build + ad
 create "gate:stories"  "FBCA04" "GATE 1 — Principal: story approval"
 create "gate:deploy"   "FBCA04" "GATE 2 — Principal: merge · deploy · migration"
 # Pipeline control
-create "adlc:auto"     "C5DEF5" "Auto-run the Analyst on this issue (auto-start; you still approve Gate 1)"
+create "adlc:auto"     "C5DEF5" "Auto-run the Analyst while at stage:intake; add it back to re-run (you still approve Gate 1)"
 create "adlc:autopilot" "5319E7" "Full autopilot: also auto-approve Gate 1 — only Gate 2 (merge/deploy) is human"
 create "bug"           "D73A4A" "Defect filed by Ops — lands at stage:intake with telemetry"
 create "adlc:changes-requested" "FBCA04" "A review flagged the PR — the fix loop returns it to the Builder"
