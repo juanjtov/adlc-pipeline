@@ -55,8 +55,8 @@ For **FAST**, post a **change brief** instead of a story set — enough for the 
 without an ADR:
 
 - **Change** — the one thing to do, in a sentence.
-- **Scope** — the exact files or globs it may touch (this becomes `.adlc/scope.txt`; the cap and
-  diff-scope check enforce it).
+- **Scope** — the exact files or directories it may touch (this becomes `.adlc/scope.txt`, one
+  path prefix per line — not globs; the cap and diff-scope check enforce it).
 - **Acceptance** — one runnable check (Given/When/Then or a command + expected result) that
   proves it, carrying an `S1-AC1` id so QA/tests can trace it.
 - **Out of scope** — what this deliberately does not touch.
