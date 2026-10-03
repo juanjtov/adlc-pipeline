@@ -7,8 +7,9 @@ set -euo pipefail
 DIR="$(git rev-parse --show-toplevel)"
 SCRIPT="$DIR/.adlc/scripts/adlc-diff-scope.sh"
 [ -x "$SCRIPT" ] || exit 0   # scripts not installed → skip
+cd "$DIR"   # repo-relative scope path, like the staged paths — so a staged scope.txt is in scope
 
-if ! git diff --cached --name-only | "$SCRIPT" build "$DIR/.adlc/scope.txt"; then
+if ! git diff --cached --name-only | "$SCRIPT" build .adlc/scope.txt; then
   echo "✗ commit blocked: files staged outside the declared diff scope (.adlc/scope.txt)." >&2
   echo "  Widen the scope with the Architect, or split the change." >&2
   exit 1

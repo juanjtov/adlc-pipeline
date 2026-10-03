@@ -24,6 +24,65 @@ printf 'src/db/y.py\n'              | bash "$S/adlc-diff-scope.sh" build "$SF" >
 printf 'x\n'                        | bash "$S/adlc-diff-scope.sh" build "/no/such/file" >/dev/null 2>&1; check 0 "build advisory when no scope file" $?
 printf 'src/api/x.py\n'             | bash "$S/adlc-diff-scope.sh" fast "$SF" >/dev/null 2>&1; check 0 "fast reuses build scope (in-scope)" $?
 printf 'src/db/y.py\n'              | bash "$S/adlc-diff-scope.sh" fast "$SF" >/dev/null 2>&1; check 1 "fast reuses build scope (out-of-scope)" $?
+# build+qa = a Builder PR that QA has committed tests onto: declared scope OR the test dirs
+printf 'src/api/x.py\nbackend/tests/t.py\n' | ADLC_TEST_DIRS='tests|backend/tests' bash "$S/adlc-diff-scope.sh" build+qa "$SF" >/dev/null 2>&1; check 0 "build+qa allows scope + test dirs" $?
+printf 'backend/tests/t.py\nsrc/db/y.py\n'  | ADLC_TEST_DIRS='tests|backend/tests' bash "$S/adlc-diff-scope.sh" build+qa "$SF" >/dev/null 2>&1; check 1 "build+qa denies outside scope + tests" $?
+printf 'backend/tests/t.py\n'       | ADLC_TEST_DIRS='tests|backend/tests' bash "$S/adlc-diff-scope.sh" build "$SF" >/dev/null 2>&1; check 1 "build alone does not open the test dirs" $?
+printf 'src/db/y.py\n'              | bash "$S/adlc-diff-scope.sh" build+qa "/no/such/file" >/dev/null 2>&1; check 0 "build+qa advisory when no scope file" $?
+# the scope file is part of the PR that declares it — it must not fail its own check
+printf 'src/api/x.py\n%s\n' "$SF"   | bash "$S/adlc-diff-scope.sh" fast "$SF" >/dev/null 2>&1; check 0 "scope file itself is always in scope" $?
+printf '%s\n' "$SF"                 | bash "$S/adlc-diff-scope.sh" design "$SF" >/dev/null 2>&1; check 1 "scope file is not exempt in design/qa" $?
+# a blank line / comment must not become an empty regex alternative that allows every path
+printf 'src/api/\n\n# models\n  src/models/  \n' > "$SF"
+printf 'src/db/y.py\n'              | bash "$S/adlc-diff-scope.sh" build "$SF" >/dev/null 2>&1; check 1 "blank line in scope file does not allow everything" $?
+printf 'src/models/m.py\n'          | bash "$S/adlc-diff-scope.sh" build "$SF" >/dev/null 2>&1; check 0 "scope entries are trimmed; comments ignored" $?
+: > "$SF"
+printf 'src/api/x.py\n'             | bash "$S/adlc-diff-scope.sh" build "$SF" >/dev/null 2>&1; check 1 "empty scope file allows nothing" $?
+# CI (ADLC_SCOPE_IGNORE_INHERITED): a scope file left on main by an earlier PR is not this PR's scope
+printf 'README.md\n' > "$SF"
+printf 'src/db/y.py\n'              | ADLC_SCOPE_IGNORE_INHERITED=1 bash "$S/adlc-diff-scope.sh" build "$SF" >/dev/null 2>&1; check 0 "build: inherited scope file is advisory in CI" $?
+printf 'src/db/y.py\n%s\n' "$SF"    | ADLC_SCOPE_IGNORE_INHERITED=1 bash "$S/adlc-diff-scope.sh" build "$SF" >/dev/null 2>&1; check 1 "build: scope file shipped by the PR is enforced" $?
+printf 'src/db/y.py\n%s\n' "$SF"    | ADLC_SCOPE_IGNORE_INHERITED=1 bash "$S/adlc-diff-scope.sh" build+qa "$SF" >/dev/null 2>&1; check 1 "build+qa: scope file shipped by the PR is enforced" $?
+printf 'src/db/y.py\n'              | ADLC_SCOPE_IGNORE_INHERITED=1 bash "$S/adlc-diff-scope.sh" fast "$SF" >/dev/null 2>&1; check 1 "fast: always enforced (lane requires a scope file)" $?
+printf 'src/db/y.py\n'              | bash "$S/adlc-diff-scope.sh" build "$SF" >/dev/null 2>&1; check 1 "local hook (no env): scope file always enforced" $?
+rm -f "$SF"
+
+# The stage comes from the PR's LINKED ISSUE — the lanes never put stage:* on the PR itself.
+# These are the label sets the lane workflows actually leave behind.
+echo "pr-stage (which diff-scope stage a PR is in):"
+st() { bash "$S/adlc-pr-stage.sh" "$1" "${2:-}"; }
+eq build     "full lane: Builder PR, issue at stage:build"        "$(st '' 'stage:build')"
+eq build     "full lane: fix loop (PR adlc:changes-requested)"    "$(st 'adlc:changes-requested' 'adlc:auto
+stage:build')"
+eq build+qa  "full lane: issue advanced to stage:qa"              "$(st '' 'stage:qa')"
+eq build+qa  "full lane: at Gate 2 (stage:qa + gate:deploy)"      "$(st '' 'stage:qa
+gate:deploy')"
+eq build+qa  "Gate 2 with the stage label removed"                "$(st '' 'gate:deploy')"
+eq design    "issue at stage:design"                              "$(st '' 'stage:design')"
+eq fast      "fast lane at opened (lane:fast not on the PR yet)"  "$(st '' 'stage:fast')"
+eq fast      "fast lane after PASS (issue at gate:deploy)"        "$(st 'lane:fast' 'gate:deploy')"
+eq fast      "fast lane: fix loop"                                "$(st 'lane:fast
+adlc:changes-requested' 'stage:fast')"
+eq fast      "fast lane: PR label only (no linked issue)"         "$(st 'lane:fast')"
+eq qa        "PR-label fallback: stage:qa (tests only)"           "$(st 'stage:qa')"
+eq design    "PR-label fallback: stage:design"                    "$(st 'stage:design' 'gate:stories')"
+eq build     "PR-label fallback: stage:build"                     "$(st 'stage:build' '')"
+eq build+qa  "linked issue wins over the PR's own label"          "$(st 'stage:build' 'stage:qa')"
+eq other     "no labels → not an ADLC PR"                         "$(st '' '')"
+eq other     "non-stage labels → other"                           "$(st 'bug
+needs:human' 'adlc:auto
+stage:intake')"
+eq other     "whole-label match, not substring"                   "$(st 'old-stage:build-notes' 'xstage:qa')"
+# Drift guards: every stage label the lanes use must resolve to a stage, and every stage the
+# resolver can print must be one adlc-diff-scope.sh enforces — a miss either way is a silent skip.
+for l in $(grep -oE '"stage:[a-z]+"' "$ROOT/templates/github/labels.sh" | tr -d '"'); do
+  [ "$l" = "stage:intake" ] && continue   # no PR exists yet at intake
+  [ "$(st '' "$l")" != other ] && ok "labels.sh $l maps to a stage" || bad "labels.sh $l maps to a stage (got other)"
+done
+SF="$(mktemp)"; printf 'src/api/\n' > "$SF"
+for s in fast build build+qa design qa; do
+  printf 'zz/outside.txt\n' | ADLC_TEST_DIRS=tests bash "$S/adlc-diff-scope.sh" "$s" "$SF" >/dev/null 2>&1; check 1 "diff-scope enforces resolver stage '$s'" $?
+done
 rm -f "$SF"
 
 echo "triage (fast-lane cap):"
