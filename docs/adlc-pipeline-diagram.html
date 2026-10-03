@@ -89,7 +89,7 @@ text{fill:var(--ink)}
 </defs>
 <text x="60.0" y="70.0" class="title" text-anchor="start" style="font-size:44px;font-weight:800">ADLC PIPELINE</text>
 <text x="60.0" y="100.0" class="sub" text-anchor="start" style="font-size:15px">How one request becomes a merged change · the adlc plugin for Claude Code, as built</text>
-<text x="60.0" y="122.0" class="sub2" text-anchor="start" style="font-size:12px">Agents move work up to a gate, never through it. Only a person approves the plan and merges the code.</text>
+<text x="60.0" y="122.0" class="sub2" text-anchor="start" style="font-size:12px">Agents move work up to a gate, never through it. A person approves the plan, or opts into autopilot, and always does the merge.</text>
 <text x="1000.0" y="40.0" class="eyebrow" text-anchor="start" style="font-size:10px;font-weight:700">HOW TO READ</text>
 <line x1="1000" y1="57" x2="1030" y2="57" class="fl-ind fl-thick" marker-end="url(#arrow-ind)"/>
 <text x="1040.0" y="60.5" class="leg" text-anchor="start" style="font-size:10.5px">handoff · the issue moves to the next stage</text>
@@ -108,7 +108,7 @@ text{fill:var(--ink)}
 <g class="ic ic-s" transform="translate(1332.0,68.0) scale(0.667)"><path d="M4 21V6M20 21V6"/><rect x="2" y="9" width="20" height="4.6" rx="1.2"/><path d="M7.6 9l-2.4 4.6M12.6 9l-2.4 4.6M17.6 9l-2.4 4.6"/></g>
 <text x="1358.0" y="80.0" class="leg" text-anchor="start" style="font-size:10.5px">you · a person decides</text>
 <g class="ic ic-a" transform="translate(1332.0,88.0) scale(0.667)" stroke-dasharray="2.2 1.6"><circle cx="12" cy="12" r="9"/><path d="M12 7v5.2l3.2 1.9"/></g>
-<text x="1358.0" y="100.0" class="leg" text-anchor="start" style="font-size:10.5px">dashed · optional, chosen in setup</text>
+<text x="1358.0" y="100.0" class="leg" text-anchor="start" style="font-size:10.5px">dashed · optional, you switch it on</text>
 <circle cx="1340" cy="116" r="8" class="step"/>
 <text x="1340" y="120.2" class="step-t" text-anchor="middle" style="font-size:9px">1</text>
 <text x="1358.0" y="120.0" class="leg" text-anchor="start" style="font-size:10.5px">the reading order, keyed below</text>
@@ -177,9 +177,16 @@ text{fill:var(--ink)}
 <g class="ic ic-n" transform="translate(105.0,585.0) scale(2.083)"><title>A GitHub issue describing the problem and outcome. Issues are the execution source of truth; labels track the stage. File it with the Requirement issue template.</title><path d="M3 13l2.6-8h12.8L21 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M3 13h5l2 3h4l2-3h5"/></g>
 <text x="130.0" y="662.0" class="lab" text-anchor="middle" style="font-size:12.5px;font-weight:800">Request</text>
 <text x="130.0" y="675.0" class="lab-s" text-anchor="middle" style="font-size:9px">a GitHub issue</text>
-<path d="M130,312 C130,420 130,480 130,570" class="fl-slate" marker-end="url(#arrow-slate)"/>
-<rect x="96.3" y="431.0" width="67.4" height="18.0" rx="9.0" class="lbl-s-bg"/>
-<text x="130.0" y="443.2" class="lbl-s" text-anchor="middle" style="font-size:9px">you file it</text>
+<circle cx="130.0" cy="430.0" r="31.7" class="tile-l"/>
+<g class="ic ic-l" transform="translate(108.0,408.0) scale(1.833)"><title>/adlc-intake (intake skill): starts from a rough idea, a PRD-lite, a full PRD (sliced), an existing GitHub issue, a bug, or a Notion / Linear ticket fetched through its connector. It interviews you only for what is missing, shows the exact issue, and files it with stage:intake after you confirm. Already clear? File the Requirement issue form or label your own issue.</title><path d="M4 5h16a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H9l-5 4z"/><path d="M8 10h8M8 13h5"/></g>
+<text x="130.0" y="476.0" class="lab" text-anchor="middle" style="font-size:12.5px;font-weight:800">Intake</text>
+<text x="130.0" y="489.0" class="lab-s" text-anchor="middle" style="font-size:9px">idea · PRD · ticket</text>
+<path d="M130,312 C130,340 130,370 130,396" class="fl-slate" marker-end="url(#arrow-slate)"/>
+<rect x="93.8" y="345.0" width="72.5" height="18.0" rx="9.0" class="lbl-s-bg"/>
+<text x="130.0" y="357.2" class="lbl-s" text-anchor="middle" style="font-size:9px">you bring it</text>
+<path d="M130,500 C130,522 130,548 130,570" class="fl-slate" marker-end="url(#arrow-slate)"/>
+<rect x="81.2" y="525.0" width="97.7" height="18.0" rx="9.0" class="lbl-s-bg"/>
+<text x="130.0" y="537.2" class="lbl-s" text-anchor="middle" style="font-size:9px">filed on your yes</text>
 <circle cx="98" cy="578" r="11" class="step"/>
 <text x="98" y="582.2" class="step-t" text-anchor="middle">1</text>
 <circle cx="330.0" cy="610.0" r="36.0" class="tile-l"/>
@@ -200,6 +207,12 @@ text{fill:var(--ink)}
 <path d="M367,610 C390,610 410,610 432,610" class="fl-ind fl-thick" marker-end="url(#arrow-ind)"/>
 <rect x="363.8" y="625.0" width="72.5" height="18.0" rx="9.0" class="lbl-i-bg"/>
 <text x="400.0" y="637.2" class="lbl-i" text-anchor="middle" style="font-size:9px">gate:stories</text>
+<g class="ic ic-l" transform="translate(407.0,463.0) scale(1.083)" stroke-dasharray="2.2 1.6"><title>adlc:autopilot label on an issue: adlc-intake.yml approves Gate 1 for you when the Analyst&#x27;s verdict is FULL. A FAST verdict still waits for you. Gate 2 is never automated.</title><path d="M13 2.5L4.5 14H11l-1 7.5L19 10h-6.5z"/></g>
+<text x="420.0" y="504.0" class="lab-g" text-anchor="middle" style="font-size:11px;font-weight:800">Autopilot</text>
+<text x="420.0" y="517.0" class="lab-g" text-anchor="middle" style="font-size:9px">optional · full lane only</text>
+<path d="M420,524 C420,552 472,546 478,572" class="fl-teal" style="stroke-dasharray:5 4" marker-end="url(#arrow-teal)"/>
+<rect x="413.3" y="538.0" width="67.4" height="18.0" rx="9.0" class="lbl-t-bg"/>
+<text x="447.0" y="550.2" class="lbl-t" text-anchor="middle" style="font-size:9px">can approve</text>
 <text x="566.0" y="428.0" class="eyebrow" text-anchor="start" style="font-size:9.5px;font-weight:700">FULL LANE · NEW BEHAVIOR</text>
 <circle cx="620.0" cy="490.0" r="36.0" class="tile-l"/>
 <g class="ic ic-l" transform="translate(595.0,465.0) scale(2.083)"><title>Architect (agents/architect.md): writes docs/adr/NNNN-*.md and a task breakdown where every task declares the exact files it may touch (its diff scope), plus a blast-radius check. Writes only under docs/.</title><path d="M12 3l9 4.8-9 4.8-9-4.8z"/><path d="M3 12l9 4.8 9-4.8M3 16.2l9 4.8 9-4.8"/></g>
@@ -351,9 +364,9 @@ text{fill:var(--ink)}
 <text x="71.0" y="1092.2" class="step-t" text-anchor="middle">1</text>
 <g class="ic ic-s" transform="translate(88.0,1078.0) scale(0.833)"><path d="M3 13l2.6-8h12.8L21 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M3 13h5l2 3h4l2-3h5"/></g>
 <text x="116.0" y="1092.0" class="loop-t" text-anchor="start" style="font-size:12.5px;font-weight:800">Request</text>
-<text x="60.0" y="1114.0" class="loop-s" text-anchor="start" style="font-size:10px">You open a GitHub issue: the</text>
-<text x="60.0" y="1127.0" class="loop-s" text-anchor="start" style="font-size:10px">problem and the outcome you</text>
-<text x="60.0" y="1140.0" class="loop-s" text-anchor="start" style="font-size:10px">want.</text>
+<text x="60.0" y="1114.0" class="loop-s" text-anchor="start" style="font-size:10px">Bring an idea, a PRD or a</text>
+<text x="60.0" y="1127.0" class="loop-s" text-anchor="start" style="font-size:10px">ticket. /adlc-intake turns it</text>
+<text x="60.0" y="1140.0" class="loop-s" text-anchor="start" style="font-size:10px">into one clear GitHub issue.</text>
 <circle cx="256.0" cy="1088" r="11" class="step"/>
 <text x="256.0" y="1092.2" class="step-t" text-anchor="middle">2</text>
 <g class="ic ic-s" transform="translate(273.0,1078.0) scale(0.833)"><path d="M6 3h8l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/><path d="M14 3v5h5"/><path d="M8 13h8M8 17h6"/></g>
@@ -364,8 +377,9 @@ text{fill:var(--ink)}
 <text x="441.0" y="1092.2" class="step-t" text-anchor="middle">3</text>
 <g class="ic ic-s" transform="translate(458.0,1078.0) scale(0.833)"><path d="M4 21V6M20 21V6"/><rect x="2" y="9" width="20" height="4.6" rx="1.2"/><path d="M7.6 9l-2.4 4.6M12.6 9l-2.4 4.6M17.6 9l-2.4 4.6"/></g>
 <text x="486.0" y="1092.0" class="loop-t" text-anchor="start" style="font-size:12.5px;font-weight:800">Gate 1</text>
-<text x="430.0" y="1114.0" class="loop-s" text-anchor="start" style="font-size:10px">You approve the plan and choose</text>
-<text x="430.0" y="1127.0" class="loop-s" text-anchor="start" style="font-size:10px">the lane: full or fast.</text>
+<text x="430.0" y="1114.0" class="loop-s" text-anchor="start" style="font-size:10px">You approve the plan and pick</text>
+<text x="430.0" y="1127.0" class="loop-s" text-anchor="start" style="font-size:10px">the lane. Optional autopilot</text>
+<text x="430.0" y="1140.0" class="loop-s" text-anchor="start" style="font-size:10px">can approve the full lane.</text>
 <circle cx="626.0" cy="1088" r="11" class="step"/>
 <text x="626.0" y="1092.2" class="step-t" text-anchor="middle">4</text>
 <g class="ic ic-s" transform="translate(643.0,1078.0) scale(0.833)"><path d="M12 3l9 4.8-9 4.8-9-4.8z"/><path d="M3 12l9 4.8 9-4.8M3 16.2l9 4.8 9-4.8"/></g>
@@ -400,5 +414,5 @@ text{fill:var(--ink)}
 <text x="1355.0" y="1114.0" class="loop-s" text-anchor="start" style="font-size:10px">You read the card, then merge</text>
 <text x="1355.0" y="1127.0" class="loop-s" text-anchor="start" style="font-size:10px">and deploy. No agent can.</text>
 </svg>
-<figcaption>Drawn from the plugin as built: agents/, skills/charter, skills/triage, templates/github/*.yml and templates/scripts/. The fast-lane size cap and the fix-loop limit are defaults a project can change; hover the icons for the values and files. Without GitHub Actions, you start each lane by hand in Claude Code and the gates are the same.</figcaption></figure></div>
+<figcaption>Drawn from the plugin as built: agents/, skills/charter, skills/triage, skills/intake, templates/github/*.yml and templates/scripts/. The fast-lane size cap and the fix-loop limit are defaults a project can change; hover the icons for the values and files. Without GitHub Actions, you start each lane by hand in Claude Code and the gates are the same.</figcaption></figure></div>
 </body></html>
