@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Unit tests for the ADLC guardrail scripts. Plain bash, no dependencies.
 # Run: bash tests/run.sh   (exit 0 = all pass). These verify the deterministic guardrails
-# themselves — the same scripts CI and the local pre-commit hook call.
+# themselves — the same scripts CI and the local pre-commit hook call. The static checks at the
+# end lint what can't be executed here: the workflow templates' triggers.
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 S="$ROOT/templates/scripts"
@@ -105,6 +106,35 @@ printf '%s\n' "$CO" | grep -qE 'adlc-builder +2 +180 +90\.0 +7000' && ok "per-la
 printf '%s\n' "$CO" | grep -qE 'TOTAL +3 +260' && ok "pipeline total latency" || bad "pipeline total latency"
 LO=$(printf 'adlc-review 30\nadlc-review 10\n' | bash "$S/adlc-cost.sh")
 printf '%s\n' "$LO" | grep -qE 'adlc-review +2 +40 +20\.0' && ok "latency-only (no tokens)" || bad "latency-only"
+
+echo "lane triggers (static):"
+# `labeled` fires on EVERY label change — including the label moves the lanes themselves make with
+# the dispatch token. Every job of a workflow that subscribes to it must filter on the label that
+# fired the event, or it re-runs on unrelated transitions (adlc-intake once re-ran the Analyst at
+# every stage and could drag an in-flight issue back to gate:stories). No pipes into `grep -q`
+# here: under this file's pipefail an early-exiting reader can turn a match into a failure.
+for W in "$ROOT"/templates/github/adlc-*.yml; do
+  on=$(awk '/^on:/{f=1;next} /^[^ \t#]/{f=0} f' "$W")
+  case "$on" in *labeled*) ;; *) continue ;; esac
+  # jobs whose block never mentions github.event.label.name (comment lines ignored)
+  unfiltered=$(awk '
+    /^jobs:/ {j=1; next}
+    !j || /^[ \t]*#/ {next}
+    /^  [A-Za-z0-9_-]+:[ \t]*$/ { if (name != "" && !hit) printf "%s ", name; name=$1; sub(/:$/, "", name); hit=0; next }
+    /github\.event\.label\.name/ {hit=1}
+    END { if (name != "" && !hit) printf "%s ", name }' "$W")
+  eq "" "$(basename "$W"): every job filters on the label that fired" "$unfiltered"
+done
+# adlc-intake.yml: the concurrency group must admit exactly the runs its job will start (the job's
+# `if` minus the author allowlist), and give every other event a group of its own. If the two
+# drift, a run that is going to be skipped can share the group and cancel an in-flight Analyst.
+I="$ROOT/templates/github/adlc-intake.yml"
+flat() { awk -v a="$1" -v b="$2" '$0 ~ a {f=1; next} $0 ~ b {f=0} f {gsub(/^[ \t]+|[ \t]+$/, ""); printf "%s ", $0}' "$I"; }
+pre='}}-${{ '; suf=" && 'start' || github.run_id }} "; allow=' && contains(fromJSON('
+grp=$(flat '^  group: >-' '^  cancel-in-progress:'); grp=${grp#*"$pre"}; grp=${grp%"$suf"}
+jif=$(flat '^    if: >' '^    runs-on:');             jif=${jif%"$allow"*}
+[ -n "$jif" ] && eq "$jif" "adlc-intake.yml: concurrency group admits exactly the runs the job starts" "$grp" \
+  || bad "adlc-intake.yml: could not read the job's if"
 
 echo ""
 echo "== $pass passed, $fail failed =="
