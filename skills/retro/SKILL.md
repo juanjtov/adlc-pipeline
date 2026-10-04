@@ -41,7 +41,7 @@ in this order — a lower layer always beats a higher one:
 | missing-edge-case, logic-contradiction | a **regression test** pinning the case (best — executable, permanent) |
 | tenant-leak, authz-gap, injection, secret-in-code | a **`adlc:security-gate` case** + a regression test |
 | hallucinated-api | a **CI check** (symbol/import lint) + a `project-conventions` "seams" note |
-| contract-violation / diff-scope breach | tighten the ADR template or the `.adlc/scope.txt` allowlist |
+| contract-violation / diff-scope breach | tighten the ADR template or the `.adlc/scope/<issue>.txt` allowlist |
 | flaky-test | fix/quarantine the test — **not** a context line |
 | recurring, un-checkable gotcha | last resort: one line in `project-conventions` or CLAUDE.md |
 

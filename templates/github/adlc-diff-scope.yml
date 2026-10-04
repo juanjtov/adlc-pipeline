@@ -1,14 +1,13 @@
 # ADLC diff-scope check — the path-level half of author/verifier separation.
-# Fails a PR whose changed files fall outside the scope allowed for its stage. Both decisions
+# Fails a lane PR whose changed files fall outside the scope its issue declares. Both decisions
 # are unit-tested scripts (the check itself is shared with the local pre-commit hook):
 #   .adlc/scripts/adlc-pr-stage.sh    WHICH stage — read from the PR's LINKED ISSUE, because the
 #                                     lanes put stage:* on the issue and never on the PR. The
 #                                     PR's own `lane:fast` / stage:* labels are the fallback.
-#   .adlc/scripts/adlc-diff-scope.sh  THE check — design → docs/ only · build|fast →
-#                                     .adlc/scope.txt · build+qa (issue at stage:qa) → that
-#                                     scope + $ADLC_TEST_DIRS · no ADLC stage → skipped.
-# A full-lane PR is held to .adlc/scope.txt only when the PR itself ships one; otherwise its
-# scope is advisory here and enforced by the review.
+#   .adlc/scripts/adlc-diff-scope.sh  THE check — build|fast → .adlc/scope/<issue>.txt, which
+#                                     the Builder writes · build+qa (issue at stage:qa) → that
+#                                     scope + $ADLC_TEST_DIRS · no lane stage → skipped.
+# A lane PR with no scope file FAILS: the scope must be declared to be enforced.
 name: ADLC diff-scope
 
 on:
@@ -33,20 +32,27 @@ jobs:
           PR: ${{ github.event.pull_request.number }}
           # test dirs QA may write (regex alternation), e.g. tests|backend/tests
           ADLC_TEST_DIRS: "{{TEST_DIR_REGEX}}"
-          # a scope file left on main by an earlier merged PR is not THIS PR's declared scope
-          ADLC_SCOPE_IGNORE_INHERITED: "1"
         run: |
           chmod +x .adlc/scripts/adlc-pr-stage.sh .adlc/scripts/adlc-diff-scope.sh
-          # Resolve the linked issue the same way adlc-review.yml's `route` job does. Plain
-          # assignments (no pipe) so a failed API call fails the check instead of skipping it.
+          # Plain assignments, never a pipe from gh: a failed API call must fail the check, not
+          # skip it. The files API (not `gh pr diff`) has no 300-file limit and no quoted names.
           pr_labels=$(gh pr view "$PR" --json labels --jq '.labels[].name')
-          issue=$(gh pr view "$PR" --json closingIssuesReferences --jq '.closingIssuesReferences[0].number // empty')
-          [ -z "$issue" ] && issue=$(gh pr view "$PR" --json body --jq '.body' | grep -oiE '#[0-9]+' | head -1 | tr -d '#' || true)
+          files=$(gh api --paginate "repos/{owner}/{repo}/pulls/$PR/files?per_page=100" --jq '.[].filename')
+          # Which issue: a closing reference in THIS repo, else the one scope file the PR ships
+          # (.adlc/scope/<issue>.txt). A bare `#N` in the body is not used — it is often an
+          # upstream PR number or an HTML entity, and would tie an unrelated PR to an issue.
+          issue=$(gh pr view "$PR" --json url,closingIssuesReferences --jq '.url as $u | [.closingIssuesReferences[] | select(.url | startswith(($u | sub("/pull/[0-9]+$"; "")) + "/issues/"))][0].number // empty')
+          if [ -z "$issue" ]; then
+            shipped=$(printf '%s\n' "$files" | sed -n 's|^\.adlc/scope/\([0-9][0-9]*\)\.txt$|\1|p')
+            case "$(printf '%s\n' "$shipped" | grep -c .)" in
+              0) ;;
+              1) issue="$shipped" ;;
+              *) echo "PR ships several scope files and closes no issue — cannot tell which issue it implements" >&2; exit 1 ;;
+            esac
+          fi
           issue_labels=""
-          # A `#N` in the body may not be an issue here — then only the PR's own labels count.
-          [ -n "$issue" ] && issue_labels=$(gh issue view "$issue" --json labels --jq '.labels[].name' || true)
+          if [ -n "$issue" ]; then issue_labels=$(gh issue view "$issue" --json labels --jq '.labels[].name'); fi
           stage=$(.adlc/scripts/adlc-pr-stage.sh "$pr_labels" "$issue_labels")
-          echo "stage=$stage (linked issue: #${issue:-none})"
-          [ "$stage" = other ] && { echo "no ADLC stage — skipped"; exit 0; }
-          files=$(gh pr diff "$PR" --name-only)
-          printf '%s\n' "$files" | .adlc/scripts/adlc-diff-scope.sh "$stage"
+          echo "stage=$stage (issue: #${issue:-none})"
+          if [ "$stage" = other ]; then echo "not a lane PR — skipped"; exit 0; fi
+          printf '%s\n' "$files" | .adlc/scripts/adlc-diff-scope.sh "$stage" "${issue:+.adlc/scope/$issue.txt}"

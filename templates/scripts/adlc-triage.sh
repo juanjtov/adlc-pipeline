@@ -29,6 +29,9 @@ deny="${ADLC_FAST_DENY:-(^|/)(migrations?|auth|authz|security|infra|terraform|de
 
 tab=$(printf '\t')
 files=0; lines=0; reasons=()
+# The issue's scope file (.adlc/scope/<issue>.txt) is the declaration the lane requires of every
+# PR, not part of the change — it counts toward neither cap.
+is_scope_file() { printf '%s\n' "$1" | grep -qE '^\.adlc/scope/[0-9]+\.txt$'; }
 while IFS= read -r line; do
   [ -z "$line" ] && continue
   # numstat form?  <added>\t<deleted>\t<path> — detect on the literal TABs numstat always uses,
@@ -38,6 +41,7 @@ while IFS= read -r line; do
     a=$(printf '%s' "$line" | cut -f1)
     d=$(printf '%s' "$line" | cut -f2)
     f=$(printf '%s' "$line" | cut -f3-)
+    is_scope_file "$f" && continue
     # binary files show as '-' in numstat — size is unknowable, so never fast-eligible
     if [ "$a" = "-" ] || [ "$d" = "-" ]; then reasons+=("binary change: $f"); fi
     [ "$a" = "-" ] && a=0
@@ -45,6 +49,7 @@ while IFS= read -r line; do
     lines=$((lines + a + d))
   else
     f="$line"
+    is_scope_file "$f" && continue
   fi
   files=$((files + 1))
   printf '%s\n' "$f" | grep -qE "$deny" && reasons+=("sensitive path: $f")
