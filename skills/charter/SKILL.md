@@ -23,8 +23,8 @@ here, the project skills win on specifics; this charter wins on process.
 3. **Harness-emitted telemetry** — status/metrics come from hooks, CI, and prod logs.
    Agent self-reports are never a system of record.
 4. **Deterministic permissions** — each role's tool access is enforced by configuration
-   (agent frontmatter `tools:` + `.claude/settings.json` deny rules + diff-scope CI),
-   never by prompt instructions alone.
+   (agent frontmatter `tools:` + the plugin's guard hook + each lane's tool grants +
+   diff-scope CI), never by prompt instructions alone.
 5. **Staged autonomy** — agents earn gate relaxation only through sustained eval
    thresholds (e.g. auto-merge low-risk PRs after ≥90% first-pass acceptance over 20 stories).
 6. **Gates before automation** — a stage is never auto-triggered until its verification
@@ -58,20 +58,26 @@ here, the project skills win on specifics; this charter wins on process.
 |---|---|---|---|---|---|
 | Repo read | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Repo write (branch) | — | ADRs/docs only | ✅ | tests only | ✅ |
-| Merge to main | — | — | — | post-Gate-2 only | ✅ |
-| Deploy / migrations | — | — | — | post-Gate-2 only | ✅ |
+| Merge to main | — | — | — | — | ✅ |
+| Deploy / migrations | — | — | — | proposes only | ✅ |
 | Issue create/update | ✅ | ✅ | ✅ | ✅ | ✅ |
 | PR review | — | ✅ | — | ✅ | ✅ |
 | Prod logs/metrics read | — | — | — | ✅ | ✅ |
 
-Enforcement is layered: agent frontmatter `tools:` (tool-level), the `diff-scope` CI job
-(path-level; it takes the stage from the PR's linked issue, where the `stage:*` labels live),
-and the role prompt (advisory). Path restrictions can't be expressed in Claude Code tool
-grants directly — the diff-scope check is what actually blocks an out-of-scope write: a Builder
-PR is held to the scope it declares in `.adlc/scope/<issue>.txt` (plus the test dirs once the
-issue is at `stage:qa`), and fails if it declares none. The Architect's docs-only and QA's
-tests-only rules are checked only on a PR labelled `stage:design` / `stage:qa`; otherwise the
-review enforces them.
+Enforcement is layered: agent frontmatter `tools:` (which tools a role has at all), the
+plugin's guard hook (command-level, in every permission mode: no merge, push-to-main or
+force-push for anyone, and only the listed `gh`/`git` subcommands for the Analyst, Architect
+and Adversarial Reviewer), each Actions lane's `--allowedTools` (what runs unattended), the
+`diff-scope` CI job (path-level; it takes the stage from the PR's linked issue, where the
+`stage:*` labels live), and the role prompt (advisory). A role that holds the shell can write
+anywhere, so for the Builder and QA a path rule can't live in a tool grant — the diff-scope
+check is what blocks an out-of-scope write: a Builder PR is held to the scope it declares in
+`.adlc/scope/<issue>.txt` (plus the test dirs once the issue is at `stage:qa`), and fails if
+it declares none. The Architect holds no shell in the Actions design lane, so there its
+docs-only rule IS the grant (`Edit(docs/**)`); elsewhere it, and QA's tests-only rule, are
+checked only on a PR labelled `stage:design` / `stage:qa`, and otherwise by the review. The
+hook reads command text, so it is a guardrail, not a sandbox: the hard merge gate is branch
+protection (or the tripwire) plus Gate 2.
 
 ## The label state machine (execution source of truth = GitHub issues)
 
@@ -95,7 +101,8 @@ fast:  stage:intake → (triage) → stage:fast ──────────�
   for the Principal's lane approval. When in doubt, triage FULL.
 - **Agents may move work up to a gate, never through it.** An agent can apply the next
   `stage:*` label only for a stage→stage transition it owns (Architect's
-  `stage:design → stage:build`). The label that *follows a gate*
+  `stage:design → stage:build`; in the Actions design lane the workflow applies it, after
+  committing the ADR to `adlc/design-<issue>`). The label that *follows a gate*
   (`gate:stories → stage:design` or `stage:fast`, and the deploy past `gate:deploy`) is the
   Principal's. `adlc:autopilot` may act for them into `stage:design` (the full pipeline) — but
   **never into `stage:fast`**: choosing the fast lane is always an explicit human approval.
@@ -108,8 +115,10 @@ fast:  stage:intake → (triage) → stage:fast ──────────�
 - **Gate 1 — story approval** (`gate:stories`). The Principal accepts/returns the
   Analyst's stories, then applies `stage:design`.
 - **Gate 2 — merge + deploy + migration** (`gate:deploy`). QA posts a Proposed Action
-  Card; the Principal merges and deploys (or explicitly delegates). Agents never merge or
-  deploy. `gh pr merge` and pushes to main are deny-listed at the harness level.
+  Card; the Principal merges and deploys. Agents never merge or deploy — relaxing that is a
+  staged-autonomy decision (§2.5) made in the guard, never in a prompt. `gh pr merge` and
+  pushes to main are blocked by the plugin's guard hook, with `.claude/settings.json` deny
+  rules as the backstop.
 
 ### Proposed Action Card (every irreversible action)
 

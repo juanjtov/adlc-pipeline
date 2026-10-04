@@ -4,7 +4,22 @@
 #
 # stage:design is applied by the Principal at Gate 1 — so this automates the *work*, not the
 # gate. PREREQUISITES: CLAUDE_CODE_OAUTH_TOKEN + ADLC_DISPATCH_TOKEN (the dispatch token so the
-# Architect's advance to stage:build fires the builder lane).
+# advance to stage:build fires the builder lane).
+#
+# The agent step installs the plugin, runs as `adlc:architect`, and is granted file edits
+# UNDER docs/ ONLY — `Edit(docs/**)`, which covers the Write tool too — plus `gh issue` /
+# `gh pr` read+comment and read-only git (see adlc-builder.yml, HOW THE AGENT RUNS). It gets
+# no commit, no push, no label change, and no write outside docs/: the next step runs with
+# the dispatch token, so nothing the Architect can touch may be something that step executes.
+#
+# THE HANDOFF IS THE WORKFLOW'S, and it is deterministic. The ADR the Architect wrote exists
+# only in this job's workspace, so the last step commits docs/ to `adlc/design-<issue>`, pushes
+# it, and only then moves the issue to stage:build. The Builder lane starts from that branch,
+# so the ADR rides in the Builder's PR — and because the diff-scope check holds that PR to
+# `.adlc/scope/<issue>.txt`, the same commit starts that file with the design files it carries.
+# A stage is done only when its artifacts exist: no ADR file, or no task-breakdown comment
+# naming it (`ADLC-BREAKDOWN: <ADR path>`), ⇒ no advance. The branch belongs to this lane: a
+# re-run replaces it, and it can be deleted once the Builder's PR has merged.
 name: ADLC design
 
 on:
@@ -31,9 +46,63 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.ADLC_DISPATCH_TOKEN }}
+          allowed_bots: "{{BUILDER_BOT}}"
+          plugin_marketplaces: "https://github.com/juanjtov/adlc-pipeline.git"
+          plugins: "adlc@adlc-pipeline"
+          claude_args: |
+            --agent adlc:architect
+            --permission-mode dontAsk
+            --allowedTools "Edit(docs/**),Skill,Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh issue list:*),Bash(gh pr view:*),Bash(gh pr list:*),Bash(gh pr diff:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*)"
           prompt: |
-            You are the ADLC Architect (design duty). For issue #${{ github.event.issue.number }}
-            write the ADR (docs/adr/NNNN-*.md, status Proposed) + a task-breakdown comment with a
-            declared diff scope per task + a blast-radius check, then advance stage:design →
-            stage:build. Load the architect agent definition and the project-conventions +
-            release-ops + verify skills. Only advance after the ADR + breakdown exist. Never merge.
+            Design duty. For issue #${{ github.event.issue.number }} write the ADR
+            (docs/adr/NNNN-*.md, status Proposed) + a task-breakdown comment with a declared diff
+            scope per task + a blast-radius check. Load your role's skills with the Skill tool
+            first. You can write under docs/ only. End the task-breakdown comment with the line
+            `ADLC-BREAKDOWN: <the ADR's path>` (for example
+            `ADLC-BREAKDOWN: docs/adr/0007-login.md`). Do NOT commit and do NOT change labels:
+            the next step commits docs/ to the design branch and advances the issue to
+            stage:build once the ADR file and that breakdown line exist.
+
+      - name: Hand the design to the Builder (commit the ADR to a branch, then advance)
+        env:
+          GH_TOKEN: ${{ secrets.ADLC_DISPATCH_TOKEN }}
+          N: ${{ github.event.issue.number }}
+        run: |
+          branch="adlc/design-$N"
+          stop() { # <what is missing> — say so on the issue and fail, leaving it at stage:design
+            gh issue comment "$N" --body "⚠️ The design lane finished without $1 — not advancing to \`stage:build\`. Remove and re-apply \`stage:design\` to run it again."
+            echo "::error::design incomplete (no $1) — issue left at stage:design"
+            exit 1
+          }
+          git checkout -q -B "$branch"
+          [ -d docs ] && git add -- docs/
+          # A stage is done only when its artifacts exist. 1) An ADR: a new or changed
+          # docs/adr/*.md — the template is not one, and neither is a deletion. (-z here and
+          # below: git would otherwise quote a name holding a quote or a non-ASCII character.)
+          adrs=$(git diff --cached --name-only --no-renames --diff-filter=d -z -- 'docs/adr/*.md' ':(exclude)docs/adr/template.md' | tr '\0' '\n')
+          [ -n "$adrs" ] || stop "an ADR under \`docs/adr/\`"
+          # 2) The task breakdown the Builder works from: an issue comment in which the
+          # Architect wrote `ADLC-BREAKDOWN: <ADR path>`. Naming the ADR ties it to THIS design,
+          # so the comment of an earlier round does not count. (A plain assignment, never a pipe
+          # from gh: a failed API call must fail the step, not read as "no breakdown".)
+          comments=$(gh issue view "$N" --json comments --jq '.comments[].body')
+          found=""
+          while IFS= read -r line; do
+            case "$line" in *"ADLC-BREAKDOWN:"*)
+              while IFS= read -r adr; do
+                case "$line" in *"${adr##*/}"*) found="$adr" ;; esac
+              done <<< "$adrs" ;;
+            esac
+          done <<< "$comments"
+          [ -n "$found" ] || stop "a task-breakdown comment with the line \`ADLC-BREAKDOWN: <ADR path>\`"
+          # The Builder's PR will carry these files, and the diff-scope check holds that PR to
+          # .adlc/scope/<issue>.txt — so declare them there now; the Builder adds the task's own
+          # scope below. --no-renames: a moved doc counts under both its old and its new path.
+          mkdir -p .adlc/scope
+          git diff --cached --name-only --no-renames -z | tr '\0' '\n' > ".adlc/scope/$N.txt"
+          git add -- ".adlc/scope/$N.txt"
+          git -c user.name="adlc-design" -c user.email="adlc-design@users.noreply.github.com" \
+            commit -q -m "docs: design for #$N (ADR from the design lane)"
+          git push -q --force origin "HEAD:refs/heads/$branch"
+          gh issue comment "$N" --body "📐 Design handed off on branch \`$branch\` ($(printf '%s' "$adrs" | paste -sd ' ' -)). The Builder lane starts from it, so the ADR rides in the Builder's PR."
+          gh issue edit "$N" --remove-label stage:design --add-label stage:build

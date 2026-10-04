@@ -6,6 +6,8 @@
 # PREREQUISITES: CLAUDE_CODE_OAUTH_TOKEN + ADLC_DISPATCH_TOKEN (the dispatch token so the
 # proposal PR is bot-authored and can trigger the review/CI lanes). Also add `jq` if your
 # metrics script needs it (ubuntu-latest has it).
+# The step installs the plugin and invokes its `retro` skill by name (`/adlc:retro`), with the
+# tools the skill needs (see adlc-builder.yml, HOW THE AGENT RUNS).
 name: ADLC retro
 
 on:
@@ -31,10 +33,10 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.ADLC_DISPATCH_TOKEN }}
-          prompt: |
-            Run the ADLC self-improvement retro. Load the `retro` skill and follow it:
-            compute metrics (run .adlc/scripts/adlc-metrics.sh), read .adlc/metrics/findings.jsonl
-            and CONTEXT-LOG.md, rank recurring failure classes, and open ONE proposal PR that
-            adds the cheapest durable fixes (regression tests > CI checks > conventions > gotcha),
-            prunes zero-hit context lines, and logs every change in CONTEXT-LOG.md. Never
-            auto-merge; never bypass the gates. If nothing recurs, open no PR and say so.
+          allowed_bots: "{{BUILDER_BOT}}"
+          plugin_marketplaces: "https://github.com/juanjtov/adlc-pipeline.git"
+          plugins: "adlc@adlc-pipeline"
+          claude_args: |
+            --permission-mode dontAsk
+            --allowedTools "Read,Edit,Write,Skill,Bash"
+          prompt: "/adlc:retro"
