@@ -4,7 +4,7 @@
 # Requires: gh authenticated against this repo (gh auth status).
 set -euo pipefail
 
-create() { # name color description
+create() { # name color description (GitHub rejects a description over 100 characters)
   gh label create "$1" --color "$2" --description "$3" --force >/dev/null
   echo "  ✓ $1"
 }
@@ -15,12 +15,12 @@ create "stage:intake"  "0E8A16" "Agent 1 — Product Analyst: requirement → st
 create "stage:design"  "1D76DB" "Agent 2 — Architect: ADR + task breakdown + blast radius"
 create "stage:build"   "5319E7" "Agent 3 — Builder: code + unit tests → PR"
 create "stage:qa"      "B60205" "Agent 4 — QA/Release-Ops: tests + security gate"
-create "stage:fast"    "0FB889" "FAST LANE — trivial change: scoped build + adversarial/security review, skips design & Gate 1 (deterministically capped)"
+create "stage:fast"    "0FB889" "FAST LANE — trivial change: scoped build + adversarial/security review, skips design & Gate 1"
 # Gate labels (work stops for the Principal)
 create "gate:stories"  "FBCA04" "GATE 1 — Principal: story approval"
 create "gate:deploy"   "FBCA04" "GATE 2 — Principal: merge · deploy · migration"
 # Pipeline control
-create "adlc:auto"     "C5DEF5" "Auto-run the Analyst on this issue (auto-start; you still approve Gate 1)"
+create "adlc:auto"     "C5DEF5" "Auto-run the Analyst while at stage:intake; add it back to re-run (you still approve Gate 1)"
 create "adlc:autopilot" "5319E7" "Full autopilot: also auto-approve Gate 1 — only Gate 2 (merge/deploy) is human"
 create "bug"           "D73A4A" "Defect filed by Ops — lands at stage:intake with telemetry"
 create "adlc:changes-requested" "FBCA04" "A review flagged the PR — the fix loop returns it to the Builder"

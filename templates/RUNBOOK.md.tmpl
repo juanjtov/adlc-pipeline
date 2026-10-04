@@ -24,7 +24,7 @@ directly to a fresh issue (your own triage) or after the Analyst recommends FAST
 1. Run the fast-lane cap on your intended scope first — `printf '<files>' | .adlc/scripts/adlc-triage.sh`
    (FULL means it's too big or touches something sensitive → use the full pipeline instead).
 2. Invoke the **builder** agent on the `stage:fast` issue: it makes the scoped change + a test
-   (no ADR — it works from the change brief), writes `.adlc/scope.txt`, and opens a PR.
+   (no ADR — it works from the change brief), writes `.adlc/scope/<n>.txt`, and opens a PR.
 3. Invoke the **adversarial-reviewer** on the PR (walk the `adlc:security-gate` classes). The cap
    is enforced again on the real diff — an over-cap/sensitive diff goes to `stage:design`.
 4. On a PASS verdict, apply `gate:deploy`. **Gate 2 (you):** merge. On CHANGES, hand it back to
@@ -40,8 +40,9 @@ directly to a fresh issue (your own triage) or after the Analyst recommends FAST
 ## Stage 3 — Build (Builder)
 
 1. Invoke the **builder** agent on the `stage:build` issue.
-2. It branches `feat/<n>-<slug>`, implements within the declared diff scope, writes
-   AC-traced tests, runs the project's test/build commands, and opens a PR.
+2. It branches `feat/<n>-<slug>`, implements within the declared diff scope (recorded in
+   `.adlc/scope/<n>.txt`, which the pre-commit hook enforces), writes AC-traced tests, runs the
+   project's test/build commands, and opens a PR.
 3. If you run the Builder in an **isolated worktree**, hand it the ADR path so it commits
    the ADR onto its branch (an ADR written only in the main checkout is invisible to the
    branch and gets stranded off the PR).

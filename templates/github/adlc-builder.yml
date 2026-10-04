@@ -50,7 +50,10 @@ jobs:
           prompt: |
             You are the ADLC Builder. Implement issue #${{ github.event.issue.number }}
             following its task breakdown and ADR. Load the builder agent definition and the
-            project-conventions + adlc:security-gate skills. Open a PR; never merge.
+            project-conventions + adlc:security-gate skills. Write the task's declared diff scope
+            to .adlc/scope/${{ github.event.issue.number }}.txt (one path prefix per line; the
+            diff-scope check enforces it). Open a PR whose body starts
+            `Closes #${{ github.event.issue.number }}`; never merge.
 
       # After the PR is opened, Architect review advances stage:build → stage:qa. Whatever
       # makes that label change — a review workflow or the Principal — must use a PAT/App

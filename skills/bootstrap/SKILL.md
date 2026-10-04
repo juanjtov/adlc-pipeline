@@ -104,8 +104,9 @@ detected values pre-selected as the recommended option. Cover:
    All keep **Gate 2 (merge + deploy) human** — merge/deploy is never automated — and only
    allowlisted authors can auto-trigger:
    - **Label-driven** (default) — stages start by applying `stage:*` labels by hand.
-   - **Auto-start** — filing a requirement (the `adlc:auto` label / issue template) runs the
-     Analyst immediately and flows to build; **you still approve Gate 1** (stories) and Gate 2.
+   - **Auto-start** — filing a requirement (the issue template applies `adlc:auto` +
+     `stage:intake`) runs the Analyst immediately and flows to build; **you still approve
+     Gate 1** (stories) and Gate 2.
    - **Full autopilot** — the `adlc:autopilot` label additionally **auto-approves Gate 1**, so
      the pipeline runs all the way to a QA-approved, adversarially-reviewed PR and your **only**
      step is reviewing + merging that PR at Gate 2. (Auto-advance is done by the workflow, not
@@ -176,7 +177,8 @@ Create/write:
    hook call — one unit-tested source of truth, not prose. Then install the **local diff-scope
    guard**: copy `templates/hooks/pre-commit` to `.git/hooks/pre-commit` (chmod +x) — **ask first
    if a pre-commit hook already exists** — so the Builder's declared scope is enforced on every
-   local commit, not only in CI.
+   local commit, not only in CI. Set the hook's `ADLC_TEST_DIRS` default to the repo's test dirs
+   (the same regex that fills `{{TEST_DIR_REGEX}}`).
 
 9. **UI projects only** (frontend detected): note that the `design-system` and
    `verify-frontend-change` skills are expected by the Builder/QA agents when frontend
@@ -207,7 +209,8 @@ PR — adversarial then architect conformance — and does the `stage:build → 
 labels the PR `adlc:changes-requested` for the fix loop. Because control doesn't depend on
 GitHub's review state, you may enable branch protection's **"require a human approval"** — it
 then gates only the final MERGE, and the pipeline still flows to a finished, QA'd PR. Also copy
-**`adlc-diff-scope.yml`** (fails a PR that touches files outside its stage's allowed paths — the
+**`adlc-diff-scope.yml`** (fails a lane PR that touches files outside the scope its issue declares
+in `.adlc/scope/<issue>.txt`; fill `{{TEST_DIR_REGEX}}` with the repo's test dirs — the
 path-level half of author/verifier separation). For the test battery, follow the Phase 1 choice: if the user picked **propose it**,
 run the `test-strategy` skill, then copy **`adlc-ci.yml`** filled with the chosen setup +
 commands (these are the required checks); if they picked **keep ours**, skip `adlc-ci.yml` and
@@ -247,9 +250,13 @@ and `{{BUILDER_BOT}}` (the account the Builder uses to open PRs). Offer the user
 
 If **auto-start** or **full autopilot** is chosen (Phase 1): copy `adlc-intake.yml`,
 `adlc-design.yml`, and `.github/ISSUE_TEMPLATE/requirement.yml`, and set the template's labels
-per the level — `adlc:auto` for auto-start, **plus `adlc:autopilot`** for full autopilot (that
-label is what makes `adlc-intake.yml` auto-approve Gate 1). Confirm the author allowlist, then
-describe the honest flow:
+per the level — `adlc:auto` + `stage:intake` for auto-start (keep both: the Analyst starts only
+when an issue carries the pair), **plus `adlc:autopilot`** for full autopilot (that label is what
+makes `adlc-intake.yml` auto-approve Gate 1, and it must be on the issue before the Analyst
+starts). Confirm the author allowlist, then describe the honest flow — on either level the
+Analyst runs once per filing (the lanes' own label moves never re-run it); if it stops to ask
+clarifying questions the workflow takes `adlc:auto` off and the issue waits at `stage:intake`
+until the Principal answers and adds `adlc:auto` back:
 - **Auto-start:** file → Analyst → **Gate 1 (you approve)** → Architect → build → PR
   (adversarial + architect review + CI) → QA → **Gate 2 (you merge + deploy)**.
 - **Full autopilot:** file → the whole chain runs → you review and merge the QA-approved,
