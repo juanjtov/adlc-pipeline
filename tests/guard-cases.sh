@@ -37,6 +37,11 @@ g A - feat 'eval "$(ssh-agent -s)" && git fetch origin'
 g A - feat 'timeout 30 grep -rn git . ; nohup rg bash src'                    # an ARGUMENT named git/bash is not a call
 g A - feat 'find . -name "*.sh" -exec grep -l "gh pr merge" {} \;'
 g D - feat '(gh pr merge 5) > /tmp/out 2>&1'
+g D - feat "gh alias set m 'pr merge' && gh m 5"                              # a new name for the blocked command
+g D - feat "gh alias set x --shell 'gh pr merge 5'; gh x"
+g D - feat 'gh alias import aliases.yml'
+g D - feat '"$GH" alias set m "pr merge"'
+g A - feat 'gh alias list'
 g D - feat $'bash <<EOF\ngh pr merge 5\nEOF'
 g D - feat 'echo "gh pr merge 5" | bash'
 g A - feat 'gh pr view 5'

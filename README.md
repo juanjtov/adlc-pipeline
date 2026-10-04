@@ -260,7 +260,8 @@ there limits nothing). It is sturdier than the prefix deny rules in `settings.js
   `bash`), it stops trusting the current branch: a push then has to name its branch —
   `git push -u origin feat/12-login`, not `git push` or `… HEAD`.
 - **It still reads command *text*.** A script on disk, code handed to another program
-  (`python -c`, `make`, `ssh`), a git alias or hook, or an encoded payload is invisible to it.
+  (`python -c`, `make`, `ssh`), a git or `gh` alias set up earlier, a git hook, or an encoded
+  payload is invisible to it.
   And in text it can't read it finds only the forbidden calls written out plainly — not ones
   that text assembles itself.
 

@@ -882,7 +882,7 @@ class Guard:
                 for word in PUSHES:
                     if word in texts:
                         self.check_push(args[texts.index(word) + 1:], self.cwd_of(scope), plumbing=word != "push")
-                for word in ("pr", "api"):
+                for word in ("pr", "api", "alias"):
                     if word in texts:
                         self.check_gh(args[texts.index(word):], scope)
                 self.check_http("curl", args)
@@ -1410,6 +1410,9 @@ class Guard:
         if group == "pr" and sub == "merge":
             raise Block("`gh pr merge`. Merging is the Principal's Gate 2 — no agent merges. "
                         "Post the Proposed Action Card and stop.")
+        if group == "alias" and sub in ("set", "import"):  # `gh alias set m 'pr merge'; gh m 5`
+            raise Block("`gh alias %s` can hide a blocked command behind a new name. Run gh "
+                        "commands under their own names." % sub)
         if group == "pr" and sub == "checkout":
             named = [args[j + 1] for j, a in enumerate(args[:-1]) if a.text in ("-b", "--branch")]
             self.move(self.cwd_of(scope), named[0] if named else PR_BRANCH)
