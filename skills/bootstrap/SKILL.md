@@ -308,12 +308,15 @@ automation is live.
    state-machine labels. Also confirm the charter + RUNBOOK + ADR, CLAUDE.md (with the
    ablation-date comment), CONTEXT-LOG.md, and (if chosen) the workflows exist. Report a short
    ✅/⬜ checklist.
-2. **Offer the first pipeline run:**
-   - **Greenfield:** offer to turn the PRD into the first intake issue — create a
-     `stage:intake` GitHub issue (ask before creating) summarizing the first slice of the
-     PRD, then hand it to the `product-analyst` agent.
+2. **Offer the first pipeline run** — through the `intake` skill, so every request enters the
+   same way (interview → preview → `stage:intake` issue, filed only on a yes):
+   - **Greenfield:** offer to run `intake` on the PRD — it slices it, sharpens the first
+     slice, and files that as the first intake issue; then hand it to the `product-analyst`
+     agent.
    - **Brownfield:** suggest a small, well-scoped starter item to run the full loop on
-     end-to-end before trusting it with bigger work.
+     end-to-end before trusting it with bigger work, and offer to file it with `intake`.
+   Mention the other starting points it takes (an idea, an existing issue, a Notion/Linear
+   ticket) in one line — don't walk through them.
 3. **Print the "you're ready" summary:** what was created, the automation level, the exact
    next command (e.g. "invoke the product-analyst agent on issue #N", or "read
    docs/adlc/RUNBOOK.md and run stage 1"), and the reminder that nothing was committed —
