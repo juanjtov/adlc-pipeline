@@ -31,8 +31,9 @@ author/verifier separation, never the security gate.
   bug fix with an obvious cause, a dependency-free tweak — the kind of change whose design is
   self-evident from the change itself.
 - **Passes the eligibility pre-screen.** Nothing it touches is on the sensitive list the cap
-  enforces: migrations, auth/authz, infra/deploy, CI, the ADLC harness (`.github/`, `.claude/`),
-  dependency manifests, or secrets. Estimated size within the cap (default ≤ 5 files, ≤ 40 lines).
+  enforces: migrations, auth/authz, infra/deploy, CI, the ADLC harness (`.github/`, `.claude/`,
+  `.adlc/scripts/`), dependency manifests, or secrets. Estimated size within the cap (default
+  ≤ 5 files, ≤ 40 lines).
 - **One runnable acceptance check is enough** to prove it — you don't need a story set.
 
 Anything else — new behavior, ambiguity, a security-relevant surface, a change you'd want an ADR
@@ -55,8 +56,8 @@ For **FAST**, post a **change brief** instead of a story set — enough for the 
 without an ADR:
 
 - **Change** — the one thing to do, in a sentence.
-- **Scope** — the exact files or globs it may touch (this becomes `.adlc/scope.txt`; the cap and
-  diff-scope check enforce it).
+- **Scope** — the exact files or directories it may touch (the Builder writes them to
+  `.adlc/scope/<issue>.txt`, one path prefix per line — not globs; the diff-scope check enforces it).
 - **Acceptance** — one runnable check (Given/When/Then or a command + expected result) that
   proves it, carrying an `S1-AC1` id so QA/tests can trace it.
 - **Out of scope** — what this deliberately does not touch.
