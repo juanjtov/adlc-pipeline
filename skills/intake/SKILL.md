@@ -33,10 +33,20 @@ If no starting point was given as an argument, ask which one it is.
 | **Idea** | a sentence or two, in chat | the interview (§2) does the work |
 | **PRD-lite** | one page: problem, outcome, users, out of scope | read it; ask only for what's missing |
 | **Full PRD** | a file or pasted document | read it, propose **slices** (§3), file the first |
-| **Existing GitHub issue** | `#N` or a URL | `gh issue view N`; sharpen it in place, then label it |
+| **Existing GitHub issue** | `#N` or a URL | `gh issue view N --json title,body,labels,author`; check it (below), sharpen it in place, then label it |
 | **External ticket** — Notion, Linear, Jira, … | a URL or id | fetch it through its connector (below); file a GitHub issue that links back |
 | **Bug / incident** | what happened vs. expected, repro, evidence | same flow; add the `bug` label |
 | **The Analyst's open questions** | an issue paused at `stage:intake` with numbered questions | answer them here, update the issue, then give the restart step (§5) |
+
+**Existing issues — check before you touch.** Labels start agents, so read them first:
+- Another `stage:*` or a `gate:*` label means the issue is already in the pipeline. Adding
+  `stage:intake` would send it back to the Analyst mid-flight. Stop and ask what the Principal
+  wants; never relabel it on your own.
+- `adlc:auto` on the issue means adding `stage:intake` starts the Analyst at once. Say so in
+  the preview.
+- The automated lanes run only on issues opened by the Principal or an allowlisted author
+  (charter §2.7). If someone else opened it, say so and offer to file a new issue that links
+  back, as for an external ticket.
 
 **External trackers.** Use the tracker's MCP connector when one is connected in this session
 (its page/issue fetch or search tools). If none is, say so and offer the two fallbacks:
@@ -87,16 +97,25 @@ Title: <outcome-first, one line>
 ## Out of scope
 ## Constraints          (omit if none)
 ## Open questions       (omit if none)
+## Later slices         (omit if none; the remaining slices from §3)
 ## Source               (link to the PRD / ticket; "idea, <date>" if none)
 ```
 
-On a yes: `gh issue create --label stage:intake` (or `gh issue edit N --add-label
-stage:intake` for an existing issue, with the sharpened body).
+On a yes: write the body to a temp file and pass it with `--body-file`. Never put PRD,
+ticket, or issue text inline in a shell command, where backticks or `$(…)` would be run.
+Then `gh issue create --label stage:intake --body-file <file>` (or `gh issue edit N
+--add-label stage:intake --body-file <file>` for an existing issue that passed the §1 check).
 
 ## 5. Hand off
 
-End with the single next step — local recipe: "invoke the product-analyst agent on issue
-#N"; auto-start lane, new issue: "the Analyst is running and will stop at Gate 1"; auto-start
-lane, questions answered: "add `adlc:auto` back to restart the Analyst" — the workflow took it
-off when the Analyst stopped to ask, and an edit or a comment alone never restarts it. Nothing
-else is yours: no stories, no ACs, no lane.
+End with the single next step, by what is true of the issue now:
+- **No `adlc:auto` on it** (the default; intake adds it only when asked): "invoke the
+  product-analyst agent on issue #N" — or, where the auto-start lane is installed, "add
+  `adlc:auto` to start the Analyst".
+- **Filed with `adlc:auto`:** "the Analyst is running and will stop at Gate 1" (with
+  `adlc:autopilot`, a FULL verdict goes straight on to design).
+- **Questions answered on a paused auto-start issue:** "add `adlc:auto` back to restart the
+  Analyst" — the workflow took it off when the Analyst stopped to ask, and an edit or a
+  comment alone never restarts it.
+
+Nothing else is yours: no stories, no ACs, no lane.
