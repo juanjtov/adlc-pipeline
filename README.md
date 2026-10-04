@@ -22,6 +22,10 @@ skills/
   ablation/                    # periodic context reset so the setup doesn't rot append-only
   bootstrap/                   # ← the dual-mode adoption WIZARD
 commands/adlc-init.md          # friendly alias that launches the wizard
+commands/adlc-mission-control.md   # opens Mission Control, the live view of the line
+mission-control/               # ← MISSION CONTROL: local live view (Python stdlib server + static page)
+bin/adlc-mission-control       # its launcher (on the Bash PATH when the plugin is enabled)
+hooks/hooks.json               # reports pipeline-agent activity to Mission Control when it is running
 templates/                     # what the wizard fills into the host repo
   host-CLAUDE.md.tmpl          # minimalist CLAUDE.md (commands + gotchas + pointers)
   skills/project-conventions.SKILL.md.tmpl   # lean: only what the code doesn't reveal
@@ -29,6 +33,7 @@ templates/                     # what the wizard fills into the host repo
   charter.md.tmpl · RUNBOOK.md.tmpl · adr-template.md · CONTEXT-LOG.md.tmpl
   settings.deny.json           # harness deny rules (no push-to-main / no self-merge)
   settings.telemetry.json      # opt-in OTel env for per-agent token/cost/latency
+  settings.mission-control.json   # opt-in OTel env that sends the same data straight to Mission Control
   github/labels.sh · adlc-builder.yml · adlc-qa.yml · adlc-review.yml · adlc-fix.yml
   github/adlc-intake.yml · adlc-design.yml        # auto-start (autopilot) lanes
   github/adlc-fast.yml                            # ← fast lane for trivial changes
@@ -89,6 +94,15 @@ agent come from **opt-in OpenTelemetry** (`settings.telemetry.json`): Claude Cod
 per-session tokens + cost + duration to your OTel collector, and `service.name` groups a whole
 pipeline run. A ready-to-run collector ships in `telemetry/` (`docker compose up -d`); latency
 works without one.
+
+**Mission Control.** `/adlc-mission-control` opens a live page of the line on your own machine:
+one station per agent, each request moving between them, what every agent is doing right now, and
+its tokens, cost and latency. It is read-only (it never labels, comments or merges), needs no
+install beyond Python 3, and keeps everything local: GitHub is read through your `gh` login, agent
+steps arrive through the plugin's hooks, and tokens/cost arrive as telemetry sent straight to it
+(`settings.mission-control.json`, no collector). It sees agents that run **on this machine**; runs
+on GitHub's runners show their GitHub state only. Details and limits: `mission-control/README.md`.
+Try it with made-up data: `adlc-mission-control --demo --open`.
 
 **Prompt caching, kept honest.** The harness re-serves each run's stable prefix — the tool set,
 the loaded skills, and `CLAUDE.md` — from cache at ~0.1× input price, so cost really scales with

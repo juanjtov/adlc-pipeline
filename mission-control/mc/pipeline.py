@@ -175,18 +175,19 @@ def _split_tools(value):
 
 
 def _skills_in(load_line, plugin_root):
-    """Skill names from an agent's 'Load:' line, with a size estimate where the file ships in the plugin."""
-    names = re.findall(r'`([^`]+)`', load_line)
-    out = []
-    for name in names:
-        short = name.split(':')[-1]
-        size = None
+    """Skill names from an agent's 'Load:' line. The agent is told to load these; a run may load fewer."""
+    return [{'name': name, 'tok': skill_tokens(plugin_root, '', name)} for name in re.findall(r'`([^`]+)`', load_line)]
+
+
+def skill_tokens(plugin_root, cwd, name):
+    """A size estimate for a skill: the plugin's own skills first, then the project's. None when the file is not found."""
+    short = str(name).split(':')[-1]
+    for base in (os.path.join(plugin_root or '', 'skills'), os.path.join(cwd or '', '.claude', 'skills')):
         try:
-            size = os.path.getsize(os.path.join(plugin_root, 'skills', short, 'SKILL.md'))
+            return est_tokens(os.path.getsize(os.path.join(base, short, 'SKILL.md')))
         except OSError:
-            pass
-        out.append({'name': name, 'tok': est_tokens(size) if size else None})
-    return out
+            continue
+    return None
 
 
 def est_tokens(chars):
