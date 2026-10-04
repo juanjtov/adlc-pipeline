@@ -3,14 +3,18 @@
 GitHub is the source of truth for where a request stands (labels, pull requests, verdict comments).
 Hook events say what an agent is doing right now. Telemetry says what it cost.
 """
-import json
 import os
 import time
 
 from . import pipeline as P
 
 LIVE_GAP = 600      # seconds without any event before a run stops counting as working
+LONG_GAP = 1800     # the same while a tool call is open: a long test run or a helper agent sends nothing until it ends
 RUN_WINDOW = 7 * 86400
+DAY = 86400
+
+SLOT_NAME = {'intake': 'intake', 'analyst': 'the Analyst', 'gate1': 'Gate 1', 'architect': 'the Architect', 'builder': 'the Builder',
+             'reviewer': 'review', 'qa': 'QA', 'gate2': 'Gate 2', 'done': 'main'}
 
 
 def midnight(now):
@@ -47,6 +51,9 @@ def build(store, repo, now=None, agents=None, github=None, mode='live', plugin_r
     for c in store.comments(repo):
         comments.setdefault((c['kind'], c['number']), []).append(c)
     runs = store.runs_in(repo, now - RUN_WINDOW)
+    open_step = store.runs_with_open_step()
+    for r in runs:
+        r['open_step'] = r['id'] in open_step
 
     requests = []
     for issue in issues:
@@ -72,6 +79,7 @@ def build(store, repo, now=None, agents=None, github=None, mode='live', plugin_r
             'today': {'tok': total['tok'], 'usd': total['usd'], 'input': total['input'] + total['cacheCreation'], 'cacheRead': total['cacheRead'],
                       'output': total['output'], 'steps': steps, 'runs': len([r for r in st_runs if r['started'] >= day0])},
             'lat': (total['ms'] / total['replies'] / 1000.0) if total['replies'] else None,
+            # Requests here that no run on this machine is working on. Their agent may be running elsewhere (a lane on GitHub).
             'queued': len([r for r in requests if r['at'] == st and r['phase'] == 'queued']),
             'run': _run_detail(store, pick, by_n, agents.get(st) or {}, repo, comments, events, prs, now, plugin_root) if pick else None,
         }
@@ -81,12 +89,15 @@ def build(store, repo, now=None, agents=None, github=None, mode='live', plugin_r
         if r['epic'] not in seen:
             seen.add(r['epic'])
             epics.append({'key': r['epic'], 'name': r['epic'] or 'No milestone'})
-    recent = store.one('SELECT COUNT(*) AS n FROM api WHERE ts >= ?', (now - 86400,))['n']
+    tel = store.meta('telemetry') or {}
     return {
         'v': 1, 'mode': mode, 'now': now, 'repo': repo,
         'repos': [{'name': name, 'count': _on_line(store, name)} for name in store.repos()],
         'github': github or {'ok': True, 'msg': '', 'polled': None},
-        'telemetry': recent > 0,
+        # Whether Claude Code's telemetry reaches us at all, from any session. Whether a given run has figures is a separate matter.
+        'telemetry': now - (tel.get('seen') or 0) < DAY,
+        'telemetryNote': ('Model replies from plugin agents are arriving without the agent’s name, so they cannot be placed on a run. '
+                          'Add OTEL_LOG_TOOL_DETAILS=1 to the same settings block.') if now - (tel.get('unnamed') or 0) < DAY else '',
         'epics': epics,
         'merged': len([r for r in requests if r['phase'] == 'done']),
         'lead': _lead(events),
@@ -101,13 +112,21 @@ def _on_line(store, repo):
 
 
 def _is_live(run, now):
-    return not run.get('ended') and now - (run.get('last_seen') or 0) < LIVE_GAP
+    quiet = now - (run.get('last_seen') or 0)
+    return not run.get('ended') and quiet < (LONG_GAP if run.get('open_step') else LIVE_GAP)
+
+
+def _serves(run, slot):
+    """Whether a run is work for a slot. The Architect has two duties: a run of it that names a pull request is its review of that pull request."""
+    if run['station'] == 'architect':
+        return slot == ('reviewer' if run.get('pr') else 'architect')
+    return run['station'] == slot
 
 
 # ---------------------------------------------------------------------------------------- requests
 def _request(store, issue, evs, pr_list, comments, runs, now, day0):
     n, labels = issue['number'], issue['labels']
-    slot, label = P.slot_for_labels(labels)
+    slot, label = P.slot_for_labels(labels, evs)
     pr_list = sorted(pr_list, key=lambda p: p.get('created') or 0)
     open_prs = [p for p in pr_list if p['state'] == 'OPEN']
     merged_prs = [p for p in pr_list if p.get('merged')]
@@ -118,23 +137,28 @@ def _request(store, issue, evs, pr_list, comments, runs, now, day0):
         if not (merged_prs and (on_line_before or slot)):
             return None
         done_at = merged_prs[-1]['merged']
+    elif slot is None:
+        return None
+    elif merged_prs and not open_prs:
+        # Merged, but nothing closed the issue (no closing keyword). The line is done with it, unless a label moved it again afterwards.
+        moved = max([e['ts'] for e in evs if e['added'] and e['label'] == label and e.get('ts')] or [0])
+        if merged_prs[-1]['merged'] >= moved:
+            done_at = merged_prs[-1]['merged']
+    if done_at is not None:
         if done_at < day0:
             return None
         slot = 'done'
-    elif slot is None:
-        return None
 
     icomments = comments.get(('issue', n), [])
     pcomments = comments.get(('pr', pr['number']), []) if pr else []
-    timeline, rounds = _timeline(issue, evs, pr, pcomments, done_at)
-    if slot in ('builder',) and label in ('stage:build', 'stage:fast') and pr and pr['state'] == 'OPEN':
+    timeline, rounds = _timeline(evs, pr, pcomments, done_at)
+    if slot == 'builder' and pr and pr['state'] == 'OPEN':
         slot = timeline[-1]['slot'] if timeline and timeline[-1]['slot'] in ('builder', 'reviewer') else 'reviewer'
         if 'adlc:changes-requested' in pr['labels']:
             slot = 'builder'
     if not timeline or timeline[-1]['slot'] != slot:
         timeline.append({'ts': (timeline[-1]['ts'] if timeline else issue.get('updated') or issue.get('created') or now), 'slot': slot, 'round': rounds})
 
-    lane = 'fast' if ('stage:fast' in labels or any(e['label'] == 'stage:fast' and e['added'] for e in evs) or (pr and 'lane:fast' in pr['labels'])) else 'full'
     triage, _ = _last(P.TRIAGE_RE, icomments)
     my_runs = [r for r in runs if r.get('issue') == n or (pr and r.get('pr') == pr['number'])]
 
@@ -143,7 +167,7 @@ def _request(store, issue, evs, pr_list, comments, runs, now, day0):
         t1 = timeline[i + 1]['ts'] if i + 1 < len(timeline) else None
         stop = {'slot': tr['slot'], 'round': tr.get('round', 0), 't0': tr['ts'], 't1': t1, 'tok': 0, 'usd': 0.0, 'steps': 0, 'note': '', 'auto': False}
         if tr['slot'] in P.STATIONS:
-            ids = [r['id'] for r in my_runs if r['station'] == tr['slot'] and r['started'] >= tr['ts'] - 120 and (t1 is None or r['started'] < t1)]
+            ids = [r['id'] for r in my_runs if _serves(r, tr['slot']) and r['started'] >= tr['ts'] - 120 and (t1 is None or r['started'] < t1)]
             total = store.api_sum(ids)
             stop.update({'tok': total['tok'], 'usd': total['usd'], 'steps': sum(store.step_count(i_) for i_ in ids)})
         if t1 is not None:
@@ -154,13 +178,14 @@ def _request(store, issue, evs, pr_list, comments, runs, now, day0):
         stops.insert(0, {'slot': 'intake', 'round': 0, 't0': issue['created'], 't1': stops[0]['t0'], 'tok': 0, 'usd': 0.0, 'steps': 0,
                          'note': 'Filed, then labelled stage:intake', 'auto': False})
 
+    # 'queued' means no run on this machine is working on it. Its agent may still be at work elsewhere (a lane on GitHub).
     phase, since = 'queued', timeline[-1]['ts']
     if slot == 'done':
         phase = 'done'
     elif slot in P.GATES:
         phase = 'waiting'
     else:
-        live = [r for r in my_runs if r['station'] == slot and _is_live(r, now)]
+        live = [r for r in my_runs if _serves(r, slot) and _is_live(r, now)]
         if live:
             phase, since = 'working', live[-1]['started']
     adr = None
@@ -169,28 +194,56 @@ def _request(store, issue, evs, pr_list, comments, runs, now, day0):
         if m:
             adr = int(m.group(1))
     return {
-        'n': n, 'title': issue['title'], 'url': issue['url'], 'epic': issue.get('milestone') or '', 'lane': lane,
+        'n': n, 'title': issue['title'], 'url': issue['url'], 'epic': issue.get('milestone') or '', 'lane': _lane(labels, evs, pr),
         'fastRec': triage == 'FAST' and slot == 'gate1', 'autopilot': 'adlc:autopilot' in labels, 'at': slot, 'phase': phase,
         'since': since, 'born': issue.get('created') or since, 'doneAt': done_at, 'pr': pr['number'] if pr else None, 'adr': adr,
         'round': rounds, 'alert': 'Needs a human' if (pr and 'needs:human' in pr['labels']) else '', 'stops': stops,
     }
 
 
-def _timeline(issue, evs, pr, pcomments, done_at):
-    """Every move of a request, in order: label changes, the pull request opening, and each fix round."""
+def _lane(labels, evs, pr):
+    """Fast only while the fast lane still has it. A request bounced to the full pipeline (stage:fast, then stage:design) is a full one."""
+    if pr and 'lane:fast' in pr['labels']:
+        return 'fast'
+    routed = [e['label'] for e in evs if e['added'] and e['label'] in ('stage:fast', 'stage:design', 'stage:build')]
+    if routed:
+        return 'fast' if routed[-1] == 'stage:fast' else 'full'
+    return 'fast' if 'stage:fast' in labels else 'full'
+
+
+def _review(comments):
+    """What one review left on the pull request: its last ADLC-ADV and ADLC-ARCH verdicts, and when the last one was posted."""
+    adv = arch = at = None
+    for c in comments:
+        a, b = P.ADV_RE.findall(c['body'] or ''), P.ARCH_RE.findall(c['body'] or '')
+        adv, arch = (a[-1] if a else adv), (b[-1] if b else arch)
+        if a or b:
+            at = c['ts']
+    return adv, arch, at
+
+
+def _timeline(evs, pr, pcomments, done_at):
+    """Every move of a request, in order: label changes, the pull request opening, and each fix round.
+
+    A fix round is what the lanes make it. A review that is not clean on both verdicts sends the pull request to
+    the Builder, and the Builder's `adlc-fix:` commit sends it back to review. So there is one round per fix commit
+    (the count adlc-fix-cap.sh caps), plus one more while a review's request for changes is still unanswered.
+    """
     t = [{'ts': e['ts'], 'slot': P.LABEL_SLOT[e['label']], 'round': 0, 'actor': e.get('actor'), 'label': e['label']}
          for e in evs if e['added'] and e['label'] in P.LABEL_SLOT and e.get('ts')]
     rounds = 0
     if pr and pr.get('created'):
-        t.append({'ts': pr['created'], 'slot': 'reviewer', 'round': 0})
-        for c in sorted(pcomments, key=lambda c: c['ts'] or 0):
-            hits = P.ADV_RE.findall(c['body'] or '')
-            if hits and hits[-1] == 'CHANGES':
-                rounds += 1
-                t.append({'ts': c['ts'], 'slot': 'builder', 'round': rounds})
-                fix = next((f for f in (pr.get('fix_commits') or []) if f > c['ts']), None)
-                if fix:
-                    t.append({'ts': fix, 'slot': 'reviewer', 'round': rounds})
+        starts = [pr['created']] + sorted(f for f in (pr.get('fix_commits') or []) if f > pr['created'])
+        ordered = sorted((c for c in pcomments if c.get('ts')), key=lambda c: c['ts'])
+        for i, start in enumerate(starts):
+            end = starts[i + 1] if i + 1 < len(starts) else None
+            t.append({'ts': start, 'slot': 'reviewer', 'round': i})
+            adv, arch, at = _review([c for c in ordered if c['ts'] >= start and (end is None or c['ts'] < end)])
+            # A fix commit followed, so this review asked for one. For the latest review, read its verdicts. At the cap
+            # (needs:human) the loop has stopped and a person takes over: no further round.
+            if end is not None or ('CHANGES' in (adv, arch) and 'needs:human' not in pr['labels']):
+                rounds = i + 1
+                t.append({'ts': at or end, 'slot': 'builder', 'round': rounds})
     if done_at:
         t.append({'ts': done_at, 'slot': 'done', 'round': rounds})
     t.sort(key=lambda x: x['ts'])
@@ -207,6 +260,9 @@ def _note(tr, nxt, pr, icomments, pcomments, labels, t1):
     slot, t0 = tr['slot'], tr['ts']
     inside = lambda cs: [c for c in cs if t0 - 5 <= (c['ts'] or 0) <= t1 + 180]
     prn = ('PR #%d' % pr['number']) if pr else 'the pull request'
+    if nxt.get('label') and P.SLOTS.index(nxt['slot']) < P.SLOTS.index(slot):
+        # A label moved it to an earlier stage (stories returned, QA re-run). A fix round is not this: it carries no label.
+        return 'Sent back to %s%s' % (SLOT_NAME[nxt['slot']], ' by ' + nxt['actor'] if nxt.get('actor') else ''), False
     if slot == 'analyst':
         verdict, _ = _last(P.TRIAGE_RE, inside(icomments))
         if verdict == 'FAST':
@@ -266,7 +322,7 @@ def _run_detail(store, run, by_n, agent, repo, comments, events, prs, now, plugi
         ctx.append({'id': 'agent', 'name': 'System prompt: the agent definition', 'tok': P.est_tokens(len(agent['prompt'])), 'cached': True, 'est': True,
                     'detail': 'The agent file is this agent’s whole system prompt. It ships with the plugin, so it is shown in full.',
                     'items': [{'name': agent.get('file', ''), 'tok': P.est_tokens(len(agent['prompt']))}], 'text': agent['prompt']})
-    skills = _skills_loaded(store, run, plugin_root)
+    skills = [{'name': name, 'tok': P.skill_tokens(plugin_root, run.get('cwd'), name)} for name in store.step_values(run['id'], 'skill')]
     if skills:
         ctx.append({'id': 'skills', 'name': '%d skill%s loaded' % (len(skills), '' if len(skills) == 1 else 's'), 'tok': sum(s.get('tok') or 0 for s in skills),
                     'cached': True, 'est': True, 'detail': 'Loaded with the Skill tool during this run. Sizes are estimates from the skill files.',
@@ -281,16 +337,23 @@ def _run_detail(store, run, by_n, agent, repo, comments, events, prs, now, plugi
     ctx_total = None
     if replies:
         last = replies[-1]
-        ctx_total = (last['input'] or 0) + (last['cache_read'] or 0) + (last['cache_creation'] or 0)
         fresh = (last['input'] or 0) + (last['cache_creation'] or 0)
+        cached = last['cache_read'] or 0
+        ctx_total = fresh + cached
         known = sum(c['tok'] for c in ctx)
-        rest = max(0, ctx_total - fresh - known)
+        if known <= cached:
+            rest, new = cached - known, fresh
+        else:
+            # A cold or half-warm cache: the parts above were sent as new input this time, so they are inside `fresh`, not beside it.
+            for c in ctx:
+                c['cached'] = False
+            rest, new = 0, max(0, ctx_total - known)
         if rest:
             ctx.append({'id': 'rest', 'name': 'Tool definitions, environment and the run so far', 'tok': rest, 'cached': True, 'est': False,
                         'detail': 'Everything else in the latest request: what Claude Code adds around the agent prompt, plus every tool call and result so far. '
                                   'Measured as the remainder; the text is not exported.', 'items': [], 'text': ''})
-        if fresh:
-            ctx.append({'id': 'new', 'name': 'New in the latest reply', 'tok': fresh, 'cached': False, 'est': False,
+        if new:
+            ctx.append({'id': 'new', 'name': 'New in the latest reply', 'tok': new, 'cached': False, 'est': False,
                         'detail': 'Input that was not served from cache in the latest request. It is billed at the full price once, then joins the cache.',
                         'items': [], 'text': ''})
 
@@ -302,16 +365,25 @@ def _run_detail(store, run, by_n, agent, repo, comments, events, prs, now, plugi
 
     return {
         'id': run['id'], 'station': run['station'], 'n': req['n'] if req else run.get('issue'), 'title': req['title'] if req else '',
-        'round': req['round'] if req else 0, 'live': live, 't0': run['started'], 't1': t1, 'session': (run.get('session') or '')[:10],
+        'round': _round_of(run, req), 'live': live, 't0': run['started'], 't1': t1, 'session': (run.get('session') or '')[:10],
         'model': run.get('model') or agent.get('model') or '',
         'steps': [{'kind': s['kind'], 'label': s['label'], 't0': s['started'], 't1': s['ended'], 'ok': s['ok'] != 0} for s in steps],
         'stepCount': store.step_count(run['id']), 'total': None,
         'prompt': prompt, 'payload': payload, 'ctx': ctx, 'ctxTotal': ctx_total,
-        'outputs': _outputs(run, steps, req, comments, events, prs, now), 'report': run.get('report') or '',
+        'outputs': _outputs(run, store.step_values(run['id'], 'path'), req, comments, events, prs, run.get('ended') or (now if live else run.get('last_seen') or run['started'])),
+        'report': run.get('report') or '',
         'replies': [{'input': (r['input'] or 0) + (r['cache_creation'] or 0), 'output': r['output'] or 0, 'cacheRead': r['cache_read'] or 0,
                      'usd': r['cost'] or 0.0, 'ms': r['ms'] or 0.0} for r in replies],
         'acc': {'tok': acc['tok'], 'usd': acc['usd'], 'input': acc['input'] + acc['cacheCreation'], 'cacheRead': acc['cacheRead'], 'output': acc['output']},
     }
+
+
+def _round_of(run, req):
+    """The fix round a run belongs to: that of the stop it started in. Only the Builder and the review have rounds."""
+    for stop in reversed(req['stops'] if req else []):
+        if stop['slot'] in ('builder', 'reviewer') and _serves(run, stop['slot']) and run['started'] >= stop['t0'] - 120:
+            return stop['round']
+    return 0
 
 
 def _file_size(path):
@@ -321,29 +393,11 @@ def _file_size(path):
         return 0
 
 
-def _skills_loaded(store, run, plugin_root):
-    """The skills this run actually loaded, read from its Skill tool calls. An agent is told to load some; it may load fewer."""
-    out, seen = [], set()
-    for row in store.q("SELECT input FROM steps WHERE run = ? AND tool = 'Skill' ORDER BY id", (run['id'],)):
-        try:
-            name = (json.loads(row['input'] or '{}') or {}).get('skill')
-        except ValueError:
-            name = None
-        if name and name not in seen:
-            seen.add(name)
-            out.append({'name': name, 'tok': P.skill_tokens(plugin_root, run.get('cwd'), name)})
-    return out
-
-
-def _outputs(run, steps, req, comments, events, prs, now):
-    """What the run left behind: files it changed, and what appeared on GitHub while it ran."""
+def _outputs(run, files, req, comments, events, prs, end):
+    """What the run left behind: the files it changed, and what appeared on GitHub while it ran (`end` is when it stopped, or now)."""
     out = []
-    t0, t1 = run['started'] - 5, (run.get('ended') or now) + 180
+    t0, t1 = run['started'] - 5, end + 180
     cwd = (run.get('cwd') or '').rstrip('/') + '/'
-    files = []
-    for s in steps:
-        if s.get('path') and s['path'] not in files:
-            files.append(s['path'])
     if files:
         shown = [f[len(cwd):] if f.startswith(cwd) else f for f in files[:8]]
         out.append({'icon': 'pencil', 'title': '%d file%s changed' % (len(files), '' if len(files) == 1 else 's'),
@@ -405,6 +459,7 @@ def _lead(events):
 
 
 def _feed(events, prs, comments, runs, day0):
+    """Today's activity, newest first. The page prints clock times only, so nothing older than midnight belongs here."""
     feed = []
     on_line = set()   # issues that have been on the line at some point; other issues and their pull requests are not ours to report
     for n, evs in events.items():
@@ -433,7 +488,8 @@ def _feed(events, prs, comments, runs, day0):
             if P.ACTION_CARD_RE.search(body):
                 feed.append({'t': c['ts'], 'who': 'qa', 'n': issue, 'text': 'posted the Proposed Action Card on %s #%d' % ('PR' if kind == 'pr' else 'issue', number)})
     for r in runs:
-        if r['started'] >= day0 and r.get('station'):
+        if r.get('station'):
             feed.append({'t': r['started'], 'who': r['station'], 'n': r.get('issue'), 'text': 'started a run' + (' on #%d' % r['issue'] if r.get('issue') else '')})
-    feed.sort(key=lambda f: -(f['t'] or 0))
+    feed = [f for f in feed if (f['t'] or 0) >= day0]
+    feed.sort(key=lambda f: -f['t'])
     return feed[:40]

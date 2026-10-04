@@ -1,33 +1,26 @@
 """Reads the pipeline's state from GitHub with the user's own `gh` login. Read-only: one GraphQL call per poll."""
 import calendar
+import hashlib
 import json
-import re
 import subprocess
 import threading
 import time
 
 from . import pipeline
 
+# Open issues are asked for by pipeline label (GitHub matches any of the labels), so a request that has waited
+# at a gate for a week is still returned. Closed issues and closed pull requests only matter while they are recent.
 QUERY = """
 query($owner: String!, $name: String!) {
   repository(owner: $owner, name: $name) {
-    open: issues(first: 60, states: OPEN, orderBy: {field: UPDATED_AT, direction: DESC}) { nodes { ...issue } }
+    open: issues(first: 60, states: OPEN, labels: %s, orderBy: {field: UPDATED_AT, direction: DESC}) { nodes { ...issue } }
     closed: issues(first: 25, states: CLOSED, orderBy: {field: UPDATED_AT, direction: DESC}) { nodes { ...issue } }
-    pullRequests(first: 40, orderBy: {field: UPDATED_AT, direction: DESC}) {
-      nodes {
-        number title url state createdAt mergedAt updatedAt headRefName body
-        author { login }
-        labels(first: 20) { nodes { name } }
-        closingIssuesReferences(first: 5) { nodes { number repository { nameWithOwner } } }
-        commits(last: 40) { nodes { commit { messageHeadline committedDate } } }
-        comments(last: 40) { nodes { id body createdAt author { login } } }
-      }
-    }
+    openPrs: pullRequests(first: 40, states: OPEN, orderBy: {field: UPDATED_AT, direction: DESC}) { nodes { ...pr } }
+    closedPrs: pullRequests(first: 15, states: [MERGED, CLOSED], orderBy: {field: UPDATED_AT, direction: DESC}) { nodes { ...pr } }
   }
 }
 fragment issue on Issue {
-  number title url state createdAt closedAt updatedAt
-  author { login }
+  number title url state createdAt updatedAt
   milestone { title }
   labels(first: 20) { nodes { name } }
   timelineItems(last: 60, itemTypes: [LABELED_EVENT, UNLABELED_EVENT]) {
@@ -37,9 +30,16 @@ fragment issue on Issue {
       ... on UnlabeledEvent { createdAt label { name } actor { login } }
     }
   }
-  comments(last: 30) { nodes { id body createdAt author { login } } }
+  comments(last: 30) { nodes { id body createdAt } }
 }
-"""
+fragment pr on PullRequest {
+  number title url state createdAt mergedAt headRefName
+  labels(first: 20) { nodes { name } }
+  closingIssuesReferences(first: 5) { nodes { number repository { nameWithOwner } } }
+  commits(last: 40) { nodes { commit { messageHeadline committedDate } } }
+  comments(last: 40) { nodes { id body createdAt } }
+}
+""" % json.dumps(list(pipeline.LABEL_SLOT))
 
 
 class GhError(Exception):
@@ -56,101 +56,111 @@ def epoch(iso):
 def fetch(repo, run=subprocess.run):
     """One read of a repo's issues, pull requests, labels and comments. Raises GhError with a plain reason."""
     owner, _, name = repo.partition('/')
-    cmd = ['gh', 'api', 'graphql', '-f', 'query=' + QUERY, '-F', 'owner=' + owner, '-F', 'name=' + name]
+    # -f, not -F: -F would read a repo named '2048' as a number.
+    cmd = ['gh', 'api', 'graphql', '-f', 'query=' + QUERY, '-f', 'owner=' + owner, '-f', 'name=' + name]
     try:
         out = run(cmd, capture_output=True, text=True, timeout=30)
     except FileNotFoundError:
         raise GhError('The gh command is not installed')
-    except subprocess.SubprocessError as exc:
+    except (OSError, subprocess.SubprocessError) as exc:
         raise GhError('gh did not answer: ' + type(exc).__name__)
     if out.returncode != 0:
         err = (out.stderr or out.stdout or '').strip().splitlines()
         msg = err[0] if err else 'gh failed'
-        if 'auth' in msg.lower() or 'login' in msg.lower():
+        if any(sign in msg.lower() for sign in ('gh auth login', 'not logged in', 'bad credentials', 'http 401')):
             msg = 'gh is not signed in. Run: gh auth login'
         raise GhError(msg[:160])
     try:
         doc = json.loads(out.stdout)
     except ValueError:
         raise GhError('gh returned something that is not JSON')
-    data = (doc.get('data') or {}).get('repository')
+    data = (doc.get('data') or {}).get('repository') if isinstance(doc, dict) else None
     if not data:
-        errs = doc.get('errors') or [{}]
+        errs = (doc.get('errors') if isinstance(doc, dict) else None) or [{}]
         raise GhError(str(errs[0].get('message') or 'Repository not found')[:160])
     return data
 
 
 def apply(store, repo, data):
-    """Mirror one fetch into the store."""
-    for node in ((data.get('open') or {}).get('nodes') or []) + ((data.get('closed') or {}).get('nodes') or []):
-        number = node['number']
-        store.put('issues', {
-            'repo': repo, 'number': number, 'title': node.get('title') or '', 'url': node.get('url') or '',
-            'state': node.get('state') or 'OPEN', 'labels': json.dumps([l['name'] for l in _nodes(node, 'labels')]),
-            'milestone': (node.get('milestone') or {}).get('title'), 'author': (node.get('author') or {}).get('login'),
-            'created': epoch(node.get('createdAt')), 'closed': epoch(node.get('closedAt')), 'updated': epoch(node.get('updatedAt')),
-        })
-        for ev in _nodes(node, 'timelineItems'):
-            label = (ev.get('label') or {}).get('name')
-            if label:
-                store.put('label_events', {'repo': repo, 'number': number, 'label': label, 'added': 1 if ev.get('__typename') == 'LabeledEvent' else 0,
-                                           'ts': epoch(ev.get('createdAt')), 'actor': (ev.get('actor') or {}).get('login')})
-        _comments(store, repo, 'issue', number, node)
-    for node in _nodes(data, 'pullRequests'):
-        number = node['number']
-        # The same order the lanes use: a closing reference in this repo, else the issue the branch names, else the first #N in the body.
-        closing = [n['number'] for n in _nodes(node, 'closingIssuesReferences')
-                   if ((n.get('repository') or {}).get('nameWithOwner') or repo).lower() == repo.lower()]
-        issue = closing[0] if closing else pipeline.issue_in_branch(node.get('headRefName')) or _first_ref(node.get('body'))
-        commits = [c.get('commit') or {} for c in _nodes(node, 'commits')]
-        dates = [epoch(c.get('committedDate')) for c in commits if c.get('committedDate')]
-        fixes = sorted(epoch(c.get('committedDate')) for c in commits if (c.get('messageHeadline') or '').startswith('adlc-fix:') and c.get('committedDate'))
-        store.put('prs', {
-            'repo': repo, 'number': number, 'title': node.get('title') or '', 'url': node.get('url') or '', 'state': node.get('state') or 'OPEN',
-            'head': node.get('headRefName'), 'labels': json.dumps([l['name'] for l in _nodes(node, 'labels')]), 'issue': issue,
-            'author': (node.get('author') or {}).get('login'), 'created': epoch(node.get('createdAt')), 'merged': epoch(node.get('mergedAt')),
-            'updated': epoch(node.get('updatedAt')), 'fix_commits': json.dumps(fixes), 'last_commit': max(dates) if dates else None,
-        })
-        _comments(store, repo, 'pr', number, node)
+    """Make the mirror of a repo match one fetch. Issues and pull requests are replaced whole, so one that left
+    the line (closed, labels removed) leaves the mirror too. Label history and comments only grow."""
+    with store.tx():
+        store.x('DELETE FROM issues WHERE repo = ?', (repo,))
+        store.x('DELETE FROM prs WHERE repo = ?', (repo,))
+        for node in _nodes(data, 'open') + _nodes(data, 'closed'):
+            number = node['number']
+            store.put('issues', {
+                'repo': repo, 'number': number, 'title': node.get('title') or '', 'url': node.get('url') or '',
+                'state': node.get('state') or 'OPEN', 'labels': json.dumps([l['name'] for l in _nodes(node, 'labels')]),
+                'milestone': (node.get('milestone') or {}).get('title'),
+                'created': epoch(node.get('createdAt')), 'updated': epoch(node.get('updatedAt')),
+            })
+            for ev in _nodes(node, 'timelineItems'):
+                label = (ev.get('label') or {}).get('name')
+                if label:
+                    store.put('label_events', {'repo': repo, 'number': number, 'label': label, 'added': 1 if ev.get('__typename') == 'LabeledEvent' else 0,
+                                               'ts': epoch(ev.get('createdAt')), 'actor': (ev.get('actor') or {}).get('login')})
+            _comments(store, repo, 'issue', number, node)
+        for node in _nodes(data, 'openPrs') + _nodes(data, 'closedPrs'):
+            number = node['number']
+            # The issue a pull request works on, as the diff-scope lane reads it: a closing reference in this repo,
+            # else the issue its branch names. A bare #N in the text ties it to nothing.
+            closing = [n['number'] for n in _nodes(node, 'closingIssuesReferences')
+                       if ((n.get('repository') or {}).get('nameWithOwner') or repo).lower() == repo.lower()]
+            issue = closing[0] if closing else pipeline.issue_in_branch(node.get('headRefName'))
+            commits = [c.get('commit') or {} for c in _nodes(node, 'commits')]
+            fixes = sorted(epoch(c.get('committedDate')) for c in commits if (c.get('messageHeadline') or '').startswith('adlc-fix:') and c.get('committedDate'))
+            store.put('prs', {
+                'repo': repo, 'number': number, 'title': node.get('title') or '', 'url': node.get('url') or '', 'state': node.get('state') or 'OPEN',
+                'head': node.get('headRefName'), 'labels': json.dumps([l['name'] for l in _nodes(node, 'labels')]), 'issue': issue,
+                'created': epoch(node.get('createdAt')), 'merged': epoch(node.get('mergedAt')), 'fix_commits': json.dumps(fixes),
+            })
+            _comments(store, repo, 'pr', number, node)
 
 
 def _nodes(node, key):
-    return ((node or {}).get(key) or {}).get('nodes') or []
+    return [n for n in (((node or {}).get(key) or {}).get('nodes') or []) if n]
 
 
 def _comments(store, repo, kind, number, node):
     for c in _nodes(node, 'comments'):
-        store.put('comments', {'repo': repo, 'cid': c.get('id'), 'kind': kind, 'number': number, 'ts': epoch(c.get('createdAt')),
-                               'author': (c.get('author') or {}).get('login'), 'body': c.get('body') or ''})
-
-
-def _first_ref(text):
-    m = re.search(r'#(\d+)', text or '')
-    return int(m.group(1)) if m else None
+        store.put('comments', {'repo': repo, 'cid': c.get('id'), 'kind': kind, 'number': number, 'ts': epoch(c.get('createdAt')), 'body': c.get('body') or ''})
 
 
 class Poller(threading.Thread):
-    """Polls each known repo in turn and reports whether GitHub could be read."""
+    """Reads GitHub for the repos a page is open on, and reports whether each could be read.
+
+    `repos` returns those repos. With no page open nothing is read: a read costs a few points of the
+    account's hourly GraphQL budget, and nobody is there to see the result.
+    """
 
     def __init__(self, store, repos, on_change, interval=15.0, fetcher=fetch):
         super().__init__(daemon=True)
         self.store, self.repos, self.on_change, self.interval, self.fetcher = store, repos, on_change, interval, fetcher
         self.status = {}
+        self.seen = {}   # repo -> digest of the last read, so an unchanged read costs no writes
         self.wake = threading.Event()
         self.stopped = False
 
     def poll(self, repo):
+        last = (self.status.get(repo) or {}).get('polled')
         try:
-            apply(self.store, repo, self.fetcher(repo))
+            data = self.fetcher(repo)
+            digest = hashlib.sha1(json.dumps(data, sort_keys=True).encode()).hexdigest()
+            if digest != self.seen.get(repo):
+                apply(self.store, repo, data)
+                self.seen[repo] = digest
             self.status[repo] = {'ok': True, 'msg': '', 'polled': time.time()}
         except GhError as exc:
-            prev = self.status.get(repo) or {}
-            self.status[repo] = {'ok': False, 'msg': str(exc), 'polled': prev.get('polled')}
+            self.status[repo] = {'ok': False, 'msg': str(exc), 'polled': last}
+        except Exception as exc:   # whatever a read runs into, this thread goes on: a dead poller would leave the page saying GitHub is followed
+            self.status[repo] = {'ok': False, 'msg': 'Reading GitHub failed (%s)' % type(exc).__name__, 'polled': last}
         self.on_change()
 
     def run(self):
         while not self.stopped:
-            for repo in list(self.repos()):
+            watched = list(self.repos())
+            for repo in watched:
                 self.poll(repo)
-            self.wake.wait(self.interval)
+            self.wake.wait(self.interval if watched else None)   # no page open: wait for one
             self.wake.clear()
