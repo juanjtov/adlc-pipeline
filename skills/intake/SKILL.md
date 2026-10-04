@@ -36,7 +36,7 @@ If no starting point was given as an argument, ask which one it is.
 | **Existing GitHub issue** | `#N` or a URL | `gh issue view N`; sharpen it in place, then label it |
 | **External ticket** — Notion, Linear, Jira, … | a URL or id | fetch it through its connector (below); file a GitHub issue that links back |
 | **Bug / incident** | what happened vs. expected, repro, evidence | same flow; add the `bug` label |
-| **The Analyst's open questions** | an issue paused at `stage:intake` with numbered questions | answer them here, update the issue, re-run the Analyst |
+| **The Analyst's open questions** | an issue paused at `stage:intake` with numbered questions | answer them here, update the issue, then give the restart step (§5) |
 
 **External trackers.** Use the tracker's MCP connector when one is connected in this session
 (its page/issue fetch or search tools). If none is, say so and offer the two fallbacks:
@@ -96,5 +96,7 @@ stage:intake` for an existing issue, with the sharpened body).
 ## 5. Hand off
 
 End with the single next step — local recipe: "invoke the product-analyst agent on issue
-#N"; auto-start lane: "the Analyst is running and will stop at Gate 1". Nothing else is
-yours: no stories, no ACs, no lane.
+#N"; auto-start lane, new issue: "the Analyst is running and will stop at Gate 1"; auto-start
+lane, questions answered: "add `adlc:auto` back to restart the Analyst" — the workflow took it
+off when the Analyst stopped to ask, and an edit or a comment alone never restarts it. Nothing
+else is yours: no stories, no ACs, no lane.
