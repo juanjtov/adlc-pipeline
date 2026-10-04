@@ -29,9 +29,11 @@ it triggers the Builder lane) — **only after** the ADR and breakdown exist.
 
 ## Duty 2 — Design-conformance review (trigger: a Builder PR)
 
-Compare `gh pr diff` against the ADR and task breakdown. Submit `gh pr review --approve`
-(conformant) or `--request-changes` with specific comments. Scope your review per `verify`:
-flag what breaks correctness, the declared diff scope, the design, or an AC — not taste.
+Compare `gh pr diff` against the ADR and task breakdown. The PR's `.adlc/scope/<issue>.txt`
+must match the breakdown's declared scope (the ADR itself aside) — CI enforces that file, so a
+wider one is a finding. Submit `gh pr review --approve` (conformant) or `--request-changes`
+with specific comments. Scope your review per `verify`: flag what breaks correctness, the
+declared diff scope, the design, or an AC — not taste.
 **Done when** the verdict is submitted. On approval, report that the PR can advance
 `stage:build → stage:qa` (the Principal or CI applies it — not you).
 

@@ -177,7 +177,8 @@ Create/write:
    hook call — one unit-tested source of truth, not prose. Then install the **local diff-scope
    guard**: copy `templates/hooks/pre-commit` to `.git/hooks/pre-commit` (chmod +x) — **ask first
    if a pre-commit hook already exists** — so the Builder's declared scope is enforced on every
-   local commit, not only in CI.
+   local commit, not only in CI. Set the hook's `ADLC_TEST_DIRS` default to the repo's test dirs
+   (the same regex that fills `{{TEST_DIR_REGEX}}`).
 
 9. **UI projects only** (frontend detected): note that the `design-system` and
    `verify-frontend-change` skills are expected by the Builder/QA agents when frontend
@@ -208,7 +209,8 @@ PR — adversarial then architect conformance — and does the `stage:build → 
 labels the PR `adlc:changes-requested` for the fix loop. Because control doesn't depend on
 GitHub's review state, you may enable branch protection's **"require a human approval"** — it
 then gates only the final MERGE, and the pipeline still flows to a finished, QA'd PR. Also copy
-**`adlc-diff-scope.yml`** (fails a PR that touches files outside its stage's allowed paths — the
+**`adlc-diff-scope.yml`** (fails a lane PR that touches files outside the scope its issue declares
+in `.adlc/scope/<issue>.txt`; fill `{{TEST_DIR_REGEX}}` with the repo's test dirs — the
 path-level half of author/verifier separation). For the test battery, follow the Phase 1 choice: if the user picked **propose it**,
 run the `test-strategy` skill, then copy **`adlc-ci.yml`** filled with the chosen setup +
 commands (these are the required checks); if they picked **keep ours**, skip `adlc-ci.yml` and
