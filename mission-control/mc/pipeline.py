@@ -48,7 +48,7 @@ ADR_RE = re.compile(r'(?:ADR[ -]?|docs/adr/)(\d{3,4})')
 _ISSUE_RE = re.compile(r'\bissue\s+#?(\d+)', re.I)
 _PR_RE = re.compile(r'\b(?:PR|pull request)\s+#?(\d+)', re.I)
 _HASH_RE = re.compile(r'(?<![\w/])#(\d+)\b')
-_BRANCH_RE = re.compile(r'(?:^|/)(\d+)-')
+_BRANCH_RE = re.compile(r'^[^/]*/(\d+)(?:-.*)?$')   # the same rule as templates/scripts/adlc-branch-issue.sh
 
 
 def station_for(agent_type):
@@ -74,8 +74,8 @@ def refs_in(text):
 
 
 def issue_in_branch(branch):
-    """'feat/142-password-reset' -> 142."""
-    m = _BRANCH_RE.search(branch or '')
+    """The issue a lane branch names: 'feat/142-password-reset' -> 142, 'feat/142' -> 142, 'main' -> None."""
+    m = _BRANCH_RE.match(branch or '')
     return int(m.group(1)) if m else None
 
 
