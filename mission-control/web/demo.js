@@ -44,15 +44,8 @@ const ST = [
 const AG = {};
 ST.forEach((s, i) => { s.i = i; s.prefix = s.sysTok + s.agentTok + CLAUDE_TOK + s.skills.reduce((a, x) => a + x[1], 0); AG[s.id] = s; });
 
-const SLOTS = ['intake', 'analyst', 'gate1', 'architect', 'builder', 'reviewer', 'qa', 'gate2', 'done'];
-const WEIGHT = [0.56, 1, 0.6, 1, 1, 1, 1, 0.6, 0.56];
-const TOTALW = WEIGHT.reduce((a, b) => a + b, 0);
-const CENTER = {};
-(() => { let acc = 0; SLOTS.forEach((s, i) => { CENTER[s] = (acc + WEIGHT[i] / 2) / TOTALW * 100; acc += WEIGHT[i]; }); })();
-const PATH = { full: SLOTS, fast: ['intake', 'analyst', 'gate1', 'builder', 'reviewer', 'gate2', 'done'] };
-const NAME = { intake: 'Intake', gate1: 'Gate 1', gate2: 'Gate 2', done: 'Merged' };
-const NEXTNOTE = { analyst: 'Stories and acceptance checks', gate1: 'You approve the plan and the lane', architect: 'Design decision and task list', builder: 'Code and tests on a branch', reviewer: 'An independent attempt to break it', qa: 'Full test suite and the merge proposal', gate2: 'You read the card and merge', done: 'On main' };
-const WHO = { analyst: 'Analyst', architect: 'Architect', builder: 'Builder', reviewer: 'Reviewer', qa: 'QA', you: 'You', auto: 'Autopilot', gate1: 'Gate 1', gate2: 'Gate 2' };
+// The route each lane takes down the line. The simulator moves requests along it; app.js holds the same two lists for drawing.
+const PATH = { full: ['intake', 'analyst', 'gate1', 'architect', 'builder', 'reviewer', 'qa', 'gate2', 'done'], fast: ['intake', 'analyst', 'gate1', 'builder', 'reviewer', 'gate2', 'done'] };
 const TICK = 15;
 
 const REPOS = {
@@ -64,14 +57,9 @@ const REPOS = {
     pool: [['Search across guides', 'site', 'full'], ['Versioned API reference', 'ref', 'full'], ['Fix broken link in the quickstart', 'guide', 'fast'], ['Copy button on code samples', 'site', 'full', { fixes: 2 }], ['Changelog page', 'site', 'full', { autopilot: true }], ['Dark theme for the docs', 'site', 'full'], ['Webhook reference', 'ref', 'full'], ['Correct the install command', 'guide', 'fast'], ['Feedback widget on pages', 'site', 'full'], ['Migration guide for v2', 'guide', 'full', { fixes: 1 }], ['Update the license year', 'site', 'fast'], ['Error code reference', 'ref', 'full']] }
 };
 
-const noop = () => {};
 const pad = (v, n) => String(v).padStart(n, '0');
 function rnd(a, b, c) { let h = (Math.imul(a | 0, 374761393) + Math.imul(b | 0, 668265263) + Math.imul(c | 0, 2246822519)) | 0; h = Math.imul(h ^ (h >>> 13), 1274126177); h ^= h >>> 16; h = Math.imul(h, 2654435761); h ^= h >>> 15; return (h >>> 0) / 4294967296; }
 const fTok = v => v >= 1e6 ? (v / 1e6).toFixed(2) + 'M' : v >= 1e4 ? Math.round(v / 1e3) + 'k' : v >= 1e3 ? (v / 1e3).toFixed(1) + 'k' : String(Math.round(v));
-const fTokC = v => v >= 1e6 ? (v / 1e6).toFixed(1) + 'M' : fTok(v);
-const fUsd = v => '$' + (v >= 100 ? v.toFixed(0) : v.toFixed(2));
-const fDur = s => { s = Math.max(0, Math.round(s)); if (s < 60) return s + 's'; const m = Math.floor(s / 60); return m < 60 ? m + 'm ' + pad(s % 60, 2) + 's' : Math.floor(m / 60) + 'h ' + pad(m % 60, 2) + 'm'; };
-const fMin = s => { const m = Math.max(0, Math.round(s / 60)); return m < 60 ? m + 'm' : Math.floor(m / 60) + 'h ' + pad(m % 60, 2) + 'm'; };
 const fClock = s => pad(Math.floor(s / 3600) % 24, 2) + ':' + pad(Math.floor(s / 60) % 60, 2);
 const slugify = t => { const w = t.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().split(' '); let out = ''; for (const x of w) { if (out && (out + '-' + x).length > 24) break; out = out ? out + '-' + x : x; } return out; };
 const fill = (label, is) => label.replace(/\{(\w+)\}/g, (m, k) => k === 'n' ? '#' + is.n : k === 'slug' ? is.n + '-' + is.slug : k === 'pr' ? 'PR #' + (is.pr || '') : k === 'adr' ? 'ADR ' + pad(is.adr || 0, 4) : m);
@@ -235,8 +223,6 @@ function tick(sim, speed) {
   });
   sim.pool.forEach((o, i) => { if (o && o.phase === 'done' && sim.clock - o.doneAt > 330) { sim.gone[o.n] = o; sim.pool[i] = null; } });
 }
-const whereOf = is => is.phase === 'working' ? AG[is.at].short : is.phase === 'queued' ? 'Queued, ' + AG[is.at].short : is.phase === 'waiting' ? NAME[is.at] + ', ' + fMin(is.el) : is.phase === 'done' ? 'Merged' : 'Intake';
-const hueOf = is => is.phase === 'working' ? 'h-' + is.at : is.phase === 'waiting' ? 'h-you' : is.phase === 'done' ? 'h-done' : 'h-none';
 
 function promptFor(cfg, is, round) {
   const n = is.n, pr = is.pr;
@@ -255,7 +241,7 @@ function payloadFor(cfg, is, round, repo, t0) {
   if (cfg.id === 'reviewer') ev = { event: round ? 'pull_request.synchronize' : 'pull_request.opened', repository: repo.name, pull_request: is.pr, issue: is.n, sender: 'builder' };
   else if (cfg.id === 'builder' && round) ev = { event: 'pull_request.labeled', repository: repo.name, pull_request: is.pr, issue: is.n, label: 'adlc:changes-requested', sender: 'review lane' };
   else ev = { event: 'issues.labeled', repository: repo.name, issue: is.n, label: cfg.id === 'builder' && is.lane === 'fast' ? 'stage:fast' : cfg.trigger, sender: cfg.id === 'analyst' ? 'you' : cfg.id === 'architect' ? (is.autopilot ? 'autopilot' : 'you') : cfg.id === 'builder' ? (is.lane === 'fast' ? 'you' : 'architect') : 'review lane' };
-  ev.lane = is.lane; ev.runner = 'this Mac'; ev.agent = cfg.id; ev.model = cfg.model; ev.session = sid(is.n, cfg.i, round); ev.started = fClock(t0);
+  ev.lane = is.lane; ev.runner = 'this machine'; ev.agent = cfg.id; ev.model = cfg.model; ev.session = sid(is.n, cfg.i, round); ev.started = fClock(t0);
   return JSON.stringify(ev, null, 2);
 }
 function outputsFor(cfg, is, round) {

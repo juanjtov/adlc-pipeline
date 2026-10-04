@@ -15,7 +15,8 @@ const PATH = { full: SLOTS, fast: ['intake', 'analyst', 'gate1', 'builder', 'rev
 const NAME = { intake: 'Intake', gate1: 'Gate 1', gate2: 'Gate 2', done: 'Merged' };
 const NEXTNOTE = { analyst: 'Stories and acceptance checks', gate1: 'You approve the plan and the lane', architect: 'Design decision and task list', builder: 'Code and tests on a branch', reviewer: 'An independent attempt to break it', qa: 'Full test suite and the merge proposal', gate2: 'You read the card and merge', done: 'On main' };
 const WHO = { analyst: 'Analyst', architect: 'Architect', builder: 'Builder', reviewer: 'Reviewer', qa: 'QA', you: 'You', auto: 'Autopilot', gate1: 'Gate 1', gate2: 'Gate 2', github: 'GitHub' };
-const WALK = 274, CHAMBER = 220, POOL = 14, ARRIVE_MS = 2000;
+const WALK = 274, CHAMBER = 220, ARRIVE_MS = 2000;
+const LINEUP = 2;   // crates drawn in one queue; a longer queue shows these and a count of the rest. A third would sit on the next queue over.
 
 const ICON = {
   play: 'M8 5.5v13l11-6.5z', pause: 'M8.5 5v14M15.5 5v14',
@@ -78,7 +79,9 @@ const fUsd = v => '$' + (v >= 100 ? v.toFixed(0) : (v || 0).toFixed(2));
 const fDur = s => { s = Math.max(0, Math.round(s)); if (s < 60) return s + 's'; const m = Math.floor(s / 60); return m < 60 ? m + 'm ' + pad(s % 60, 2) + 's' : Math.floor(m / 60) + 'h ' + pad(m % 60, 2) + 'm'; };
 const fMin = s => { const m = Math.max(0, Math.round(s / 60)); return m < 60 ? m + 'm' : m < 1440 ? Math.floor(m / 60) + 'h ' + pad(m % 60, 2) + 'm' : Math.floor(m / 1440) + 'd ' + Math.floor(m % 1440 / 60) + 'h'; };
 const fClock = t => { const d = new Date(t * 1000); return pad(d.getHours(), 2) + ':' + pad(d.getMinutes(), 2); };
+const fClockS = t => fClock(t) + ':' + pad(new Date(t * 1000).getSeconds(), 2);
 const plural = (n, one, many) => n + ' ' + (n === 1 ? one : many);
+const tf = v => v ? 'true' : 'false';   // for aria-* attributes, which want the word
 
 const ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 const esc = v => String(v === null || v === undefined ? '' : v).replace(/[&<>"']/g, c => ESC[c]);
@@ -101,7 +104,7 @@ function morph(from, to) {
   for (const t of Array.from(to.childNodes)) {
     const key = t.nodeType === 1 && t.dataset ? t.dataset.key : null;
     let match = null;
-    if (key) match = keyed.get(key) || null;
+    if (key) { match = keyed.get(key) || null; if (match && !sameKind(match, t)) match = null; }
     else if (cur && sameKind(cur, t) && !(cur.nodeType === 1 && cur.dataset && cur.dataset.key)) match = cur;
     if (match) {
       if (match === cur) cur = cur.nextSibling; else from.insertBefore(match, cur);
@@ -115,29 +118,34 @@ function morph(from, to) {
 const params = new URLSearchParams(location.search);
 const saved = (() => { try { return JSON.parse(localStorage.getItem('adlc-mc') || '{}'); } catch (e) { return {}; } })();
 const A = {
-  meta: { stations: [], demo: false }, agents: {}, data: null, at: 0, demo: null, source: null, lost: false,
-  pool: new Array(POOL).fill(null), seen: new Map(), arr: new Map(), frozenAt: null,
+  meta: { stations: [], demo: false }, agents: {}, data: null, at: 0, demo: null, source: null, lost: false, trouble: '',
+  pool: [], seen: new Map(), arr: new Map(), frozenAt: null,
   ui: { sel: { type: 'station', id: 'builder' }, tab: 'live', left: 'work', ctx: 'agent', lane: 'all', theme: saved.theme || null, pal: saved.pal || 'cool',
-    playing: true, repoMenu: false, hov: null, closed: {}, toast: null, repo: params.get('repo') || saved.repo || '' }
+    playing: true, repoMenu: false, hov: null, closed: new Set(), toast: null, repo: params.get('repo') || saved.repo || '' }
 };
 const save = () => { try { localStorage.setItem('adlc-mc', JSON.stringify({ theme: A.ui.theme, pal: A.ui.pal, repo: A.ui.repo })); } catch (e) { /* private window */ } };
 const clock = () => !A.data ? Date.now() / 1000 : A.frozenAt !== null ? A.frozenAt : A.data.mode === 'demo' ? A.data.now : A.data.now + (performance.now() - A.at) / 1000;
 
 const hueOf = r => r.phase === 'waiting' ? 'h-you' : r.phase === 'done' ? 'h-done' : STATION[r.at] ? 'h-' + r.at : 'h-none';
-const whereOf = (r, now) => (r.phase === 'working' ? STATION[r.at].short : r.phase === 'queued' ? 'Queued, ' + STATION[r.at].short
+// 'queued' only says that no run on this machine is working on the request. Its agent may be at work on GitHub, out of sight,
+// so the page says where the request is and stops short of calling it queued or idle.
+const whereOf = (r, now) => (r.phase === 'working' ? STATION[r.at].short + ', working' : r.phase === 'queued' ? 'At the ' + STATION[r.at].short
   : r.phase === 'waiting' ? NAME[r.at] + ', ' + fMin(now - r.since) : r.phase === 'done' ? 'Merged' : 'Intake') + (r.alert ? '. ' + r.alert : '');
+
+const stationWord = (live, n) => live ? 'Working' + (n ? ', ' + n + ' more here' : '') : n ? plural(n, 'request', 'requests') + ' here, no run on this machine' : 'Idle';
 
 // ------------------------------------------------------------------------------------ templates
 function topBar(D, U, waiting) {
-  const status = D.mode === 'demo' ? ['', 'Demo data. Nothing here is real'] : !D.repo ? ['is-warn', 'No GitHub repo found here'] : D.github.ok ? ['is-live', 'This Mac is following GitHub labels'] : ['is-warn', 'GitHub could not be read'];
-  const title = D.mode === 'demo' ? 'Simulated requests, timings and token counts' : D.github.ok ? 'Agents report here when they run on this machine' : D.github.msg;
+  const status = D.mode === 'demo' ? ['', 'Demo data. Nothing here is real'] : !D.repo ? ['is-warn', 'No GitHub repo found here'] : D.github.ok ? ['is-live', 'Following GitHub labels'] : ['is-warn', 'GitHub could not be read'];
+  const read = D.github.polled ? 'Last read from GitHub at ' + fClockS(D.github.polled) + '. ' : '';
+  const title = D.mode === 'demo' ? 'Simulated requests, timings and token counts' : D.github.ok ? read + 'Agents report here when they run on this machine' : read + D.github.msg;
   return h`<header class="mc-top" style="flex: none; height: 54px; display: flex; align-items: center; gap: 10px">
 <div style="display: flex; align-items: center; gap: 10px; margin-right: 6px">
 <div style="width: 30px; height: 30px; border-radius: 9px; background: var(--ink); color: var(--page); display: flex; align-items: center; justify-content: center; flex: none">${ico(ICON.brand, 18)}</div>
 <div style="font-size: 15px; font-weight: 650; letter-spacing: -0.015em; white-space: nowrap">Mission Control</div>
 </div>
 <div style="position: relative">
-<button class="b0 pillbtn" data-act="repoMenu" aria-haspopup="true" aria-expanded="${U.repoMenu}"><span class="mono" style="font-size: 12.5px">${D.repo || 'No repo'}</span>${ico(ICON.chevD, 13, 2.2)}</button>
+<button class="b0 pillbtn" data-act="repoMenu" aria-haspopup="true" aria-expanded="${tf(U.repoMenu)}"><span class="mono" style="font-size: 12.5px">${D.repo || 'No repo'}</span>${ico(ICON.chevD, 13, 2.2)}</button>
 ${U.repoMenu ? h`<div style="position: absolute; top: 40px; left: 0; z-index: 40; width: 300px; padding: 6px; border-radius: 14px; background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow)">
 <div style="padding: 6px 10px 4px; color: var(--ink-3); font-size: 11.5px">Repositories that use the plugin</div>
 ${D.repos.length ? D.repos.map(r => h`<button class="b0 row" data-act="repo" data-arg="${r.name}">
@@ -151,7 +159,7 @@ ${D.repos.length ? D.repos.map(r => h`<button class="b0 row" data-act="repo" dat
 <div style="flex: 1"></div>
 <button class="b0 pillbtn ${waiting.length ? 'is-warn' : ''}" data-act="waiting">${ico(ICON.user, 15, 2)}<span style="white-space: nowrap">${waiting.length ? waiting.length + ' waiting on you' : 'Nothing is waiting on you'}</span></button>
 <div class="seg" role="group" aria-label="Lane filter">
-${[['all', 'All lanes'], ['full', 'Full'], ['fast', 'Fast']].map(x => h`<button class="b0 seg-b ${U.lane === x[0] ? 'is-on' : ''}" aria-pressed="${U.lane === x[0]}" data-act="lane" data-arg="${x[0]}">${x[1]}</button>`)}
+${[['all', 'All lanes'], ['full', 'Full'], ['fast', 'Fast']].map(x => h`<button class="b0 seg-b ${U.lane === x[0] ? 'is-on' : ''}" aria-pressed="${tf(U.lane === x[0])}" data-act="lane" data-arg="${x[0]}">${x[1]}</button>`)}
 </div>
 <button class="b0 iconbtn" data-act="play" aria-label="${U.playing ? 'Pause the live view' : 'Resume the live view'}" title="${U.playing ? 'Pause the live view' : 'Resume the live view'}">${ico(U.playing ? ICON.pause : ICON.play, 16, 2)}</button>
 <button class="b0 iconbtn" data-act="theme" aria-label="${U.dark ? 'Switch to light' : 'Switch to dark'}" title="${U.dark ? 'Switch to light' : 'Switch to dark'}">${ico(U.dark ? ICON.sun : ICON.moon, 16)}</button>
@@ -180,8 +188,8 @@ function machine(slot, flex, D, U, now) {
   const metrics = [[noTel ? '—' : fTokC(t.tok || 0), 'tokens'], [noTel ? '—' : fUsd(t.usd || 0), 'cost'], [sd.lat === null || sd.lat === undefined ? '—' : sd.lat.toFixed(1) + 's', 'latency']];
   return h`<div style="position: relative; flex: ${flex}; min-width: 0; padding: 0 5px">
 <div class="mach h-${slot} ${live ? 'is-working' : 'is-idle'} ${sel ? 'is-sel' : ''}" style="margin-top: 16px; height: 240px; display: flex; flex-direction: column">
-<button class="b0 bay-hit" data-act="station" data-arg="${slot}" aria-label="Open the ${st.name} station" aria-pressed="${sel}"></button>
-<span class="tower" title="${live ? 'Working' : 'Idle'}${sd.queued ? ', ' + sd.queued + ' queued' : ''}"><span class="lamp ${here.some(r => r.alert) ? 'is-red' : ''}"></span><span class="lamp ${sd.queued ? 'is-amber' : ''}"></span><span class="lamp ${live ? 'is-green' : ''}"></span></span>
+<button class="b0 bay-hit" data-act="station" data-arg="${slot}" aria-label="Open the ${st.name} station" aria-pressed="${tf(sel)}"></button>
+<span class="tower" title="${stationWord(live, sd.queued)}"><span class="lamp ${here.some(r => r.alert) ? 'is-red' : ''}"></span><span class="lamp ${sd.queued ? 'is-amber' : ''}"></span><span class="lamp ${live ? 'is-green' : ''}"></span></span>
 <div class="mach-stripe"></div>
 <div style="display: flex; align-items: center; gap: 8px; padding: 8px 10px 0; pointer-events: none">
 <div class="av" style="width: 30px; height: 30px; border-radius: 9px; display: flex; align-items: center; justify-content: center; flex: none">${ico(st.icon, 16, 2)}</div>
@@ -195,9 +203,9 @@ ${live ? h`<button class="b0 issue-link ell" data-act="issue" data-arg="${act ? 
 <div style="display: flex; align-items: center; gap: 5px; min-width: 0; margin-top: 1px; color: var(--screen-ink-2); font-size: 11.5px; line-height: 1.3"><span class="spinner"></span><span class="ell">${step}</span></div>
 <div style="margin-top: auto">
 <div class="meter ${pct === null ? 'is-open' : ''}"><div class="meter-fill" style="width: ${pct === null ? 38 : (pct * 100).toFixed(1)}%"></div></div>
-<div class="tnum" style="display: flex; justify-content: space-between; gap: 6px; margin-top: 4px; color: var(--screen-ink-3); font-size: 10.5px; line-height: 1.2"><span class="ell">${meta}</span><span style="flex: none">${sd.queued ? sd.queued + ' queued' : ''}</span></div>
-</div>` : h`<div style="color: var(--screen-ink-2); font-weight: 600; font-size: 12px; line-height: 1.3">${sd.queued ? 'Waiting to start' : 'Idle'}</div>
-<div style="margin-top: 1px; color: var(--screen-ink-3); font-size: 11.5px; line-height: 1.3">${sd.queued ? plural(sd.queued, 'request is', 'requests are') + ' queued here' : st.start}</div>`}
+<div class="tnum" style="display: flex; justify-content: space-between; gap: 6px; margin-top: 4px; color: var(--screen-ink-3); font-size: 10.5px; line-height: 1.2"><span class="ell">${meta}</span><span style="flex: none">${sd.queued ? sd.queued + ' more here' : ''}</span></div>
+</div>` : h`<div style="color: var(--screen-ink-2); font-weight: 600; font-size: 12px; line-height: 1.3">${sd.queued ? plural(sd.queued, 'request', 'requests') + ' here' : 'Idle'}</div>
+<div style="margin-top: 1px; color: var(--screen-ink-3); font-size: 11.5px; line-height: 1.3">${sd.queued ? 'No run on this machine' : st.start}</div>`}
 </div>
 <div title="Today at this station" style="display: flex; gap: 4px; margin: 7px 8px 0; pointer-events: none">
 ${metrics.map(m => h`<div class="plate"><div class="tnum ell" style="font-weight: 650; font-size: 11.5px; letter-spacing: -0.02em; line-height: 1.25">${m[0]}</div><div class="ell" style="color: var(--ink-3); font-size: 9.5px; line-height: 1.25">${m[1]}</div></div>`)}
@@ -241,16 +249,18 @@ function dock(slot, flex, D) {
 </div>`;
 }
 
-// Every request is one crate. Crates keep their element (a fixed pool), so a move between stations animates.
+// Every request is one crate. A crate keeps its element (a slot in the pool) while its request is on the line, so a move
+// between stations animates. The pool grows with the line; a queue longer than LINEUP shows its first crates and a count.
 function units(D, U, now) {
   const live = new Set(D.requests.map(r => r.n)), t = performance.now();
   A.pool.forEach((n, i) => { if (n !== null && !live.has(n)) { A.pool[i] = null; A.seen.delete(n); A.arr.delete(n); } });
   D.requests.forEach(r => {
-    if (!A.pool.includes(r.n)) { const free = A.pool.indexOf(null); if (free >= 0) A.pool[free] = r.n; }
+    if (!A.pool.includes(r.n)) { const free = A.pool.indexOf(null); if (free >= 0) A.pool[free] = r.n; else A.pool.push(r.n); }
     const was = A.seen.get(r.n), is = r.at + '|' + (r.phase === 'working' ? 'w' : 'o');
     if (was !== undefined && was !== is && r.phase !== 'filing') A.arr.set(r.n, t);
     A.seen.set(r.n, is);
   });
+  while (A.pool.length && A.pool[A.pool.length - 1] === null) A.pool.pop();
   const byN = new Map(D.requests.map(r => [r.n, r]));
   const arriving = r => A.arr.has(r.n) && t - A.arr.get(r.n) < ARRIVE_MS;
   const spot = r => r.phase === 'working' ? (arriving(r) ? 'walk' : 'chamber') : r.phase;
@@ -260,16 +270,20 @@ function units(D, U, now) {
   return A.pool.map((n, i) => {
     const r = n === null ? null : byN.get(n);
     if (!r) return h`<button class="b0 unit is-hidden h-none wh-none" data-key="u${i}" style="left: ${CENTER.intake.toFixed(2)}%; top: ${WALK}px" tabindex="-1" aria-hidden="true"><span class="crate"></span>${worker()}</button>`;
-    const sp = spot(r), k = groups[r.at + '|' + sp].indexOf(r), walk = arriving(r), st = STATION[r.at];
+    const sp = spot(r), group = groups[r.at + '|' + sp], k = group.indexOf(r), walk = arriving(r), st = STATION[r.at];
+    const lined = sp === 'queued' || sp === 'waiting', place = lined ? Math.min(k, LINEUP - 1) : k;
+    const behind = lined && k >= LINEUP, more = lined && k === LINEUP - 1 ? group.length - LINEUP : 0;
     let off = 0, top = WALK, cls = '', wh = st ? 'wh-' + r.at : 'wh-none';
     if (sp === 'chamber') { top = CHAMBER; cls = 'in-chamber'; }
     else if (sp === 'walk') cls = 'on-walk';
-    else if (sp === 'queued') { off = -64 - 62 * k; cls = 'on-walk'; }
-    else if (sp === 'waiting') { off = -80 - 62 * k; cls = 'on-walk'; wh = 'wh-you'; }
+    else if (sp === 'queued') { off = -64 - 62 * place; cls = 'on-walk'; }
+    else if (sp === 'waiting') { off = -80 - 62 * place; cls = 'on-walk'; wh = 'wh-you'; }
     else if (sp === 'done') { top = WALK - 28 * Math.min(k, 2); cls = walk ? 'on-walk' : ''; wh = 'wh-done'; }
     const sel = U.sel.type === 'issue' && U.sel.n === r.n, dim = U.lane !== 'all' && r.lane !== U.lane;
-    const where = whereOf(r, now);
-    return h`<button class="b0 unit ${hueOf(r)} ${wh} is-${r.phase} ${cls} ${walk && sp !== 'filing' ? 'is-walking' : ''} ${sel ? 'is-sel' : ''} ${dim ? 'is-dim' : ''}" data-key="u${i}" style="left: calc(${CENTER[r.at].toFixed(2)}% + ${off}px); top: ${top}px" data-act="issue" data-arg="${r.n}" title="${r.title} (${where})" aria-label="Issue ${r.n}, ${r.title}, ${where}"><span class="crate"><span class="tnum">#${r.n}</span>${r.lane === 'fast' ? bolt(10) : ''}</span>${worker()}</button>`;
+    const where = whereOf(r, now) + (more ? ', and ' + more + ' more behind it' : '');
+    // A crate past the end of the line-up waits unseen behind the last one drawn; the work list still shows it.
+    if (behind) return h`<button class="b0 unit is-hidden ${hueOf(r)} ${wh}" data-key="u${i}" style="left: calc(${CENTER[r.at].toFixed(2)}% + ${off}px); top: ${top}px" tabindex="-1" aria-hidden="true"><span class="crate"><span class="tnum">#${r.n}</span></span>${worker()}</button>`;
+    return h`<button class="b0 unit ${hueOf(r)} ${wh} is-${r.phase} ${cls} ${walk && sp !== 'filing' ? 'is-walking' : ''} ${sel ? 'is-sel' : ''} ${dim ? 'is-dim' : ''}" data-key="u${i}" style="left: calc(${CENTER[r.at].toFixed(2)}% + ${off}px); top: ${top}px" data-act="issue" data-arg="${r.n}" title="${r.title} (${where})" aria-label="Issue ${r.n}, ${r.title}, ${where}"><span class="crate"><span class="tnum">#${r.n}</span>${r.lane === 'fast' ? bolt(10) : ''}</span>${more ? h`<span class="more tnum">+${more}</span>` : ''}${worker()}</button>`;
   });
 }
 const worker = () => raw('<svg class="worker" width="36" height="46" viewBox="0 0 36 46" fill="none" aria-hidden="true"><path d="M11 27L8 13M25 27L28 13" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"></path><rect x="10" y="22" width="16" height="16" rx="7" fill="currentColor"></rect><path class="hat" d="M9.5 24a8.5 8.5 0 0 1 17 0z"></path><rect class="hat" x="7.5" y="23" width="21" height="2.6" rx="1.3"></rect><circle class="eye" cx="15.2" cy="30.4" r="1.35"></circle><circle class="eye" cx="20.8" cy="30.4" r="1.35"></circle><path class="leg leg-a" d="M15.5 37.5V44.5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"></path><path class="leg leg-b" d="M20.5 37.5V44.5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"></path></svg>');
@@ -308,9 +322,9 @@ ${units(D, U, now)}
 function leftPanel(D, U, now) {
   const shown = D.requests.filter(r => U.lane === 'all' || r.lane === U.lane);
   const groups = D.epics.map(e => ({ e, rows: shown.filter(r => r.epic === e.key).sort((a, b) => SLOTS.indexOf(b.at) - SLOTS.indexOf(a.at) || a.n - b.n) })).filter(g => g.rows.length);
-  const work = () => groups.length ? groups.map(g => { const open = !U.closed[g.e.key]; return h`<div style="margin-bottom: 4px">
-<button class="b0 grouphead" data-act="epic" data-arg="${g.e.key}" aria-expanded="${open}">${ico(ICON.chevR, 13, 2.2, ' style="transform: rotate(' + (open ? 90 : 0) + 'deg); transition: transform .18s ease"')}<span>${g.e.name}</span><span class="tnum" style="color: var(--ink-3); font-weight: 500">${g.rows.length}</span></button>
-${open ? g.rows.map(r => { const sel = U.sel.type === 'issue' && U.sel.n === r.n; return h`<button class="b0 row ${sel ? 'is-sel' : ''}" data-act="issue" data-arg="${r.n}" aria-pressed="${sel}">
+  const work = () => groups.length ? groups.map(g => { const open = !U.closed.has(g.e.key); return h`<div style="margin-bottom: 4px">
+<button class="b0 grouphead" data-act="epic" data-arg="${g.e.key}" aria-expanded="${tf(open)}">${ico(ICON.chevR, 13, 2.2, ' style="transform: rotate(' + (open ? 90 : 0) + 'deg); transition: transform .18s ease"')}<span>${g.e.name}</span><span class="tnum" style="color: var(--ink-3); font-weight: 500">${g.rows.length}</span></button>
+${open ? g.rows.map(r => { const sel = U.sel.type === 'issue' && U.sel.n === r.n; return h`<button class="b0 row ${sel ? 'is-sel' : ''}" data-act="issue" data-arg="${r.n}" aria-pressed="${tf(sel)}">
 <span class="sdot ${hueOf(r)}"></span>
 <span class="tnum" style="flex: none; width: 38px; color: var(--ink-3); font-size: 12px">#${r.n}</span>
 <span class="ell" style="flex: 1; min-width: 0; font-weight: 500">${r.title}</span>
@@ -325,8 +339,8 @@ ${r.lane === 'fast' ? h`<span class="chip" title="Fast lane">${bolt(10)}Fast</sp
 </button>`) : h`<div class="empty">Nothing has happened yet today.</div>`;
   return h`<section class="mc-left panel" aria-label="Work" style="flex: 0 0 388px; min-width: 0; display: flex; flex-direction: column">
 <div role="tablist" aria-label="Work views" style="flex: none; display: flex; align-items: center; gap: 2px; padding: 10px 10px 8px; border-bottom: 1px solid var(--line)">
-<button class="b0 tab ${U.left === 'work' ? 'is-on' : ''}" role="tab" aria-selected="${U.left === 'work'}" data-act="left" data-arg="work">On the line<span class="count tnum">${shown.length}</span></button>
-<button class="b0 tab ${U.left === 'feed' ? 'is-on' : ''}" role="tab" aria-selected="${U.left === 'feed'}" data-act="left" data-arg="feed">Activity</button>
+<button class="b0 tab ${U.left === 'work' ? 'is-on' : ''}" role="tab" aria-selected="${tf(U.left === 'work')}" data-act="left" data-arg="work">On the line<span class="count tnum">${shown.length}</span></button>
+<button class="b0 tab ${U.left === 'feed' ? 'is-on' : ''}" role="tab" aria-selected="${tf(U.left === 'feed')}" data-act="left" data-arg="feed">Activity</button>
 </div>
 <div class="scroll" data-scroll="left" style="flex: 1; min-height: 0; padding: 8px">${U.left === 'work' ? work() : feed()}</div>
 </section>`;
@@ -344,7 +358,7 @@ function stationPanel(D, U, now) {
 <div style="flex: 1; min-width: 0">
 <div style="display: flex; align-items: center; gap: 9px; flex-wrap: wrap">
 <h2 style="margin: 0; font-size: 18px; font-weight: 680; letter-spacing: -0.02em">${st.name}</h2>
-<span class="status ${live ? 'is-on' : ''}"><span class="andon ${live ? 'is-on' : ''}"></span>${live ? 'Working' : 'Idle'}${sd.queued ? ', ' + sd.queued + ' queued' : ''}</span>
+<span class="status ${live ? 'is-on' : ''}"><span class="andon ${live ? 'is-on' : ''}"></span>${stationWord(live, sd.queued)}</span>
 <span style="flex: 1"></span>
 ${run && run.n ? h`<button class="b0 chip chip-link" data-act="issue" data-arg="${run.n}" style="height: 24px"><span class="ell">${run.live ? 'Now' : 'Last'}: #${run.n} ${run.title}</span></button>` : ''}
 </div>
@@ -353,12 +367,12 @@ ${run && run.n ? h`<button class="b0 chip chip-link" data-act="issue" data-arg="
 </div>
 <div style="display: flex; align-items: center; gap: 6px 12px; flex-wrap: wrap; padding-bottom: 8px; border-bottom: 1px solid var(--line)">
 <div role="tablist" aria-label="Station views" style="display: flex; gap: 2px">
-${tabs.map(t => h`<button class="b0 tab ${U.tab === t[0] ? 'is-on' : ''}" role="tab" aria-selected="${U.tab === t[0]}" data-act="tab" data-arg="${t[0]}">${t[1]}</button>`)}
+${tabs.map(t => h`<button class="b0 tab ${U.tab === t[0] ? 'is-on' : ''}" role="tab" aria-selected="${tf(U.tab === t[0])}" data-act="tab" data-arg="${t[0]}">${t[1]}</button>`)}
 </div>
 <span style="flex: 1"></span>
 <div style="display: flex; gap: 6px; flex-wrap: wrap">
 <span class="chip">Model: ${(run && run.model) || agent.model || 'not set'}</span>
-<span class="chip">${ico(ICON.laptop, 12, 2)}Runs on this Mac</span>
+<span class="chip" title="A run on another machine, such as a lane on GitHub, shows its results but not its steps">${ico(ICON.laptop, 12, 2)}Shows runs on this machine</span>
 <span class="chip">${ico(ICON.tag, 12, 2)}${st.start}</span>
 </div>
 </div>
@@ -406,7 +420,7 @@ ${parts.map(c => h`<button class="b0 part ${c.cached ? 'pc' : 'pn'} ${U.ctx === 
 </div>
 <div class="tnum" style="margin-top: 10px; padding: 0 8px; color: var(--ink-3); font-size: 12px; text-wrap: pretty">${note}</div>
 <div style="display: flex; flex-direction: column; margin-top: 4px">
-${parts.map(c => { const open = U.ctx === c.id; return h`<button class="b0 row ${open ? 'is-sel' : ''}" data-act="ctx" data-arg="${c.id}" aria-expanded="${open}">
+${parts.map(c => { const open = U.ctx === c.id; return h`<button class="b0 row ${open ? 'is-sel' : ''}" data-act="ctx" data-arg="${c.id}" aria-expanded="${tf(open)}">
 <span class="sw ${c.cached ? 'pc' : 'pn'}"></span>
 <span class="ell" style="flex: 1; min-width: 0; font-weight: 500">${c.name}</span>
 <span style="flex: none; color: var(--ink-3); font-size: 12px">${c.cached ? 'cached' : 'new'}</span>
@@ -453,7 +467,8 @@ ${[[td.runs || 0, 'runs'], [fTok(td.tok || 0), 'tokens'], [fUsd(td.usd || 0), 's
   if (!D.telemetry) return h`<div style="display: flex; flex-direction: column; gap: 18px">
 <div class="hint"><b>Telemetry is off.</b> Tokens, cost and latency appear once Claude Code sends its telemetry here. Add the env block from the plugin’s <span class="mono">templates/settings.mission-control.json</span> to this repo’s <span class="mono">.claude/settings.local.json</span>, then start a new Claude Code session. Steps and GitHub state work without it.</div>
 ${today}</div>`;
-  if (!run) return h`<div style="display: flex; flex-direction: column; gap: 18px"><div class="hint"><b>No run seen yet.</b> Tokens and cost for this station show up with its first run.</div>${today}</div>`;
+  const unplaced = D.telemetryNote ? h`<div class="hint"><b>Some replies cannot be placed.</b> ${D.telemetryNote}</div>` : '';
+  if (!run) return h`<div style="display: flex; flex-direction: column; gap: 18px">${unplaced}<div class="hint"><b>No run seen yet.</b> Tokens and cost for this station show up with its first run.</div>${today}</div>`;
   const acc = run.acc || {}, reps = (run.replies || []).slice(-24), denom = (acc.cacheRead || 0) + (acc.input || 0), pct = denom ? Math.round(100 * acc.cacheRead / denom) : 0;
   const max = Math.max(1, ...reps.map(x => x.input + x.output + x.cacheRead)), H = 92;
   const hov = U.hov !== null && U.hov < reps.length ? U.hov : reps.length - 1;
@@ -463,6 +478,7 @@ ${today}</div>`;
     ['Latency', sd.lat === null || sd.lat === undefined ? '—' : sd.lat.toFixed(1) + 's', 'per model reply'], ['New input', fTok(acc.input || 0), 'full price'], ['From cache', fTok(acc.cacheRead || 0), 'a tenth of the price'],
     ['Output', fTok(acc.output || 0), 'written by the model'], ['All tokens', fTok(acc.tok || 0), 'this run']];
   return h`<div style="display: flex; flex-direction: column; gap: 20px">
+${unplaced}
 <div><h3 class="h3" style="margin-bottom: 9px">${run.live ? 'This run' : 'Last run'}</h3>
 <div class="grid4">${tiles.map(k => h`<div class="tile"><div style="color: var(--ink-3); font-size: 11.5px">${k[0]}</div><div style="margin-top: 2px; font-size: 18px; font-weight: 680; letter-spacing: -0.02em">${k[1]}</div><div class="ell" style="color: var(--ink-3); font-size: 11px">${k[2]}</div></div>`)}</div>
 </div>
@@ -501,16 +517,16 @@ function issuePanel(D, U, now, r) {
     const st = STATION[cur.slot], run = st && D.stations[cur.slot] ? D.stations[cur.slot].run : null;
     let note = 'Being written up with /adlc-intake.', state = 'Now';
     if (r.phase === 'working') { state = 'Working now'; const open = run && run.live && run.n === r.n ? run.steps.filter(s => s.t1 === null) : []; note = open.length ? open[open.length - 1].label : run && run.live && run.n === r.n && run.steps.length ? run.steps[run.steps.length - 1].label : 'The agent is working.'; }
-    else if (r.phase === 'queued') { state = 'Queued'; const busy = D.requests.find(o => o.at === cur.slot && o.phase === 'working'); note = busy ? 'In line behind #' + busy.n + '.' : 'Waiting for the ' + st.short + ' to start.'; }
+    else if (r.phase === 'queued') { state = 'Here now'; const busy = D.requests.find(o => o.at === cur.slot && o.phase === 'working'); note = busy ? 'The ' + st.short + ' on this machine is working on #' + busy.n + '.' : 'No run seen on this machine. If this lane runs on GitHub, its work does not show here.'; }
     else if (r.phase === 'waiting') { state = 'Waiting on you'; note = cur.slot === 'gate2' ? 'Read the Action Card, then merge' + (r.pr ? ' PR #' + r.pr : '') + ' in GitHub.' : r.fastRec ? 'The Analyst recommends the fast lane. Apply stage:fast or stage:design in GitHub.' : 'Read the stories, then apply stage:design in GitHub.'; }
     rows.push({ cls: 'is-now ' + (st ? 'h-' + cur.slot : r.phase === 'waiting' ? 'is-human h-you' : 'is-human h-none'), icon: iconOf(cur.slot), name: stopName(cur), state, note, dur: fDur(dur(cur)), cost: cost(cur), pick: st ? cur.slot : '' });
-    const path = PATH[r.lane] || PATH.full;
-    path.slice(path.indexOf(r.at) + 1).forEach(slot => rows.push({ cls: 'is-next ' + (STATION[slot] ? 'h-' + slot : 'is-human h-none'), icon: iconOf(slot), name: STATION[slot] ? STATION[slot].short : NAME[slot], state: 'Up next', note: NEXTNOTE[slot], dur: '', cost: '', pick: '' }));
+    const path = PATH[r.lane] || PATH.full, at = path.indexOf(r.at);
+    (at < 0 ? [] : path.slice(at + 1)).forEach(slot => rows.push({ cls: 'is-next ' + (STATION[slot] ? 'h-' + slot : 'is-human h-none'), icon: iconOf(slot), name: STATION[slot] ? STATION[slot].short : NAME[slot], state: 'Up next', note: NEXTNOTE[slot], dur: '', cost: '', pick: '' }));
   }
   const sum = (f, k) => r.stops.filter(f).reduce((a, s) => a + (k === 'sec' ? dur(s) : s[k] || 0), 0);
   const isAgent = s => !!STATION[s.slot], isGate = s => s.slot === 'gate1' || s.slot === 'gate2';
   const stNow = STATION[r.at];
-  const status = r.phase === 'working' ? 'With the ' + stNow.short : r.phase === 'queued' ? 'Queued for the ' + stNow.short : r.phase === 'waiting' ? 'Waiting on you at ' + NAME[r.at] : r.phase === 'done' ? 'Merged' : 'In intake';
+  const status = r.phase === 'working' ? 'With the ' + stNow.short : r.phase === 'queued' ? 'At the ' + stNow.short : r.phase === 'waiting' ? 'Waiting on you at ' + NAME[r.at] : r.phase === 'done' ? 'Merged' : 'In intake';
   const chips = [r.lane === 'fast' ? 'Fast lane' : 'Full lane', r.autopilot ? 'Autopilot' : '', r.pr ? 'PR #' + r.pr : '', r.adr ? 'ADR ' + pad(r.adr, 4) : '', r.alert].filter(Boolean);
   const stats = [[fMin((r.doneAt || now) - r.born), 'Since it was filed'], [fMin(sum(isAgent, 'sec')), 'Agent time'], [fMin(sum(isGate, 'sec')), 'Waiting on you'],
     [D.telemetry ? fTok(sum(isAgent, 'tok')) : '—', 'Tokens'], [D.telemetry ? fUsd(sum(isAgent, 'usd')) : '—', 'Cost']];
@@ -563,6 +579,7 @@ function page(D, U, now) {
   const waiting = D.requests.filter(r => r.phase === 'waiting').sort((a, b) => a.since - b.since);
   const picked = U.sel.type === 'issue' ? D.requests.find(r => r.n === U.sel.n) : null;
   const notice = A.lost ? 'Lost the connection to Mission Control. Is it still running? This page reconnects on its own.'
+    : A.trouble ? 'Mission Control could not build this view: ' + A.trouble + '. The page shows what it had; the terminal it runs in has the details.'
     : D.mode !== 'demo' && !D.repo ? 'No GitHub repo was found. Start Mission Control inside a repo, or pass --repo owner/name.'
     : D.mode !== 'demo' && !D.github.ok && D.github.msg ? 'GitHub could not be read: ' + D.github.msg + '. Showing what was read last.' : '';
   return h`<div class="mc ${U.playing ? '' : 'is-paused'}" data-theme="${U.dark ? 'dark' : 'light'}" data-pal="${U.pal}" style="height: 100vh; min-height: 720px; display: flex; flex-direction: column; gap: 12px; padding: 0 20px 16px; background: var(--page); color: var(--ink); font-size: 13px; line-height: 1.4; overflow: hidden">
@@ -583,13 +600,13 @@ ${U.toast ? h`<div class="toast" role="status">${U.toast}</div>` : ''}
 // ------------------------------------------------------------------------------------ render + actions
 const root = document.getElementById('app');
 function render() {
-  if (!A.data) return;
+  if (!A.data) { if (A.trouble) root.textContent = 'Mission Control could not build this view: ' + A.trouble + '. The terminal it runs in has the details.'; return; }
   const U = A.ui;
   U.dark = U.theme ? U.theme === 'dark' : U.pal === 'cool';
   const tpl = document.createElement('template');
   tpl.innerHTML = page(A.data, U, clock()).__raw;
   const next = tpl.content.firstElementChild;
-  if (root.firstElementChild) morph(root.firstElementChild, next); else root.appendChild(next);
+  if (root.firstElementChild) morph(root.firstElementChild, next); else { root.textContent = ''; root.appendChild(next); }
 }
 const scrollTop = () => { const el = root.querySelector('[data-scroll="right"]'); if (el) el.scrollTop = 0; };
 let toastTimer = 0;
@@ -604,13 +621,13 @@ const actions = {
   left: id => { A.ui.left = id; render(); },
   ctx: id => { A.ui.ctx = A.ui.ctx === id ? null : id; render(); },
   lane: id => { A.ui.lane = id; render(); },
-  epic: key => { A.ui.closed[key] = !A.ui.closed[key]; render(); },
+  epic: key => { if (!A.ui.closed.delete(key)) A.ui.closed.add(key); render(); },
   hov: i => { A.ui.hov = Number(i); render(); },
   theme: () => { A.ui.theme = A.ui.dark ? 'light' : 'dark'; save(); render(); },
   play: () => { A.ui.playing = !A.ui.playing; A.frozenAt = A.ui.playing ? null : clock(); if (A.ui.playing && A.data.mode !== 'demo') connect(); render(); },
   repoMenu: () => { A.ui.repoMenu = !A.ui.repoMenu; render(); },
   closeMenus: () => { A.ui.repoMenu = false; render(); },
-  repo: name => { A.ui.repoMenu = false; A.ui.repo = name; A.ui.sel = { type: 'station', id: 'builder' }; A.pool.fill(null); A.seen.clear(); A.arr.clear(); save(); if (A.demo) { A.demo.pick(name); A.data = A.demo.state(); render(); } else connect(); },
+  repo: name => { A.ui.repoMenu = false; A.ui.repo = name; A.ui.sel = { type: 'station', id: 'builder' }; A.pool.length = 0; A.seen.clear(); A.arr.clear(); save(); if (A.demo) { A.demo.pick(name); A.data = A.demo.state(); render(); } else connect(); },
   open: n => toast('In demo mode there is no real issue #' + n + ' to open')
 };
 root.addEventListener('click', ev => { const el = ev.target.closest('[data-act]'); if (el && root.contains(el) && actions[el.dataset.act]) actions[el.dataset.act](el.dataset.arg, el); });
@@ -622,7 +639,8 @@ function connect() {
   if (A.source) A.source.close();
   const src = new EventSource('/api/events' + (A.ui.repo ? '?repo=' + encodeURIComponent(A.ui.repo) : ''));
   A.source = src;
-  src.addEventListener('state', ev => { if (!A.ui.playing) return; A.data = JSON.parse(ev.data); A.at = performance.now(); A.lost = false; render(); });
+  src.addEventListener('state', ev => { if (!A.ui.playing) return; A.data = JSON.parse(ev.data); A.at = performance.now(); A.lost = false; A.trouble = ''; render(); });
+  src.addEventListener('trouble', ev => { try { A.trouble = JSON.parse(ev.data).error || 'an error'; } catch (e) { A.trouble = 'an error'; } render(); });
   src.onerror = () => { if (!A.lost) { A.lost = true; render(); } };
 }
 
