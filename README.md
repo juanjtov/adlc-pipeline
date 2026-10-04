@@ -159,7 +159,7 @@ In the target repository:
 
 Every request enters as one GitHub issue labeled `stage:intake`. `/adlc-intake` (the `intake`
 skill) gets you there from wherever you are, and **interviews you first** — it asks only for
-what's missing (problem, outcome, roles, scope edge, one or two acceptance examples), shows
+what's missing (problem, outcome, roles, scope edge, one to three acceptance examples), shows
 the exact issue, and files it once you confirm:
 
 | You have | What intake does |
