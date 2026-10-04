@@ -2,33 +2,38 @@
 import json
 import sqlite3
 import threading
+from contextlib import contextmanager
+
+# Bump when a table changes shape. A file written by another version is emptied and rebuilt: no released
+# version has data to carry over yet. The first release that does must migrate instead.
+VERSION = 2
+TABLES = ('runs', 'steps', 'api', 'issues', 'label_events', 'prs', 'comments', 'meta')
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS runs (
   id TEXT PRIMARY KEY, session TEXT, agent_id TEXT, agent_type TEXT, station TEXT, repo TEXT, cwd TEXT,
-  branch TEXT, issue INTEGER, pr INTEGER, model TEXT, prompt TEXT, report TEXT, transcript TEXT,
+  branch TEXT, issue INTEGER, pr INTEGER, model TEXT, prompt TEXT, report TEXT,
   started REAL, ended REAL, last_seen REAL);
 CREATE INDEX IF NOT EXISTS runs_repo ON runs(repo, started);
 CREATE TABLE IF NOT EXISTS steps (
   id INTEGER PRIMARY KEY AUTOINCREMENT, run TEXT, tool_use_id TEXT, tool TEXT, kind TEXT, label TEXT,
-  path TEXT, started REAL, ended REAL, ok INTEGER, input TEXT, output TEXT);
+  path TEXT, skill TEXT, started REAL, ended REAL, ok INTEGER);
 CREATE INDEX IF NOT EXISTS steps_run ON steps(run, id);
 CREATE TABLE IF NOT EXISTS api (
-  id INTEGER PRIMARY KEY AUTOINCREMENT, run TEXT, session TEXT, agent TEXT, ts REAL, model TEXT,
+  id INTEGER PRIMARY KEY AUTOINCREMENT, run TEXT, ts REAL, model TEXT,
   input INTEGER, output INTEGER, cache_read INTEGER, cache_creation INTEGER, cost REAL, ms REAL);
 CREATE INDEX IF NOT EXISTS api_run ON api(run, id);
 CREATE TABLE IF NOT EXISTS issues (
-  repo TEXT, number INTEGER, title TEXT, url TEXT, state TEXT, labels TEXT, milestone TEXT, author TEXT,
-  created REAL, closed REAL, updated REAL, PRIMARY KEY (repo, number));
+  repo TEXT, number INTEGER, title TEXT, url TEXT, state TEXT, labels TEXT, milestone TEXT,
+  created REAL, updated REAL, PRIMARY KEY (repo, number));
 CREATE TABLE IF NOT EXISTS label_events (
   repo TEXT, number INTEGER, label TEXT, added INTEGER, ts REAL, actor TEXT,
   PRIMARY KEY (repo, number, label, added, ts));
 CREATE TABLE IF NOT EXISTS prs (
   repo TEXT, number INTEGER, title TEXT, url TEXT, state TEXT, head TEXT, labels TEXT, issue INTEGER,
-  author TEXT, created REAL, merged REAL, updated REAL, fix_commits TEXT, last_commit REAL,
-  PRIMARY KEY (repo, number));
+  created REAL, merged REAL, fix_commits TEXT, PRIMARY KEY (repo, number));
 CREATE TABLE IF NOT EXISTS comments (
-  repo TEXT, cid TEXT, kind TEXT, number INTEGER, ts REAL, author TEXT, body TEXT,
+  repo TEXT, cid TEXT, kind TEXT, number INTEGER, ts REAL, body TEXT,
   PRIMARY KEY (repo, cid));
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 """
@@ -37,23 +42,22 @@ TEXT_LIMIT = 6000
 
 
 def clip(value, limit=TEXT_LIMIT):
-    """Text for storage: JSON for structures, cut to a sane size."""
+    """Text for storage, cut to a sane size."""
     if value is None:
         return None
-    if not isinstance(value, str):
-        try:
-            value = json.dumps(value, ensure_ascii=False)
-        except (TypeError, ValueError):
-            value = str(value)
+    value = value if isinstance(value, str) else str(value)
     return value if len(value) <= limit else value[:limit] + '…'
 
 
 class Store:
     def __init__(self, path=':memory:'):
         self.lock = threading.RLock()
+        self.depth = 0
         self.db = sqlite3.connect(path, check_same_thread=False)
         self.db.row_factory = sqlite3.Row
         with self.lock:
+            if self.db.execute('PRAGMA user_version').fetchone()[0] != VERSION:
+                self.db.executescript(''.join('DROP TABLE IF EXISTS %s;' % t for t in TABLES) + 'PRAGMA user_version = %d;' % VERSION)
             self.db.executescript(SCHEMA)
             self.db.commit()
 
@@ -69,8 +73,26 @@ class Store:
     def x(self, sql, args=()):
         with self.lock:
             cur = self.db.execute(sql, args)
-            self.db.commit()
+            if not self.depth:
+                self.db.commit()
             return cur
+
+    @contextmanager
+    def tx(self):
+        """Several writes as one transaction: all of them land, or none does."""
+        with self.lock:
+            self.depth += 1
+            try:
+                yield
+            except BaseException:
+                if self.depth == 1:
+                    self.db.rollback()
+                raise
+            else:
+                if self.depth == 1:
+                    self.db.commit()
+            finally:
+                self.depth -= 1
 
     def put(self, table, row):
         cols = list(row)
@@ -89,11 +111,12 @@ class Store:
         return self.meta('repos', [])
 
     def add_repo(self, repo):
-        repos = self.repos()
-        if repo and repo not in repos:
-            repos.append(repo)
-            self.set_meta('repos', repos)
-        return repos
+        with self.lock:
+            repos = self.repos()
+            if repo and repo not in repos:
+                repos.append(repo)
+                self.set_meta('repos', repos)
+            return repos
 
     # ---- runs (one per agent session or subagent)
     def run(self, run_id):
@@ -125,11 +148,11 @@ class Store:
         return self.q('SELECT * FROM runs WHERE repo = ? AND started >= ? ORDER BY started', (repo, since))
 
     # ---- steps (one per tool call)
-    def step_open(self, run_id, tool_use_id, tool, kind, label, path, ts, tool_input):
-        self.x('INSERT INTO steps (run, tool_use_id, tool, kind, label, path, started, input) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-               (run_id, tool_use_id, tool, kind, label, path, ts, clip(tool_input)))
+    def step_open(self, run_id, tool_use_id, tool, kind, label, path, skill, ts):
+        self.x('INSERT INTO steps (run, tool_use_id, tool, kind, label, path, skill, started) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+               (run_id, tool_use_id, tool, kind, clip(label), path, skill, ts))
 
-    def step_close(self, run_id, tool_use_id, tool, ts, ok, output):
+    def step_close(self, run_id, tool_use_id, tool, ts, ok):
         with self.lock:
             row = None
             if tool_use_id:
@@ -138,8 +161,15 @@ class Store:
                 row = self.one('SELECT id FROM steps WHERE run = ? AND tool = ? AND ended IS NULL ORDER BY id DESC LIMIT 1', (run_id, tool))
             if row is None:
                 return False
-            self.x('UPDATE steps SET ended = ?, ok = ?, output = ? WHERE id = ?', (ts, 1 if ok else 0, clip(output), row['id']))
+            self.x('UPDATE steps SET ended = ?, ok = ? WHERE id = ?', (ts, 1 if ok else 0, row['id']))
             return True
+
+    def steps_end_stale(self, run_id):
+        """A call that was denied or interrupted never reports back. Once a later call has finished, end it as not done."""
+        with self.lock:
+            last = self.one('SELECT MAX(ended) AS t FROM steps WHERE run = ?', (run_id,))['t']
+            if last:
+                self.x('UPDATE steps SET ended = ?, ok = 0 WHERE run = ? AND ended IS NULL AND started < ?', (last, run_id, last))
 
     def steps(self, run_id, limit=80):
         rows = self.q('SELECT * FROM steps WHERE run = ? ORDER BY id DESC LIMIT ?', (run_id, limit))
@@ -147,6 +177,14 @@ class Store:
 
     def step_count(self, run_id):
         return self.one('SELECT COUNT(*) AS n FROM steps WHERE run = ?', (run_id,))['n']
+
+    def step_values(self, run_id, column):
+        """Every distinct file path ('path') or skill ('skill') a run's steps name, in first-use order."""
+        assert column in ('path', 'skill')
+        return [r[column] for r in self.q('SELECT %s FROM steps WHERE run = ? AND %s IS NOT NULL GROUP BY %s ORDER BY MIN(id)' % (column, column, column), (run_id,))]
+
+    def runs_with_open_step(self):
+        return {r['run'] for r in self.q('SELECT DISTINCT run FROM steps WHERE ended IS NULL')}
 
     # ---- model replies (one per API request, from telemetry)
     def api_add(self, row):

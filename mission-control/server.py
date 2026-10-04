@@ -6,7 +6,6 @@ Standard library only (Python 3.9+). It listens on 127.0.0.1, receives what Clau
 """
 import argparse
 import atexit
-import gzip
 import json
 import mimetypes
 import os
@@ -14,8 +13,10 @@ import signal
 import sys
 import threading
 import time
+import traceback
 import urllib.request
 import webbrowser
+import zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
@@ -29,6 +30,7 @@ WEB = os.path.join(HERE, 'web')
 PLUGIN_ROOT = os.path.dirname(HERE)
 DEFAULT_PORT = 4319
 MAX_BODY = 8 * 1024 * 1024
+MAX_INFLATED = 4 * MAX_BODY
 
 
 class App:
@@ -36,22 +38,28 @@ class App:
 
     def __init__(self, store, repo, demo=False, poll=True, interval=15.0):
         self.store, self.demo = store, demo
-        self.default_repo = repo
+        self.default_repo = (repo or '').lower()
         self.port = DEFAULT_PORT
         self.changed = threading.Condition()
         self.version = 0
+        self.watching = {}   # repo -> pages open on it. GitHub is read only for these.
         self.agents = {st: pipeline.read_agent(PLUGIN_ROOT, st) for st in pipeline.STATIONS}
-        self.ingest = ingest.Ingest(store, on_repo=self._seen_repo)
-        if repo:
-            store.add_repo(repo)
-        self.poller = github.Poller(store, store.repos, self.bump, interval=interval)
+        self.ingest = ingest.Ingest(store, on_repo=store.add_repo)
+        if self.default_repo:
+            store.add_repo(self.default_repo)
+        self.poller = github.Poller(store, self.watched, self.bump, interval=interval)
         if poll and not demo:
             self.poller.start()
 
-    def _seen_repo(self, repo):
-        if repo not in self.store.repos():
-            self.store.add_repo(repo)
-            self.poller.wake.set()
+    def watched(self):
+        with self.changed:
+            return [repo for repo, pages in self.watching.items() if repo and pages > 0]
+
+    def watch(self, repo, delta):
+        with self.changed:
+            self.watching[repo] = self.watching.get(repo, 0) + delta
+        if delta > 0:
+            self.poller.wake.set()   # a page just opened: read GitHub now, not at the next tick
 
     def bump(self):
         with self.changed:
@@ -59,7 +67,7 @@ class App:
             self.changed.notify_all()
 
     def repo(self, wanted=None):
-        repos = self.store.repos()
+        wanted, repos = (wanted or '').lower(), self.store.repos()
         if wanted in repos:
             return wanted
         return self.default_repo or (repos[0] if repos else '')
@@ -81,19 +89,17 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):   # quiet: one line per request is noise for a local tool
         pass
 
-    # ---- guards: this server is for this machine only
-    def _local(self):
+    def _allowed(self, api):
+        """This server is for this machine and for its own page. Claude Code and curl send no Origin and no
+        Sec-Fetch-Site; a page on another site sends both, and is refused."""
         host = (self.headers.get('Host') or '').split(':')[0]
-        if host not in ('localhost', '127.0.0.1', '[::1]'):
+        if host not in ('localhost', '127.0.0.1'):
             self._send(403, {'error': 'Mission Control only answers on localhost'})
             return False
-        return True
-
-    def _same_origin(self):
-        """Claude Code and curl send no Origin. A web page on another site does, and is refused."""
         origin = self.headers.get('Origin')
-        if origin and urlparse(origin).netloc != self.headers.get('Host'):
-            self._send(403, {'error': 'Cross-site requests are not accepted'})
+        elsewhere = origin and urlparse(origin).netloc != self.headers.get('Host')
+        if elsewhere or (api and self.headers.get('Sec-Fetch-Site') not in (None, 'same-origin', 'none')):
+            self._send(403, {'error': 'Requests from other sites are not accepted'})
             return False
         return True
 
@@ -103,32 +109,51 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header('Content-Type', ctype)
         self.send_header('Content-Length', str(len(data)))
         self.send_header('Cache-Control', 'no-store')
+        if code >= 400:
+            self.send_header('Connection', 'close')   # the request body may be unread; it must not be taken for the next request
         self.end_headers()
         self.wfile.write(data)
 
-    def _body(self):
-        length = int(self.headers.get('Content-Length') or 0)
+    def _json(self):
+        """The request body as a JSON object. None after the refusal has been sent."""
+        try:
+            length = int(self.headers.get('Content-Length') or 0)
+        except ValueError:
+            length = 0
         if length <= 0 or length > MAX_BODY:
+            self._send(413 if length > MAX_BODY else 400, {'error': 'Send a JSON body of at most %d MB' % (MAX_BODY >> 20)})
             return None
         raw = self.rfile.read(length)
-        if (self.headers.get('Content-Encoding') or '').lower() == 'gzip':
-            raw = gzip.decompress(raw)
         try:
-            return json.loads(raw.decode('utf-8'))
-        except (ValueError, UnicodeDecodeError):
+            if (self.headers.get('Content-Encoding') or '').lower() == 'gzip':
+                inflate = zlib.decompressobj(31)
+                raw = inflate.decompress(raw, MAX_INFLATED)
+                if inflate.unconsumed_tail:
+                    self._send(413, {'error': 'The body is too large'})
+                    return None
+            doc = json.loads(raw.decode('utf-8'))
+        except (ValueError, zlib.error, RecursionError):   # ValueError covers bad JSON and bad UTF-8
+            doc = None
+        if not isinstance(doc, dict):
+            self._send(400, {'error': 'The body is not a JSON object'})
             return None
+        return doc
 
     # ---- GET
     def do_GET(self):
-        if not self._local():
-            return
         url = urlparse(self.path)
-        query = parse_qs(url.query)
-        repo = (query.get('repo') or [None])[0]
+        api = url.path.startswith('/api/')
+        if not self._allowed(api):
+            return
+        repo = (parse_qs(url.query).get('repo') or [None])[0]
         if url.path == '/healthz':
             return self._send(200, {'ok': True, 'app': 'adlc-mission-control'})
         if url.path == '/api/state':
-            return self._send(200, self.app.state(repo))
+            try:
+                return self._send(200, self.app.state(repo))
+            except Exception as exc:
+                traceback.print_exc()
+                return self._send(500, {'error': 'The view could not be built (%s)' % type(exc).__name__})
         if url.path == '/api/meta':
             return self._send(200, self.app.meta())
         if url.path == '/api/events':
@@ -148,12 +173,15 @@ class Handler(BaseHTTPRequestHandler):
         self._send(200, data, ctype)
 
     def _events(self, repo):
-        """Server-Sent Events: the full state, again each time something changes."""
+        """Server-Sent Events: the full state, again each time something changes. While the stream is open the
+        repo counts as watched, which is what makes the poller read GitHub for it."""
+        repo = self.app.repo(repo)
         self.send_response(200)
         self.send_header('Content-Type', 'text/event-stream')
         self.send_header('Cache-Control', 'no-store')
-        self.send_header('Connection', 'keep-alive')
+        self.send_header('Connection', 'close')
         self.end_headers()
+        self.app.watch(repo, +1)
         seen = -1
         try:
             while True:
@@ -162,31 +190,42 @@ class Handler(BaseHTTPRequestHandler):
                         self.app.changed.wait(timeout=10)
                     fresh = self.app.version != seen
                     seen = self.app.version
-                payload = json.dumps(self.app.state(repo)) if fresh else None
-                chunk = ('event: state\ndata: %s\n\n' % payload) if payload else ': keep-alive\n\n'
+                chunk = ': keep-alive\n\n'   # also how a closed tab is noticed: the write fails
+                if fresh:
+                    try:
+                        chunk = 'event: state\ndata: %s\n\n' % json.dumps(self.app.state(repo))
+                    except Exception as exc:   # one row the view cannot digest must not end the stream for good
+                        traceback.print_exc()
+                        chunk = 'event: trouble\ndata: %s\n\n' % json.dumps({'error': 'The view could not be built (%s)' % type(exc).__name__})
                 self.wfile.write(chunk.encode())
                 self.wfile.flush()
                 time.sleep(0.5)   # at most two pushes a second, however fast events arrive
-        except (BrokenPipeError, ConnectionResetError, OSError):
+        except OSError:           # the page went away
             pass
+        finally:
+            self.app.watch(repo, -1)
 
     # ---- POST: what Claude Code sends
     def do_POST(self):
-        if not self._local() or not self._same_origin():
+        if not self._allowed(True):
             return
         path = urlparse(self.path).path
         if path not in ('/hooks', '/v1/logs', '/v1/metrics', '/v1/traces'):
             return self._send(404, {'error': 'Not found'})
         if 'json' not in (self.headers.get('Content-Type') or ''):
             return self._send(415, {'error': 'Send JSON. For telemetry set OTEL_EXPORTER_OTLP_PROTOCOL=http/json'})
-        doc = self._body()
+        doc = self._json()
         if doc is None:
-            return self._send(400, {'error': 'The body is not valid JSON'})
+            return
         changed = False
-        if path == '/hooks':
-            changed = self.app.ingest.hook(doc)
-        elif path == '/v1/logs':
-            changed = self.app.ingest.otlp_logs(doc) > 0
+        try:
+            if path == '/hooks':
+                changed = self.app.ingest.hook(doc)
+            elif path == '/v1/logs':
+                changed = self.app.ingest.otlp_logs(doc) > 0
+        except Exception as exc:   # an event we cannot read is refused; it does not take the connection down with a traceback
+            traceback.print_exc()
+            return self._send(400, {'error': 'That event could not be read (%s)' % type(exc).__name__})
         if changed:
             self.app.bump()
         self._send(200, {})
@@ -200,25 +239,48 @@ def running_at(port):
         return False
 
 
+def marked(marker):
+    """What the marker file says about a running copy: {'port', 'pid', ...}, or {} when there is none."""
+    try:
+        with open(marker) as fh:
+            doc = json.load(fh)
+        return doc if isinstance(doc, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog='adlc-mission-control', description='Live view of the ADLC pipeline for one repo, on this machine.')
     ap.add_argument('--repo', help='GitHub repo as owner/name. Default: the repo of the current directory.')
     ap.add_argument('--port', type=int, default=int(os.environ.get('ADLC_MC_PORT') or DEFAULT_PORT))
     ap.add_argument('--open', action='store_true', help='Open the page in the browser.')
-    ap.add_argument('--demo', action='store_true', help='Show simulated work instead of reading GitHub.')
-    ap.add_argument('--home', default=ingest.data_home(), help='Where the database lives. Default: ~/.adlc/mission-control')
+    ap.add_argument('--demo', action='store_true', help='Show simulated work. Reads nothing, stores nothing, and agents do not report to it.')
     args = ap.parse_args(argv)
 
+    # One place for the database and the marker, the same one hook.sh reads: ADLC_MC_HOME, or ~/.adlc/mission-control.
+    home = ingest.data_home()
+    marker = os.path.join(home, 'server.json')
     url = 'http://localhost:%d' % args.port + ('/?demo=1' if args.demo else '')
     if running_at(args.port):
         print('Mission Control is already running at ' + url)
         if args.open:
             webbrowser.open(url)
         return 0
+    other = marked(marker).get('port')
+    if not args.demo and isinstance(other, int) and running_at(other):
+        # A second copy on the same data would take over the marker, and agents would stop reporting to the first.
+        print('Mission Control is already running at http://localhost:%d. Stop it first to move it to port %d.' % (other, args.port))
+        if args.open:
+            webbrowser.open('http://localhost:%d' % other)
+        return 0
 
-    os.makedirs(args.home, exist_ok=True)
-    repo = args.repo or ingest.Repos().lookup(os.getcwd())[0]
-    app = App(Store(os.path.join(args.home, 'mc.sqlite')), repo, demo=args.demo)
+    repo = (args.repo or ingest.Repos().lookup(os.getcwd())[0] or '').lower()
+    if args.demo:
+        store = Store()
+    else:
+        os.makedirs(home, exist_ok=True)
+        store = Store(os.path.join(home, 'mc.sqlite'))
+    app = App(store, repo, demo=args.demo)
     app.port = args.port
     Handler.app = app
     try:
@@ -228,17 +290,18 @@ def main(argv=None):
         return 1
     httpd.daemon_threads = True
 
-    marker = os.path.join(args.home, 'server.json')
-    with open(marker, 'w') as fh:
-        json.dump({'port': args.port, 'pid': os.getpid(), 'started': time.time()}, fh)
-
     def cleanup(*_):
-        try:
-            os.remove(marker)
-        except OSError:
-            pass
-    atexit.register(cleanup)
-    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+        if marked(marker).get('pid') == os.getpid():   # only our own marker: never another copy's
+            try:
+                os.remove(marker)
+            except OSError:
+                pass
+    if not args.demo:
+        with open(marker, 'w') as fh:
+            json.dump({'port': args.port, 'pid': os.getpid(), 'started': time.time()}, fh)
+        atexit.register(cleanup)
+    for sig in (signal.SIGTERM, signal.SIGHUP):   # a closed terminal counts as a stop, so the marker goes with it
+        signal.signal(sig, lambda *_: sys.exit(0))
 
     print('Mission Control is running at ' + url)
     print('Repo: ' + (repo or 'none found here, pass --repo owner/name') + ('   (demo data)' if args.demo else ''))

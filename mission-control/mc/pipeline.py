@@ -10,11 +10,10 @@ import re
 SLOTS = ['intake', 'analyst', 'gate1', 'architect', 'builder', 'reviewer', 'qa', 'gate2', 'done']
 STATIONS = ['analyst', 'architect', 'builder', 'reviewer', 'qa']
 GATES = ['gate1', 'gate2']
-PATH = {
-    'full': SLOTS,
-    'fast': ['intake', 'analyst', 'gate1', 'builder', 'reviewer', 'gate2', 'done'],
-}
 
+# Claude Code reports a plugin's agent as '<plugin name>:<agent file name>'. Only this plugin's agents are pipeline agents:
+# another plugin's 'builder', or a project's own 'architect', is not.
+PLUGIN = 'adlc'
 # Agent file (agents/<name>.md) -> station.
 AGENT_STATION = {
     'product-analyst': 'analyst',
@@ -35,13 +34,12 @@ LABEL_SLOT = {
     'stage:qa': 'qa',
     'gate:deploy': 'gate2',
 }
-# When two pipeline labels are present at once (a stale one was not removed), the later stage wins.
+# The order of the stages, used only when two pipeline labels are present and nothing says which was added last.
 LABEL_ORDER = ['stage:intake', 'gate:stories', 'stage:design', 'stage:fast', 'stage:build', 'stage:qa', 'gate:deploy']
 
 TRIAGE_RE = re.compile(r'ADLC-TRIAGE:\s*(FAST|FULL)')
 ADV_RE = re.compile(r'ADLC-ADV:\s*(PASS|CHANGES)')
 ARCH_RE = re.compile(r'ADLC-ARCH:\s*(PASS|CHANGES)')
-FINDING_RE = re.compile(r'ADLC-FINDING:\s*([^|\n]+)\|([^|\n]+)\|([^\n]+)')
 ACTION_CARD_RE = re.compile(r'Proposed Action Card', re.I)
 ADR_RE = re.compile(r'(?:ADR[ -]?|docs/adr/)(\d{3,4})')
 
@@ -52,10 +50,9 @@ _BRANCH_RE = re.compile(r'^[^/]*/(\d+)(?:-.*)?$')   # the same rule as templates
 
 
 def station_for(agent_type):
-    """'adlc:builder' or 'builder' -> 'builder'. Unknown or empty -> None."""
-    if not agent_type:
-        return None
-    return AGENT_STATION.get(str(agent_type).split(':')[-1])
+    """'adlc:builder' -> 'builder'. Anything that is not one of this plugin's five agents -> None."""
+    plugin, _, name = (agent_type if isinstance(agent_type, str) else '').partition(':')
+    return AGENT_STATION.get(name) if plugin == PLUGIN else None
 
 
 def refs_in(text):
@@ -79,13 +76,23 @@ def issue_in_branch(branch):
     return int(m.group(1)) if m else None
 
 
-def slot_for_labels(labels):
-    """The slot an issue's labels put it at, or None when it is not on the line."""
-    best = None
-    for name in labels:
-        if name in LABEL_SLOT and (best is None or LABEL_ORDER.index(name) > LABEL_ORDER.index(best)):
-            best = name
-    return (LABEL_SLOT[best], best) if best else (None, None)
+def slot_for_labels(labels, events=()):
+    """The slot an issue's labels put it at, and the label that says so. (None, None) when it is not on the line.
+
+    Two pipeline labels can be present at once when a move left the old one behind. The one added last wins, as in
+    the lanes: adlc-intake.yml reads a stage:intake beside a leftover gate:stories as "the Analyst has not finished".
+    `events` is the issue's label history, oldest first. Without it the later stage wins.
+    """
+    present = [name for name in labels if name in LABEL_SLOT]
+    if not present:
+        return None, None
+    added = {}
+    for e in events:
+        if e.get('added') and e.get('ts') and e.get('label') in present:
+            added[e['label']] = e['ts']
+    pool = added or dict.fromkeys(present, 0)
+    best = max(pool, key=lambda name: (pool[name], LABEL_ORDER.index(name)))
+    return LABEL_SLOT[best], best
 
 
 def _short(path, cwd):
@@ -133,7 +140,7 @@ def read_agent(plugin_root, station):
     """The agent file for a station: frontmatter fields plus the body, which is its system prompt."""
     name = STATION_AGENT[station]
     path = os.path.join(plugin_root, 'agents', name + '.md')
-    info = {'station': station, 'agent': name, 'file': 'agents/' + name + '.md', 'prompt': '', 'model': '', 'tools': [], 'skills': []}
+    info = {'station': station, 'agent': name, 'file': 'agents/' + name + '.md', 'prompt': '', 'model': '', 'tools': []}
     try:
         with open(path, encoding='utf-8') as fh:
             text = fh.read()
@@ -149,9 +156,6 @@ def read_agent(plugin_root, station):
             info['model'] = value
         elif key == 'tools':
             info['tools'] = _split_tools(value)
-    load = re.search(r'^Load:\s*(.+?)(?:\n\n|\Z)', info['prompt'], re.S | re.M)
-    if load:
-        info['skills'] = _skills_in(' '.join(load.group(1).split()), plugin_root)
     return info
 
 
@@ -172,11 +176,6 @@ def _split_tools(value):
         else:
             cur += ch
     return out
-
-
-def _skills_in(load_line, plugin_root):
-    """Skill names from an agent's 'Load:' line. The agent is told to load these; a run may load fewer."""
-    return [{'name': name, 'tok': skill_tokens(plugin_root, '', name)} for name in re.findall(r'`([^`]+)`', load_line)]
 
 
 def skill_tokens(plugin_root, cwd, name):
