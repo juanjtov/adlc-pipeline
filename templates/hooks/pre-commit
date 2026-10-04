@@ -1,15 +1,30 @@
 #!/usr/bin/env bash
-# ADLC local diff-scope guard — enforces the Builder's declared scope (.adlc/scope.txt) on
-# staged files in LOCAL mode, using the SAME script the CI diff-scope lane uses (single source
-# of truth). No-ops if the scripts or a scope file aren't present. The bootstrap wizard installs
-# this to .git/hooks/pre-commit (chmod +x).
+# ADLC local diff-scope guard — holds staged files to the Builder's declared scope in LOCAL mode,
+# using the SAME script the CI diff-scope lane uses (single source of truth). The scope is the
+# issue's file, .adlc/scope/<issue>.txt; the issue is read from the branch name the Builder uses
+# (feat/<issue>-<slug>). No-ops if the scripts aren't installed, the branch names no issue, that
+# issue has no scope file, or a merge is being concluded (its staged files are other people's).
+# The bootstrap wizard installs this to .git/hooks/pre-commit (chmod +x).
 set -euo pipefail
 DIR="$(git rev-parse --show-toplevel)"
-SCRIPT="$DIR/.adlc/scripts/adlc-diff-scope.sh"
-[ -x "$SCRIPT" ] || exit 0   # scripts not installed → skip
+SCRIPTS="$DIR/.adlc/scripts"
+[ -x "$SCRIPTS/adlc-diff-scope.sh" ] && [ -x "$SCRIPTS/adlc-branch-issue.sh" ] || exit 0   # not installed → skip
+cd "$DIR"                    # staged paths and the scope path are both repo-relative
+[ -f "$(git rev-parse --git-path MERGE_HEAD)" ] && exit 0
 
-if ! git diff --cached --name-only | "$SCRIPT" build "$DIR/.adlc/scope.txt"; then
-  echo "✗ commit blocked: files staged outside the declared diff scope (.adlc/scope.txt)." >&2
+branch="$(git symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
+issue="$("$SCRIPTS/adlc-branch-issue.sh" "$branch")"
+scope=".adlc/scope/$issue.txt"
+[ -n "$issue" ] && [ -f "$scope" ] || exit 0   # no declared scope for this branch → skip
+
+# Test dirs QA may write (regex alternation). The wizard sets this default to the repo's own.
+export ADLC_TEST_DIRS="${ADLC_TEST_DIRS:-tests}"
+# build+qa, not build: the hook cannot see the issue's stage, and QA commits its tests on this
+# branch too (CI applies the stricter rule while the issue is at stage:build).
+# core.quotePath=false: git would quote non-ASCII paths, and they would match nothing.
+# --no-renames: a move counts under both its old and its new path.
+if ! git -c core.quotePath=false diff --cached --name-only --no-renames | "$SCRIPTS/adlc-diff-scope.sh" build+qa "$scope"; then
+  echo "✗ commit blocked: files staged outside the declared diff scope ($scope)." >&2
   echo "  Widen the scope with the Architect, or split the change." >&2
   exit 1
 fi

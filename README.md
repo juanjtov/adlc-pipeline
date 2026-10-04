@@ -41,9 +41,11 @@ templates/                     # what the wizard fills into the host repo
   github/ISSUE_TEMPLATE/requirement.yml           # file a requirement → pipeline starts
   scripts/  adlc-diff-scope.sh · adlc-tripwire-check.sh · adlc-fix-cap.sh · adlc-verdict.sh
             adlc-log-findings.sh · adlc-doctor.sh · adlc-metrics.sh · adlc-cost.sh
-            adlc-cache.sh · adlc-triage.sh   # deterministic logic
-            #   adlc-cache.sh  = prompt-cache hit-rate rollup
-            #   adlc-triage.sh = fast-lane eligibility cap (size + sensitive-path)
+            adlc-cache.sh · adlc-triage.sh · adlc-pr-stage.sh · adlc-branch-issue.sh   # deterministic logic
+            #   adlc-cache.sh        = prompt-cache hit-rate rollup
+            #   adlc-triage.sh       = fast-lane eligibility cap (size + sensitive-path)
+            #   adlc-pr-stage.sh     = which diff-scope stage a PR is in (from its linked issue)
+            #   adlc-branch-issue.sh = which issue a lane branch names (feat/<issue>-<slug>)
   hooks/pre-commit             # local diff-scope guard (reuses adlc-diff-scope.sh)
 tests/run.sh                   # unit tests for the guardrail scripts (bash, no deps)
 telemetry/                     # ready-to-run local OTel collector (docker compose) for token/cost
@@ -64,8 +66,10 @@ not just appended to.
 **Deterministic where it matters.** The *mechanical* guardrails — path scope, direct-push
 detection, the fix-loop cap, the verdict parse, setup validation — are small shell scripts in
 `scripts/`, **unit-tested** (`tests/run.sh`), and called by both CI and a **local pre-commit
-hook** so they enforce identically on your machine and in Actions. `adlc-doctor.sh` validates a
-host repo's setup (deny rules, unfilled placeholders, skills, labels). Judgment guardrails
+hook**, so your machine and Actions run the same code. The Builder declares each change's scope
+in `.adlc/scope/<issue>.txt`; the diff-scope check fails a lane PR that strays outside it or
+declares none. `adlc-doctor.sh` validates a host repo's setup (deny rules, unfilled
+placeholders, skills, labels). Judgment guardrails
 (design conformance, security severity) stay as skills + the adversarial review — those can't
 be made deterministic without losing the point.
 

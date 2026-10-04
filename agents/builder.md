@@ -17,10 +17,13 @@ tests, green on the project's pass/fail command, ready for the Architect's revie
 
 Work on a branch `feat/<issue>-<slug>` (never main). Implement **within the declared diff
 scope** — if you must touch a file outside it, stop and ask the Architect/Principal to widen
-the scope rather than touching it. Write a test for every AC, carrying its `SN-ACN` id.
+the scope rather than touching it. Record that scope in `.adlc/scope/<issue>.txt` — one path
+prefix per line, covering every file the PR touches — and commit it: CI and the pre-commit hook
+hold the diff to it. Write a test for every AC, carrying its `SN-ACN` id.
 Apply `adlc:security-gate` as you write (scope every query by the tenant key, parameterized
-queries, reuse the auth seam, no secrets). Open the PR with `gh pr create` targeting main,
-filling the template; write it for an outside reviewer with no session context.
+queries, reuse the auth seam, no secrets). Open the PR with `gh pr create` targeting main, its
+body starting `Closes #<issue>`, filling the template; write it for an outside reviewer with no
+session context.
 
 **Done when** (per `verify`) the project's test/type-check/build commands are green locally
 — paste the real summary line, never a memory of it — the diff ⊆ declared scope, and UI

@@ -23,12 +23,17 @@ set -uo pipefail
 max_files="${ADLC_FAST_MAX_FILES:-5}"
 max_lines="${ADLC_FAST_MAX_LINES:-40}"
 # Default sensitive-path denylist: migrations, auth/authz, infra/deploy, CI, the ADLC harness
-# config, dependency manifests, and secrets. A change to any of these needs real design — no
-# matter how few lines — because its blast radius isn't local.
-deny="${ADLC_FAST_DENY:-(^|/)(migrations?|auth|authz|security|infra|terraform|deploy|helm|k8s|kubernetes)/|(^|/)\.github/|(^|/)\.claude/|(^|/)(Dockerfile|docker-compose\.ya?ml)$|(^|/)(package\.json|package-lock\.json|yarn\.lock|pnpm-lock\.yaml|requirements[^/]*\.txt|Pipfile|Pipfile\.lock|poetry\.lock|pyproject\.toml|go\.mod|go\.sum|Gemfile|Gemfile\.lock|Cargo\.toml|Cargo\.lock|composer\.json|composer\.lock|pom\.xml|build\.gradle|build\.gradle\.kts)$|(^|/)\.?env(\.|$)|(^|/)secrets?(\.|/)}"
+# config and its guard scripts (.adlc/scripts/ — this script included: the cap runs from the PR's
+# own checkout, so a PR that edits it would be judged by its edited copy), dependency manifests,
+# and secrets. A change to any of these needs real design — no matter how few lines — because
+# its blast radius isn't local.
+deny="${ADLC_FAST_DENY:-(^|/)(migrations?|auth|authz|security|infra|terraform|deploy|helm|k8s|kubernetes)/|(^|/)\.github/|(^|/)\.claude/|(^|/)\.adlc/scripts/|(^|/)(Dockerfile|docker-compose\.ya?ml)$|(^|/)(package\.json|package-lock\.json|yarn\.lock|pnpm-lock\.yaml|requirements[^/]*\.txt|Pipfile|Pipfile\.lock|poetry\.lock|pyproject\.toml|go\.mod|go\.sum|Gemfile|Gemfile\.lock|Cargo\.toml|Cargo\.lock|composer\.json|composer\.lock|pom\.xml|build\.gradle|build\.gradle\.kts)$|(^|/)\.?env(\.|$)|(^|/)secrets?(\.|/)}"
 
 tab=$(printf '\t')
 files=0; lines=0; reasons=()
+# The issue's scope file (.adlc/scope/<issue>.txt) is the declaration the lane requires of every
+# PR, not part of the change — it counts toward neither cap.
+is_scope_file() { printf '%s\n' "$1" | grep -qE '^\.adlc/scope/[0-9]+\.txt$'; }
 while IFS= read -r line; do
   [ -z "$line" ] && continue
   # numstat form?  <added>\t<deleted>\t<path> — detect on the literal TABs numstat always uses,
@@ -38,6 +43,10 @@ while IFS= read -r line; do
     a=$(printf '%s' "$line" | cut -f1)
     d=$(printf '%s' "$line" | cut -f2)
     f=$(printf '%s' "$line" | cut -f3-)
+    # `old => new` is git's rename notation: not a path, and its counts are 0 however big the
+    # file. Feed this script `git diff --numstat --no-renames`.
+    case "$f" in *" => "*) reasons+=("rename notation (use --no-renames): $f") ;; esac
+    is_scope_file "$f" && continue
     # binary files show as '-' in numstat — size is unknowable, so never fast-eligible
     if [ "$a" = "-" ] || [ "$d" = "-" ]; then reasons+=("binary change: $f"); fi
     [ "$a" = "-" ] && a=0
@@ -45,6 +54,7 @@ while IFS= read -r line; do
     lines=$((lines + a + d))
   else
     f="$line"
+    is_scope_file "$f" && continue
   fi
   files=$((files + 1))
   printf '%s\n' "$f" | grep -qE "$deny" && reasons+=("sensitive path: $f")
