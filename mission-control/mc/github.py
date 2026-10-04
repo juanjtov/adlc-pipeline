@@ -18,7 +18,7 @@ query($owner: String!, $name: String!) {
         number title url state createdAt mergedAt updatedAt headRefName body
         author { login }
         labels(first: 20) { nodes { name } }
-        closingIssuesReferences(first: 3) { nodes { number } }
+        closingIssuesReferences(first: 5) { nodes { number repository { nameWithOwner } } }
         commits(last: 40) { nodes { commit { messageHeadline committedDate } } }
         comments(last: 40) { nodes { id body createdAt author { login } } }
       }
@@ -98,7 +98,9 @@ def apply(store, repo, data):
         _comments(store, repo, 'issue', number, node)
     for node in _nodes(data, 'pullRequests'):
         number = node['number']
-        closing = [n['number'] for n in _nodes(node, 'closingIssuesReferences')]
+        # The same order the lanes use: a closing reference in this repo, else the issue the branch names, else the first #N in the body.
+        closing = [n['number'] for n in _nodes(node, 'closingIssuesReferences')
+                   if ((n.get('repository') or {}).get('nameWithOwner') or repo).lower() == repo.lower()]
         issue = closing[0] if closing else pipeline.issue_in_branch(node.get('headRefName')) or _first_ref(node.get('body'))
         commits = [c.get('commit') or {} for c in _nodes(node, 'commits')]
         dates = [epoch(c.get('committedDate')) for c in commits if c.get('committedDate')]

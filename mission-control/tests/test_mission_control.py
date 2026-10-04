@@ -55,8 +55,13 @@ class PipelineRules(unittest.TestCase):
         self.assertEqual(pipeline.refs_in('Review PR #156 in fresh context'), (None, 156))
         self.assertEqual(pipeline.refs_in('Gate the PR linked to issue #9.'), (9, None))
         self.assertEqual(pipeline.refs_in('no numbers here'), (None, None))
+        # the branch rule is the pipeline's own (templates/scripts/adlc-branch-issue.sh)
         self.assertEqual(pipeline.issue_in_branch('feat/142-password-reset'), 142)
+        self.assertEqual(pipeline.issue_in_branch('feat/142'), 142)
         self.assertIsNone(pipeline.issue_in_branch('main'))
+        self.assertIsNone(pipeline.issue_in_branch('fix/diff-scope'))
+        self.assertIsNone(pipeline.issue_in_branch('feat/area/12-deeper'))
+        self.assertIsNone(pipeline.issue_in_branch(''))
 
     def test_later_stage_label_wins(self):
         self.assertEqual(pipeline.slot_for_labels(['stage:intake', 'gate:stories'])[0], 'gate1')
@@ -152,6 +157,22 @@ class Line(unittest.TestCase):
         auto = [s for s in r[5]['stops'] if s['slot'] == 'gate1'][0]
         self.assertEqual((auto['auto'], auto['note']), (True, 'Autopilot approved the plan'))
         self.assertEqual([s for s in r[5]['stops'] if s['slot'] == 'reviewer'][0]['note'], 'ADLC-ADV: PASS and ADLC-ARCH: PASS')
+
+    def test_a_pull_request_is_tied_to_its_issue_the_way_the_lanes_do_it(self):
+        store = seeded()
+        data = fx.repo_data()
+        pr = data['pullRequests']['nodes'][0]
+        linked = lambda: [p for p in store.prs(REPO) if p['number'] == 10][0]['issue']
+        pr['closingIssuesReferences'] = {'nodes': [{'number': 99, 'repository': {'nameWithOwner': 'other/repo'}}, {'number': 3, 'repository': {'nameWithOwner': REPO}}]}
+        github.apply(store, REPO, data)
+        self.assertEqual(linked(), 3)                    # the first closing reference in this repo, ahead of the branch
+        pr['closingIssuesReferences'] = {'nodes': [{'number': 99, 'repository': {'nameWithOwner': 'other/repo'}}]}
+        pr['body'] = 'See #77 for context'
+        github.apply(store, REPO, data)
+        self.assertEqual(linked(), 4)                    # only another repo's: the branch feat/4-... names it
+        pr['headRefName'] = 'cleanup'
+        github.apply(store, REPO, data)
+        self.assertEqual(linked(), 77)                   # last resort: the first #N in the body
 
     def test_a_changes_label_sends_it_back_to_the_builder(self):
         store = seeded()
