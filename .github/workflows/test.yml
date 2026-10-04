@@ -13,3 +13,9 @@ jobs:
         run: bash tests/run.sh
       - name: Run Mission Control tests
         run: python3 -m unittest discover -s mission-control/tests
+      # Mission Control promises to run on the Python that ships with the macOS developer tools.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.9'
+      - name: Run Mission Control tests on Python 3.9
+        run: python3 -m unittest discover -s mission-control/tests
