@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Unit tests for the ADLC guardrail scripts. Plain bash, no dependencies.
 # Run: bash tests/run.sh   (exit 0 = all pass). These verify the deterministic guardrails
-# themselves — the same scripts CI and the local pre-commit hook call.
+# themselves — the same scripts CI and the local pre-commit hook call. The static checks at the
+# end cover what can't be run here for real: the workflow templates (their triggers, and the
+# intake steps against a stub gh) and labels.sh.
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 S="$ROOT/templates/scripts"
@@ -105,6 +107,124 @@ printf '%s\n' "$CO" | grep -qE 'adlc-builder +2 +180 +90\.0 +7000' && ok "per-la
 printf '%s\n' "$CO" | grep -qE 'TOTAL +3 +260' && ok "pipeline total latency" || bad "pipeline total latency"
 LO=$(printf 'adlc-review 30\nadlc-review 10\n' | bash "$S/adlc-cost.sh")
 printf '%s\n' "$LO" | grep -qE 'adlc-review +2 +40 +20\.0' && ok "latency-only (no tokens)" || bad "latency-only"
+
+echo "lane triggers (static):"
+# `labeled` fires on EVERY label change — including the label moves the lanes themselves make with
+# the dispatch token. Every job of a workflow that reacts to label changes must name, in its own
+# `if:`, the label that fired the event, or it re-runs on unrelated transitions (adlc-intake once
+# re-ran the Analyst at every stage and could drag an in-flight issue back to gate:stories).
+# No pipes into `grep -q` here: under this file's pipefail an early-exiting reader can turn a
+# match into a failure.
+for W in "$ROOT"/templates/github/adlc-*.yml; do
+  # Reacts to label changes: `labeled` among its types, or an `issues` trigger with no `types:`
+  # at all (which means every activity type, `labeled` included).
+  reacts=$(awk '
+    /^on:/ { on=1; rest=$0; sub(/^on:[ \t]*/, "", rest); if (rest ~ /issues/) bare=1; next }
+    on && /^[^ \t#]/ { on=0 }
+    !on || /^[ \t]*#/ { next }
+    /^  [A-Za-z_]+:/ { if (cur == "issues" && !typ) bare=1; cur=$1; sub(/:.*/, "", cur); typ=0 }
+    /types:/ { typ=1 }
+    /labeled/ { lab=1 }
+    END { if (cur == "issues" && !typ) bare=1; if (lab || bare) print "yes" }' "$W")
+  [ "$reacts" = "yes" ] || continue
+  # jobs whose own `if:` never mentions github.event.label.name
+  unfiltered=$(awk '
+    function flush() { if (name != "" && !hit) printf "%s ", name }
+    /^jobs:/ { j=1; next }
+    !j || /^[ \t]*#/ { next }
+    /^  [A-Za-z0-9_-]+:[ \t]*(#.*)?$/ { flush(); name=$1; sub(/:.*/, "", name); inif=0; hit=0; n++; next }
+    /^    if:/ { inif=1 }
+    inif && /^    [A-Za-z0-9_-]+:/ && !/^    if:/ { inif=0 }
+    inif && /github\.event\.label\.name/ { hit=1 }
+    END { flush(); if (!n) printf "(no jobs parsed) " }' "$W")
+  eq "" "$(basename "$W"): every job's if names the label that fired" "$unfiltered"
+done
+# adlc-intake.yml: the concurrency group must admit exactly the runs its job will start (the job's
+# `if` minus the author allowlist), and give every other event a group of its own. If the two
+# drift, a run that is going to be skipped can share the group and cancel an in-flight Analyst.
+I="$ROOT/templates/github/adlc-intake.yml"
+flat() { awk -v a="$1" -v b="$2" '$0 ~ a {f=1; next} $0 ~ b {f=0} f {gsub(/^[ \t]+|[ \t]+$/, ""); printf "%s ", $0}' "$I"; }
+pre='}}-${{ '; suf=" && 'start' || github.run_id }} "; allow=' && contains(fromJSON('
+grp=$(flat '^  group: >-' '^  cancel-in-progress:'); grp=${grp#*"$pre"}; grp=${grp%"$suf"}
+jif=$(flat '^    if: >' '^    runs-on:');             jif=${jif%"$allow"*}
+[ -n "$jif" ] && eq "$jif" "adlc-intake.yml: concurrency group admits exactly the runs the job starts" "$grp" \
+  || bad "adlc-intake.yml: could not read the job's if"
+
+echo "intake steps (the workflow's own run: scripts against a stub gh):"
+# The two shell steps of adlc-intake.yml decide whether the Analyst runs and what happens at
+# Gate 1. Pull them out of the template and execute them, so that logic is tested as shipped.
+step_run() { # <regex matching the step's `- name:` line>  → its `run: |` script
+  awk -v pat="$1" '
+    /^      - / { instep = ($0 ~ pat); inrun=0 }
+    instep && /^        run: \|[ \t]*$/ { inrun=1; next }
+    inrun { if ($0 ~ /^          / || $0 ~ /^[ \t]*$/) { sub(/^          /, ""); print } else inrun=0 }' "$I"
+}
+IT="$(mktemp -d)"; ST="$IT/state"
+step_run '- name: Read the live issue state' > "$IT/live.sh"
+step_run '- name: Gate 1 handoff'            > "$IT/gate.sh"
+cat > "$IT/gh" <<'SH'
+#!/usr/bin/env bash
+# stub gh: issue state lives in $ST (labels, comments); every write call is logged to $ST/calls
+[ -n "${GH_FAIL_EDIT:-}" ] && [ "$1 $2" = "issue edit" ] && exit 1
+case "$1 $2" in
+  "issue view") case "$*" in *"--json labels"*) cat "$ST/labels" ;; *"--json comments"*) cat "$ST/comments" ;; *) exit 2 ;; esac ;;
+  "issue comment"|"issue edit") shift; echo "$*" >> "$ST/calls" ;;
+  *) exit 2 ;;
+esac
+SH
+chmod +x "$IT/gh"
+intake() { # <script> <labels, space-separated> <comments> [ENV=val …] — runs it as Actions does (bash -e)
+  local script="$1" labels="$2" comments="$3"; shift 3
+  rm -rf "$ST"; mkdir -p "$ST"; : > "$ST/calls"; : > "$ST/out"
+  printf '%s\n' $labels > "$ST/labels"; printf '%s\n' "$comments" > "$ST/comments"
+  env PATH="$IT:$PATH" ST="$ST" N=7 GITHUB_OUTPUT="$ST/out" "$@" bash -e "$IT/$script" >/dev/null 2>&1
+}
+outs()  { tr '\n' ' ' < "$ST/out"; }
+calls() { cut -d' ' -f1-6 "$ST/calls" | tr '\n' '|'; }
+[ -s "$IT/live.sh" ] && [ -s "$IT/gate.sh" ] && ok "both run: scripts extracted from the template" || bad "could not extract the run: scripts"
+intake live.sh "adlc:auto stage:intake" "";                 eq "intake=true autopilot=false "  "live: at auto-start intake"                     "$(outs)"
+intake live.sh "adlc:auto adlc:autopilot stage:intake" "";  eq "intake=true autopilot=true "   "live: autopilot opt-in read before the Analyst" "$(outs)"
+intake live.sh "adlc:auto adlc:autopilot stage:build" "";   eq "intake=false autopilot=true "  "live: stale run on an in-flight issue does nothing" "$(outs)"
+intake live.sh "stage:intake" "";                           eq "intake=false autopilot=false " "live: paused issue (adlc:auto taken off) does nothing" "$(outs)"
+intake gate.sh "adlc:auto stage:intake" "1. Which roles?" AUTOPILOT=false
+eq "edit 7 --remove-label adlc:auto|comment 7 --body ⏸️ The Analyst|" "gate: paused → adlc:auto off, then the resume note" "$(calls)"
+intake gate.sh "adlc:auto adlc:autopilot stage:intake gate:stories" "ADLC-TRIAGE: FULL | old round" AUTOPILOT=true
+case "$(calls)" in *stage:design*) bad "gate: leftover gate:stories must not auto-advance a paused re-run" ;; *) ok "gate: leftover gate:stories does not auto-advance a paused re-run" ;; esac
+intake gate.sh "adlc:auto stage:intake" "q" AUTOPILOT=false GH_FAIL_EDIT=1; check 1 "gate: a failed label removal stops the step" $?
+eq "" "gate: …before the note that says it was removed" "$(calls)"
+intake gate.sh "adlc:auto gate:stories" "ADLC-TRIAGE: FULL | needs design" AUTOPILOT=false
+eq "" "gate: stories posted, no autopilot → Gate 1 left to the Principal" "$(calls)"
+intake gate.sh "adlc:auto adlc:autopilot gate:stories" "ADLC-TRIAGE: FULL | needs design" AUTOPILOT=true
+eq "edit 7 --remove-label gate:stories --add-label stage:design|" "gate: autopilot + FULL → stage:design" "$(calls)"
+intake gate.sh "adlc:auto adlc:autopilot gate:stories" "ADLC-TRIAGE: FAST | copy fix" AUTOPILOT=true
+eq "comment 7 --body 🚦 Triaged **FAST**|" "gate: autopilot + FAST → lane-approval note, never stage:fast" "$(calls)"
+intake gate.sh "adlc:auto adlc:autopilot gate:stories" "ADLC-TRIAGE: FULL | needs design" AUTOPILOT=false
+eq "" "gate: adlc:autopilot added mid-run is not honoured" "$(calls)"
+intake gate.sh "adlc:auto gate:stories" "ADLC-TRIAGE: FULL | needs design" AUTOPILOT=true
+eq "" "gate: adlc:autopilot taken off mid-run opts out" "$(calls)"
+intake gate.sh "adlc:auto stage:design" "ADLC-TRIAGE: FULL | x" AUTOPILOT=true
+eq "" "gate: neither stage:intake nor gate:stories → labels left alone" "$(calls)"
+rm -rf "$IT"
+
+echo "labels.sh (against a stub gh):"
+# GitHub rejects a label description over 100 characters (HTTP 422); under labels.sh's `set -e`
+# that stops the script, so every label after the offending one is never created. Run the real
+# script against a stub that enforces the limit (in bytes, which can only over-count).
+LB="$(mktemp -d)"
+cat > "$LB/gh" <<'SH'
+#!/usr/bin/env bash
+# stub: gh label create <name> --color <c> --description <d> --force
+[ "$1 $2" = "label create" ] || exit 2
+name="$3"; desc=""
+while [ $# -gt 0 ]; do [ "$1" = "--description" ] && desc="$2"; shift; done
+LC_ALL=C
+[ "${#desc}" -le 100 ] || { echo "HTTP 422: description is too long (maximum is 100 characters)" >&2; exit 1; }
+echo "$name" >> "$LB_OUT"
+SH
+chmod +x "$LB/gh"; : > "$LB/created"
+LB_OUT="$LB/created" PATH="$LB:$PATH" bash "$ROOT/templates/github/labels.sh" >/dev/null 2>&1; check 0 "labels.sh runs to the end (no description over GitHub's 100-char limit)" $?
+eq "$(grep -c '^create "' "$ROOT/templates/github/labels.sh")" "…and creates every label it lists" "$(grep -c . "$LB/created")"
+rm -rf "$LB"
 
 echo ""
 echo "== $pass passed, $fail failed =="

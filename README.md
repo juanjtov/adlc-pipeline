@@ -201,6 +201,13 @@ and it flows through build + review. It still stops at the two human gates (`gat
 `gate:deploy`), and only allowlisted authors can auto-trigger. Without this, stages are started
 by applying `stage:*` labels by hand.
 
+The Analyst starts when an issue **enters** auto-start intake — it comes to carry both `adlc:auto`
+and `stage:intake` (the template applies both) — and at no other time: the label moves the lanes
+make as the issue advances never re-run it. If it stops to ask clarifying questions, the issue
+waits at `stage:intake` and the workflow takes `adlc:auto` off; answer on the issue, then **add
+`adlc:auto` back** to run it again — a comment alone does not restart it. Moving an issue back
+to `stage:intake` (returning the stories at Gate 1) re-runs it too.
+
 **Full autopilot** goes one further: the `adlc:autopilot` label **auto-approves Gate 1**, so
 the pipeline runs the whole chain — intake → design → build → adversarial + architect review →
 QA — to a QA-approved PR, and your **only** step is reviewing and merging it at **Gate 2**.
@@ -211,4 +218,6 @@ the final merge. If a review flags something, **`adlc-fix.yml`** sends the PR ba
 to fix and re-review automatically — capped at 3 rounds, then it tags `needs:human` — so what
 reaches you is a clean PR to read and merge. Autopilot auto-approves Gate 1 into the **full**
 pipeline only; it never starts the **fast lane** (that skips design, so the lane choice stays an
-explicit human approval — a `FAST` recommendation waits at `gate:stories`).
+explicit human approval — a `FAST` recommendation waits at `gate:stories`). The label has to be
+on the issue before the Analyst starts (apply it when you file); added later, it does not advance
+an issue already waiting at Gate 1, and taking it off before the Analyst finishes opts back out.
