@@ -43,6 +43,9 @@ while IFS= read -r line; do
     a=$(printf '%s' "$line" | cut -f1)
     d=$(printf '%s' "$line" | cut -f2)
     f=$(printf '%s' "$line" | cut -f3-)
+    # `old => new` is git's rename notation: not a path, and its counts are 0 however big the
+    # file. Feed this script `git diff --numstat --no-renames`.
+    case "$f" in *" => "*) reasons+=("rename notation (use --no-renames): $f") ;; esac
     is_scope_file "$f" && continue
     # binary files show as '-' in numstat — size is unknowable, so never fast-eligible
     if [ "$a" = "-" ] || [ "$d" = "-" ]; then reasons+=("binary change: $f"); fi

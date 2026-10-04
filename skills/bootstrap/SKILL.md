@@ -177,7 +177,8 @@ Create/write:
    hook call — one unit-tested source of truth, not prose. Then install the **local diff-scope
    guard**: copy `templates/hooks/pre-commit` to `.git/hooks/pre-commit` (chmod +x) — **ask first
    if a pre-commit hook already exists** — so the Builder's declared scope is enforced on every
-   local commit, not only in CI.
+   local commit, not only in CI. Set the hook's `ADLC_TEST_DIRS` default to the repo's test dirs
+   (the same regex that fills `{{TEST_DIR_REGEX}}`).
 
 9. **UI projects only** (frontend detected): note that the `design-system` and
    `verify-frontend-change` skills are expected by the Builder/QA agents when frontend

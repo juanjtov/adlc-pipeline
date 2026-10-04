@@ -101,7 +101,9 @@ jobs:
         run: |
           chmod +x .adlc/scripts/adlc-triage.sh
           base=$(git merge-base origin/${{ github.base_ref }} HEAD 2>/dev/null || echo "origin/${{ github.base_ref }}")
-          if git diff --numstat "$base"...HEAD | .adlc/scripts/adlc-triage.sh > /tmp/cap.out 2> /tmp/cap.err; then
+          # --no-renames: a rename would show as `old => new` with 0 lines, hiding both the
+          # sensitive path it moved to and its size.
+          if git diff --numstat --no-renames "$base"...HEAD | .adlc/scripts/adlc-triage.sh > /tmp/cap.out 2> /tmp/cap.err; then
             echo "eligible=true" >> "$GITHUB_OUTPUT"
           else
             echo "eligible=false" >> "$GITHUB_OUTPUT"

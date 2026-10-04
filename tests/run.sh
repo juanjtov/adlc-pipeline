@@ -54,6 +54,8 @@ scope 'src/api/\n\n'
 printf 'src/db/y.py\n'              | ds build "$SC"; check 1 "a blank line does not allow everything" $?
 scope '  src/models/  \n'
 printf 'src/models/m.py\n'          | ds build "$SC"; check 0 "scope entries are trimmed" $?
+scope 'src/api/'   # no final newline — the usual shape of a file an agent writes
+printf 'src/api/x.py\n'             | ds build "$SC"; check 0 "a last line with no newline still counts" $?
 scope '# notes\n'
 printf '# notes/x.md\n'             | ds build "$SC"; check 1 "a # line is a comment, not a prefix" $?
 scope ''
@@ -99,6 +101,15 @@ for s in $stages; do
 done
 rm -rf "$T"
 
+echo "branch-issue (which issue a lane branch names):"
+bi() { bash "$S/adlc-branch-issue.sh" "$1"; }
+eq 12 "feat/12-add-login → 12"                        "$(bi feat/12-add-login)"
+eq 12 "feat/12 (no slug) → 12"                        "$(bi feat/12)"
+eq "" "main names no issue"                           "$(bi main)"
+eq "" "fix/diff-scope names no issue"                 "$(bi fix/diff-scope)"
+eq "" "a number deeper in the name is not an issue"   "$(bi feat/v2-12-foo)"
+eq "" "no branch (detached HEAD) names no issue"      "$(bi '')"
+
 echo "triage (fast-lane cap):"
 printf 'src/a.py\nsrc/b.py\nREADME.md\n'      | bash "$S/adlc-triage.sh" >/dev/null 2>&1; check 0 "small safe change is fast-eligible" $?
 printf 'src/a.py\ndb/migrations/003.sql\n'    | bash "$S/adlc-triage.sh" >/dev/null 2>&1; check 1 "migrations force full" $?
@@ -122,6 +133,11 @@ ADLC_FAST_MAX_FILES=1 bash -c 'printf "a\nb\n" | bash "'"$S"'/adlc-triage.sh"' >
 printf 'a\nb\nc\nd\ne\n.adlc/scope/12.txt\n'  | bash "$S/adlc-triage.sh" >/dev/null 2>&1; check 0 "scope file does not count toward the file cap" $?
 printf '38\t0\tsrc/a.py\n9\t0\t.adlc/scope/12.txt\n' | bash "$S/adlc-triage.sh" >/dev/null 2>&1; check 0 "…nor toward the line cap" $?
 printf '.adlc/scope/12/migrations/x.sql.txt\n' | bash "$S/adlc-triage.sh" >/dev/null 2>&1; check 1 "only the scope file itself is exempt" $?
+# git writes a rename as `old => new` with 0 lines: neither the path it moved to nor its size
+# would be judged. The script refuses the notation, and the workflow never produces it.
+printf '0\t0\tsrc/db/old.py => auth/new.py\n' | bash "$S/adlc-triage.sh" >/dev/null 2>&1; check 1 "rename notation is never fast-eligible" $?
+printf '0\t0\t{src/db => x/auth}/old.py\n'    | bash "$S/adlc-triage.sh" >/dev/null 2>&1; check 1 "…in its brace form either" $?
+grep -q -- 'git diff --numstat --no-renames' "$ROOT/templates/github/adlc-fast.yml" && ok "adlc-fast.yml takes the cap's diff with --no-renames" || bad "adlc-fast.yml: the cap's diff must use --no-renames"
 
 echo "verdict:"
 eq PASS    "last marker wins"        "$(printf 'ADLC-ADV: CHANGES\nblah\nADLC-ADV: PASS\n' | bash "$S/adlc-verdict.sh" ADLC-ADV)"
@@ -286,20 +302,20 @@ echo "diff-scope step (the workflow's own run: script against a stub gh):"
 # This step decides which issue and stage a PR is checked under — the part that once resolved
 # every lane PR to "no stage" and skipped. Run it as shipped, in a checkout-shaped directory.
 DS="$(mktemp -d)"; mkdir -p "$DS/bin" "$DS/repo/.adlc/scripts"
-cp "$S/adlc-pr-stage.sh" "$S/adlc-diff-scope.sh" "$DS/repo/.adlc/scripts/"
+cp "$S/adlc-pr-stage.sh" "$S/adlc-branch-issue.sh" "$S/adlc-diff-scope.sh" "$DS/repo/.adlc/scripts/"
 step_run "$ROOT/templates/github/adlc-diff-scope.yml" '- name: Enforce declared diff scope' > "$DS/step.sh"
 cat > "$DS/bin/gh" <<'SH'
 #!/usr/bin/env bash
-# stub gh: each call answers from a file in $FX; a `fail-<name>` file makes that call error
+# stub gh: each call answers from a file in $FX. No file → 404; a `fail-<name>` file → 502.
 case "$*" in
   "pr view"*closingIssuesReferences*) k=closing ;;
   "pr view"*labels*)                  k=pr-labels ;;
-  "issue view"*)                      k="issue-$3" ;;
   "api "*"/pulls/"*"/files"*)         k=files ;;
+  "api "*"/issues/"*)                 k="issue-$(printf '%s\n' "$*" | sed -n 's|.*/issues/\([0-9][0-9]*\).*|\1|p')" ;;
   *) echo "stub gh: unexpected call: $*" >&2; exit 2 ;;
 esac
-[ -e "$FX/fail-$k" ] && { echo "HTTP 502" >&2; exit 1; }
-[ -e "$FX/$k" ] || { echo "could not resolve $k" >&2; exit 1; }
+[ -e "$FX/fail-$k" ] && { echo "gh: Bad Gateway (HTTP 502)" >&2; exit 1; }
+[ -e "$FX/$k" ] || { echo '{"message":"Not Found"}'; echo "gh: Not Found (HTTP 404)" >&2; exit 1; }
 cat "$FX/$k"
 SH
 chmod +x "$DS/bin/gh"
@@ -310,7 +326,9 @@ dsfx() {
   [ "$4" = - ] || printf '%b' "$4" > "$DS/fx/issue-$3"
   [ "$5" = - ] || printf '%b' "$5" > "$DS/repo/.adlc/scope/$3.txt"
 }
-dsrun() { ( cd "$DS/repo" && env PATH="$DS/bin:$PATH" FX="$DS/fx" PR=7 ADLC_TEST_DIRS=tests bash -e "$DS/step.sh" ) >/dev/null 2>&1; }
+dsrun() { # [head branch] — runs the step as Actions does (bash -e)
+  ( cd "$DS/repo" && env PATH="$DS/bin:$PATH" FX="$DS/fx" PR=7 HEAD_REF="${1:-claude/work}" ADLC_TEST_DIRS=tests bash -e "$DS/step.sh" ) >/dev/null 2>&1
+}
 [ -s "$DS/step.sh" ] && ok "run: script extracted from the template" || bad "could not extract the run: script"
 dsfx '' '12\n' 12 'stage:build\n' 'src/api/\n' 'src/api/x.py\n.adlc/scope/12.txt\n'
 dsrun; check 0 "full lane: a PR inside its declared scope passes" $?
@@ -327,15 +345,17 @@ dsrun; check 0 "fast lane at opened (lane:fast not on the PR yet) passes in scop
 dsfx 'lane:fast\n' '13\n' 13 'gate:deploy\n' 'README.md\n' 'README.md\nsrc/late.py\n'
 dsrun; check 1 "fast lane after PASS: a late out-of-scope push fails" $?
 dsfx '' '' 12 'stage:build\n' 'src/api/\n' 'src/billing/y.py\n.adlc/scope/12.txt\n'
-dsrun; check 1 "no closing reference: the scope file the PR ships names the issue" $?
-dsfx '' '' 12 'stage:build\n' 'src/api/\n' 'src/api/x.py\n.adlc/scope/12.txt\n.adlc/scope/13.txt\n'
-dsrun; check 1 "no closing reference and two scope files: fails, does not guess" $?
-dsfx '' '' 99 - 'src/\n' 'src/a.py\n.adlc/scope/99.txt\n'
-dsrun; check 1 "a scope file for an issue that does not exist fails" $?
+dsrun feat/12-add-login; check 1 "no closing reference: the branch names the issue" $?
+dsfx '' '' 12 'stage:build\n' - 'src/api/x.py\n'
+dsrun feat/12-add-login; check 1 "…and a lane branch that declares no scope fails" $?
+dsfx '' '' 12 'stage:qa\ngate:deploy\n' 'src/api/\n' 'src/a.py\ndocs/x.md\n.adlc/scope/12.txt\n.adlc/scope/13.txt\n'
+dsrun release/next; check 0 "a PR that merely carries scope files (a promotion, a cleanup) is tied to no issue" $?
+dsfx '' '' 2026 - - 'CHANGELOG.md\n'
+dsrun release/2026-10; check 0 "a branch number that is no issue here ties the PR to none" $?
 dsfx '' '12\n' 12 'stage:design\n' 'README.md\n' 'src/api/x.py\ndocs/adr/7.md\n'
 dsrun; check 0 "issue at stage:design (a bounced fast PR) is skipped" $?
 dsfx 'dependencies\n' '' 0 - - 'package.json\n'
-dsrun; check 0 "a PR tied to no issue is skipped" $?
+dsrun dependabot/npm_and_yarn/left-pad-1.3.0; check 0 "a PR tied to no issue is skipped" $?
 dsfx 'stage:qa\n' '' 0 - - 'tests/t.py\nsrc/app.py\n'
 dsrun; check 1 "PR-label fallback: stage:qa is tests-only" $?
 dsfx 'lane:fast\n' '' 0 - - 'README.md\n'
@@ -344,27 +364,47 @@ for k in pr-labels files closing issue-12; do   # an API error must never read a
   dsfx '' '12\n' 12 'stage:build\n' 'src/api/\n' 'src/api/x.py\n'; : > "$DS/fx/fail-$k"
   dsrun; check 1 "a failed gh call ($k) fails the check" $?
 done
+# The stub does not run --jq. Where a real jq exists, run the two non-trivial filters as shipped.
+if command -v jq >/dev/null 2>&1; then
+  cf=$(sed -n "s/.*closingIssuesReferences --jq '\(.*\)')\$/\1/p" "$DS/step.sh")
+  ff=$(sed -n "s/.*per_page=100\" --jq '\(.*\)')\$/\1/p" "$DS/step.sh")
+  pr='{"url":"https://github.com/o/r/pull/7","closingIssuesReferences":[{"number":123,"url":"https://github.com/o/tracker/issues/123"},{"number":45,"url":"https://github.com/o/r/issues/45"}]}'
+  eq 45 "closing reference: the first one in THIS repo"        "$(printf '%s' "$pr" | jq -r "$cf" 2>&1)"
+  eq "" "closing reference: only another repo's → none"        "$(printf '%s' '{"url":"https://github.com/o/r/pull/7","closingIssuesReferences":[{"number":123,"url":"https://github.com/o/r-fork/issues/123"}]}' | jq -r "$cf" 2>&1)"
+  eq "src/api/new.py src/db/old.py a.py " "file list: a rename counts under both paths" "$(printf '%s' '[{"filename":"src/api/new.py","previous_filename":"src/db/old.py"},{"filename":"a.py"}]' | jq -r "$ff" 2>&1 | tr '\n' ' ')"
+else
+  echo "  · skipped the --jq filter checks (no jq here)"
+fi
 rm -rf "$DS"
 
 echo "pre-commit hook (run directly in a scratch repo):"
 HK="$(mktemp -d)"; git init -q "$HK" >/dev/null 2>&1
-mkdir -p "$HK/.adlc/scripts" "$HK/.adlc/scope" "$HK/src/api" "$HK/src/db"
-cp "$S/adlc-diff-scope.sh" "$HK/.adlc/scripts/"; chmod +x "$HK/.adlc/scripts/adlc-diff-scope.sh"
+hg()     { git -C "$HK" -c user.name=t -c user.email=t@example.com -c commit.gpgsign=false -c core.hooksPath=/dev/null "$@"; }
 hook()   { ( cd "$HK/${1:-}" && bash "$ROOT/templates/hooks/pre-commit" ) >/dev/null 2>&1; }
-branch() { git -C "$HK" symbolic-ref HEAD "refs/heads/$1"; }
+branch() { hg symbolic-ref HEAD "refs/heads/$1"; }
+mkdir -p "$HK/.adlc/scripts" "$HK/.adlc/scope" "$HK/src/api" "$HK/src/db" "$HK/tests"
+cp "$S/adlc-diff-scope.sh" "$S/adlc-branch-issue.sh" "$HK/.adlc/scripts/"; chmod +x "$HK"/.adlc/scripts/*.sh
 branch feat/12-add-login
-: > "$HK/src/api/a.py"; git -C "$HK" add src
+: > "$HK/src/api/a.py"; hg add src
 hook; check 0 "no scope file for the branch's issue → no-op" $?
-printf 'src/api/\n' > "$HK/.adlc/scope/12.txt"; git -C "$HK" add .adlc/scope
+printf 'src/api/\n' > "$HK/.adlc/scope/12.txt"; hg add .adlc/scope
 hook; check 0 "the scope file staged with an in-scope file passes" $?
-: > "$HK/src/db/b.py"; git -C "$HK" add src
+: > "$HK/src/db/b.py"; hg add src
 hook; check 1 "a staged file outside the scope blocks the commit" $?
 hook src/api; check 1 "…also when run from a subdirectory" $?
 branch fix/unrelated
 hook; check 0 "a branch that names no issue is held to no scope" $?
 branch feat/12-add-login
-git -C "$HK" rm -q --cached src/db/b.py; : > "$HK/src/api/café.py"; git -C "$HK" add src/api
+: > "$HK/.git/MERGE_HEAD"
+hook; check 0 "concluding a merge is not blocked (its staged files are other people's)" $?
+rm -f "$HK/.git/MERGE_HEAD"; hg rm -q --cached src/db/b.py
+: > "$HK/tests/t.py"; hg add tests
+hook; check 0 "QA's test outside the Builder's prefixes passes" $?
+: > "$HK/src/api/café.py"; hg add src/api
 hook; check 0 "a non-ASCII path in scope passes (git does not quote it)" $?
+printf 'one\ntwo\nthree\n' > "$HK/src/db/old.py"; hg add src/db/old.py; hg commit -q -m base >/dev/null 2>&1
+hg mv src/db/old.py src/api/moved.py
+hook; check 1 "moving a file out of an undeclared directory is caught" $?
 rm -rf "$HK"
 
 echo "labels.sh (against a stub gh):"
