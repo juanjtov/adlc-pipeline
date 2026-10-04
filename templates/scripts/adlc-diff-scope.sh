@@ -22,12 +22,12 @@ case "$stage" in
   design) pat='^docs/' ;;
   qa)     pat="^(${ADLC_TEST_DIRS:-tests})" ;;
   build|fast|build+qa)
-    if [ -z "$scope_file" ] || [ ! -f "$scope_file" ]; then
+    if [ ! -f "$scope_file" ]; then
       echo "no scope file (${scope_file:-.adlc/scope/<issue>.txt}) — a $stage-stage PR must declare its scope" >&2
       exit 1
     fi
     self="$scope_file"
-    while IFS= read -r p; do prefixes+=("$p"); done \
+    while IFS= read -r p || [ -n "$p" ]; do prefixes+=("$p"); done \
       < <(sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e '/^#/d' -e '/^$/d' "$scope_file")
     if [ "$stage" = "build+qa" ]; then pat="^(${ADLC_TEST_DIRS:-tests})"; fi ;;
   ""|other) echo "no ADLC stage — skipped"; exit 0 ;;
