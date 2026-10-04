@@ -67,10 +67,11 @@ here, the project skills win on specifics; this charter wins on process.
 Enforcement is layered: agent frontmatter `tools:` (tool-level), the `diff-scope` CI job
 (path-level; it takes the stage from the PR's linked issue, where the `stage:*` labels live),
 and the role prompt (advisory). Path restrictions can't be expressed in Claude Code tool
-grants directly — the diff-scope check is what actually blocks an out-of-scope write: `docs/`
-only at `stage:design`, and for a Builder PR the scope it declares in `.adlc/scope.txt` (plus
-the test dirs once QA adds tests). With no declared scope, or for QA's tests-only rule on a
-Builder's PR, the review is the enforcement.
+grants directly — the diff-scope check is what actually blocks an out-of-scope write: a Builder
+PR is held to the scope it declares in `.adlc/scope/<issue>.txt` (plus the test dirs once the
+issue is at `stage:qa`), and fails if it declares none. The Architect's docs-only and QA's
+tests-only rules are checked only on a PR labelled `stage:design` / `stage:qa`; otherwise the
+review enforces them.
 
 ## The label state machine (execution source of truth = GitHub issues)
 

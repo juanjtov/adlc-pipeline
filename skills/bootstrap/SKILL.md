@@ -208,7 +208,8 @@ PR — adversarial then architect conformance — and does the `stage:build → 
 labels the PR `adlc:changes-requested` for the fix loop. Because control doesn't depend on
 GitHub's review state, you may enable branch protection's **"require a human approval"** — it
 then gates only the final MERGE, and the pipeline still flows to a finished, QA'd PR. Also copy
-**`adlc-diff-scope.yml`** (fails a PR that touches files outside its stage's allowed paths — the
+**`adlc-diff-scope.yml`** (fails a lane PR that touches files outside the scope its issue declares
+in `.adlc/scope/<issue>.txt`; fill `{{TEST_DIR_REGEX}}` with the repo's test dirs — the
 path-level half of author/verifier separation). For the test battery, follow the Phase 1 choice: if the user picked **propose it**,
 run the `test-strategy` skill, then copy **`adlc-ci.yml`** filled with the chosen setup +
 commands (these are the required checks); if they picked **keep ours**, skip `adlc-ci.yml` and

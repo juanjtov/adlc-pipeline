@@ -60,10 +60,11 @@ jobs:
             You are the ADLC Builder on the FAST LANE. Implement issue
             #${{ github.event.issue.number }} from its change brief — there is NO ADR. Load the
             builder agent definition and the triage + project-conventions + adlc:security-gate +
-            verify skills. Write the declared scope to .adlc/scope.txt — one path prefix per line,
-            covering every file you touch, the test included (the cap + diff-scope check enforce
-            it) — stay strictly within it, add at least one test carrying the brief's S1-AC1
-            id, and run the project's pass/fail command (paste the real summary). Open the PR with
+            verify skills. Write the declared scope to
+            .adlc/scope/${{ github.event.issue.number }}.txt — one path prefix per line, covering
+            every file you touch, the test included (the diff-scope check enforces it) — stay
+            strictly within it, add at least one test carrying the brief's S1-AC1 id, and run the
+            project's pass/fail command (paste the real summary). Open the PR with
             `gh pr create` targeting main, body starting `Closes #${{ github.event.issue.number }}`,
             and add the label `lane:fast`. Never merge. If the change turns out to need more than
             the brief's scope, STOP and comment that it should go to the full pipeline instead.
