@@ -1,9 +1,14 @@
 # ADLC diff-scope check — the path-level half of author/verifier separation.
-# Fails a PR whose changed files fall outside the scope allowed for its stage. The actual
-# check is `.adlc/scripts/adlc-diff-scope.sh` (shared with the local pre-commit hook and unit-
-# tested), so CI and local enforce identically:
-#   stage:design → docs/ only · stage:qa → $ADLC_TEST_DIRS · stage:build → .adlc/scope.txt globs
-#   (if the Architect wrote one; otherwise advisory, enforced by the review).
+# Fails a lane PR whose changed files fall outside the scope its issue declares. The decisions
+# are unit-tested scripts (the check itself is shared with the local pre-commit hook):
+#   .adlc/scripts/adlc-pr-stage.sh    WHICH stage — read from the PR's LINKED ISSUE, because the
+#                                     lanes put stage:* on the issue and never on the PR. The
+#                                     PR's own `lane:fast` / stage:* labels are the fallback.
+#   .adlc/scripts/adlc-diff-scope.sh  THE check — build|fast → .adlc/scope/<issue>.txt, which
+#                                     the Builder writes · build+qa (issue at stage:qa) → that
+#                                     scope + $ADLC_TEST_DIRS · no lane stage → skipped.
+# A PR is tied to its issue by a closing reference (`Closes #N`) or by its branch name
+# (feat/<issue>-<slug>). Tied to a lane issue and declaring no scope, it FAILS.
 name: ADLC diff-scope
 
 on:
@@ -12,6 +17,7 @@ on:
 
 permissions:
   contents: read
+  issues: read          # the stage label is on the linked issue
   pull-requests: read
 
 jobs:
@@ -19,22 +25,35 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
       - name: Enforce declared diff scope
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
-          # test dirs allowed for qa-stage PRs (regex alternation), e.g. tests|backend/tests
+          HEAD_REF: ${{ github.head_ref }}
+          # test dirs QA may write (regex alternation), e.g. tests|backend/tests
           ADLC_TEST_DIRS: "{{TEST_DIR_REGEX}}"
         run: |
-          chmod +x .adlc/scripts/adlc-diff-scope.sh
-          labels=$(gh pr view "$PR" --json labels --jq '.labels[].name' | tr '\n' ' ')
-          stage=other
-          case "$labels" in
-            *stage:design*) stage=design ;;
-            *stage:qa*)     stage=qa ;;
-            *stage:build*)  stage=build ;;
-          esac
-          echo "stage=$stage"
-          gh pr diff "$PR" --name-only | .adlc/scripts/adlc-diff-scope.sh "$stage"
+          chmod +x .adlc/scripts/adlc-pr-stage.sh .adlc/scripts/adlc-branch-issue.sh .adlc/scripts/adlc-diff-scope.sh
+          # Plain assignments, never a pipe from gh: a failed API call must fail the check, not
+          # skip it. The files API (not `gh pr diff`) has no 300-file limit and no quoted names;
+          # a rename counts under both its old and its new path.
+          pr_labels=$(gh pr view "$PR" --json labels --jq '.labels[].name')
+          files=$(gh api --paginate "repos/{owner}/{repo}/pulls/$PR/files?per_page=100" --jq '.[] | .filename, (.previous_filename // empty)')
+          # Which issue: a closing reference in THIS repo, else the one the head branch names. A
+          # bare `#N` in the body is not used — it is often an upstream PR number or an HTML
+          # entity, and would tie an unrelated PR to an issue.
+          issue=$(gh pr view "$PR" --json url,closingIssuesReferences --jq '.url as $u | [.closingIssuesReferences[] | select(.url | startswith(($u | sub("/pull/[0-9]+$"; "")) + "/issues/"))][0].number // empty')
+          if [ -z "$issue" ]; then issue=$(.adlc/scripts/adlc-branch-issue.sh "$HEAD_REF"); fi
+          issue_labels=""
+          if [ -n "$issue" ]; then
+            err=$(mktemp)
+            if ! issue_labels=$(gh api "repos/{owner}/{repo}/issues/$issue" --jq '.labels[].name' 2>"$err"); then
+              # A branch can name a number that is no issue here (404): the PR is then tied to
+              # none. Any other failure is an API error and fails the check.
+              grep -q 'HTTP 404' "$err" || { cat "$err" >&2; exit 1; }
+              issue=""; issue_labels=""
+            fi
+          fi
+          stage=$(.adlc/scripts/adlc-pr-stage.sh "$pr_labels" "$issue_labels")
+          echo "stage=$stage (issue: #${issue:-none})"
+          printf '%s\n' "$files" | .adlc/scripts/adlc-diff-scope.sh "$stage" "${issue:+.adlc/scope/$issue.txt}"

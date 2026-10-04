@@ -42,9 +42,11 @@ templates/                     # what the wizard fills into the host repo
   github/ISSUE_TEMPLATE/requirement.yml           # file a requirement → pipeline starts
   scripts/  adlc-diff-scope.sh · adlc-tripwire-check.sh · adlc-fix-cap.sh · adlc-verdict.sh
             adlc-log-findings.sh · adlc-doctor.sh · adlc-metrics.sh · adlc-cost.sh
-            adlc-cache.sh · adlc-triage.sh   # deterministic logic
-            #   adlc-cache.sh  = prompt-cache hit-rate rollup
-            #   adlc-triage.sh = fast-lane eligibility cap (size + sensitive-path)
+            adlc-cache.sh · adlc-triage.sh · adlc-pr-stage.sh · adlc-branch-issue.sh   # deterministic logic
+            #   adlc-cache.sh        = prompt-cache hit-rate rollup
+            #   adlc-triage.sh       = fast-lane eligibility cap (size + sensitive-path)
+            #   adlc-pr-stage.sh     = which diff-scope stage a PR is in (from its linked issue)
+            #   adlc-branch-issue.sh = which issue a lane branch names (feat/<issue>-<slug>)
   hooks/pre-commit             # local diff-scope guard (reuses adlc-diff-scope.sh)
 tests/run.sh                   # unit tests for the guardrail scripts (bash, no deps)
 telemetry/                     # ready-to-run local OTel collector (docker compose) for token/cost
@@ -65,8 +67,10 @@ not just appended to.
 **Deterministic where it matters.** The *mechanical* guardrails — path scope, direct-push
 detection, the fix-loop cap, the verdict parse, setup validation — are small shell scripts in
 `scripts/`, **unit-tested** (`tests/run.sh`), and called by both CI and a **local pre-commit
-hook** so they enforce identically on your machine and in Actions. `adlc-doctor.sh` validates a
-host repo's setup (deny rules, unfilled placeholders, skills, labels). Judgment guardrails
+hook**, so your machine and Actions run the same code. The Builder declares each change's scope
+in `.adlc/scope/<issue>.txt`; the diff-scope check fails a lane PR that strays outside it or
+declares none. `adlc-doctor.sh` validates a host repo's setup (deny rules, unfilled
+placeholders, skills, labels). Judgment guardrails
 (design conformance, security severity) stay as skills + the adversarial review — those can't
 be made deterministic without losing the point.
 
@@ -235,6 +239,13 @@ and it flows through build + review. It still stops at the two human gates (`gat
 `gate:deploy`), and only allowlisted authors can auto-trigger. Without this, stages are started
 by applying `stage:*` labels by hand.
 
+The Analyst starts when an issue **enters** auto-start intake — it comes to carry both `adlc:auto`
+and `stage:intake` (the template applies both) — and at no other time: the label moves the lanes
+make as the issue advances never re-run it. If it stops to ask clarifying questions, the issue
+waits at `stage:intake` and the workflow takes `adlc:auto` off; answer on the issue, then **add
+`adlc:auto` back** to run it again — a comment alone does not restart it. Moving an issue back
+to `stage:intake` (returning the stories at Gate 1) re-runs it too.
+
 **Full autopilot** goes one further: the `adlc:autopilot` label **auto-approves Gate 1**, so
 the pipeline runs the whole chain — intake → design → build → adversarial + architect review →
 QA — to a QA-approved PR, and your **only** step is reviewing and merging it at **Gate 2**.
@@ -245,4 +256,6 @@ the final merge. If a review flags something, **`adlc-fix.yml`** sends the PR ba
 to fix and re-review automatically — capped at 3 rounds, then it tags `needs:human` — so what
 reaches you is a clean PR to read and merge. Autopilot auto-approves Gate 1 into the **full**
 pipeline only; it never starts the **fast lane** (that skips design, so the lane choice stays an
-explicit human approval — a `FAST` recommendation waits at `gate:stories`).
+explicit human approval — a `FAST` recommendation waits at `gate:stories`). The label has to be
+on the issue before the Analyst starts (apply it when you file); added later, it does not advance
+an issue already waiting at Gate 1, and taking it off before the Analyst finishes opts back out.
