@@ -3,6 +3,7 @@
 GitHub is the source of truth for where a request stands (labels, pull requests, verdict comments).
 Hook events say what an agent is doing right now. Telemetry says what it cost.
 """
+import json
 import os
 import time
 
@@ -34,7 +35,7 @@ def _last(regex, texts):
     return found
 
 
-def build(store, repo, now=None, agents=None, github=None, mode='live'):
+def build(store, repo, now=None, agents=None, github=None, mode='live', plugin_root=None):
     now = now or time.time()
     day0 = midnight(now)
     agents = agents or {}
@@ -72,7 +73,7 @@ def build(store, repo, now=None, agents=None, github=None, mode='live'):
                       'output': total['output'], 'steps': steps, 'runs': len([r for r in st_runs if r['started'] >= day0])},
             'lat': (total['ms'] / total['replies'] / 1000.0) if total['replies'] else None,
             'queued': len([r for r in requests if r['at'] == st and r['phase'] == 'queued']),
-            'run': _run_detail(store, pick, by_n, agents.get(st) or {}, repo, comments, events, prs, now) if pick else None,
+            'run': _run_detail(store, pick, by_n, agents.get(st) or {}, repo, comments, events, prs, now, plugin_root) if pick else None,
         }
 
     epics, seen = [], set()
@@ -249,7 +250,7 @@ def _claim_unassigned(requests, runs, now):
 
 
 # ---------------------------------------------------------------------------------------- runs
-def _run_detail(store, run, by_n, agent, repo, comments, events, prs, now):
+def _run_detail(store, run, by_n, agent, repo, comments, events, prs, now, plugin_root=None):
     live = _is_live(run, now)
     req = by_n.get(run.get('issue'))
     if req is None and run.get('pr'):
@@ -265,10 +266,10 @@ def _run_detail(store, run, by_n, agent, repo, comments, events, prs, now):
         ctx.append({'id': 'agent', 'name': 'System prompt: the agent definition', 'tok': P.est_tokens(len(agent['prompt'])), 'cached': True, 'est': True,
                     'detail': 'The agent file is this agent’s whole system prompt. It ships with the plugin, so it is shown in full.',
                     'items': [{'name': agent.get('file', ''), 'tok': P.est_tokens(len(agent['prompt']))}], 'text': agent['prompt']})
-    skills = agent.get('skills') or []
+    skills = _skills_loaded(store, run, plugin_root)
     if skills:
-        ctx.append({'id': 'skills', 'name': '%d skills' % len(skills), 'tok': sum(s.get('tok') or 0 for s in skills), 'cached': True, 'est': True,
-                    'detail': 'Named on the agent’s Load line. Sizes are estimates for the skills that ship with the plugin; project skills are not sized.',
+        ctx.append({'id': 'skills', 'name': '%d skill%s loaded' % (len(skills), '' if len(skills) == 1 else 's'), 'tok': sum(s.get('tok') or 0 for s in skills),
+                    'cached': True, 'est': True, 'detail': 'Loaded with the Skill tool during this run. Sizes are estimates from the skill files.',
                     'items': skills, 'text': ''})
     claude_md = _file_size(os.path.join(run.get('cwd') or '', 'CLAUDE.md'))
     if claude_md:
@@ -318,6 +319,20 @@ def _file_size(path):
         return os.path.getsize(path)
     except OSError:
         return 0
+
+
+def _skills_loaded(store, run, plugin_root):
+    """The skills this run actually loaded, read from its Skill tool calls. An agent is told to load some; it may load fewer."""
+    out, seen = [], set()
+    for row in store.q("SELECT input FROM steps WHERE run = ? AND tool = 'Skill' ORDER BY id", (run['id'],)):
+        try:
+            name = (json.loads(row['input'] or '{}') or {}).get('skill')
+        except ValueError:
+            name = None
+        if name and name not in seen:
+            seen.add(name)
+            out.append({'name': name, 'tok': P.skill_tokens(plugin_root, run.get('cwd'), name)})
+    return out
 
 
 def _outputs(run, steps, req, comments, events, prs, now):
@@ -391,16 +406,20 @@ def _lead(events):
 
 def _feed(events, prs, comments, runs, day0):
     feed = []
+    on_line = set()   # issues that have been on the line at some point; other issues and their pull requests are not ours to report
     for n, evs in events.items():
         for e in evs:
             if e['added'] and e['label'] in P.LABEL_SLOT and e.get('ts'):
+                on_line.add(n)
                 who = 'gate1' if e['label'] == 'gate:stories' else 'gate2' if e['label'] == 'gate:deploy' else 'github'
                 text = ('#%d is waiting for you' % n) if who != 'github' else '%s moved #%d to %s' % (e.get('actor') or 'Someone', n, e['label'])
                 feed.append({'t': e['ts'], 'who': who, 'n': n, 'text': text})
+    prs = [p for p in prs if p.get('issue') in on_line]
+    comments = {k: v for k, v in comments.items() if (k[1] in on_line if k[0] == 'issue' else any(p['number'] == k[1] for p in prs))}
     for p in prs:
-        if p.get('issue') and p.get('created'):
+        if p.get('created'):
             feed.append({'t': p['created'], 'who': 'builder', 'n': p['issue'], 'text': 'opened PR #%d for #%d' % (p['number'], p['issue'])})
-        if p.get('issue') and p.get('merged'):
+        if p.get('merged'):
             feed.append({'t': p['merged'], 'who': 'you', 'n': p['issue'], 'text': 'PR #%d was merged' % p['number']})
     owner = {('issue', 'ADLC-TRIAGE'): 'analyst', ('pr', 'ADLC-ADV'): 'reviewer', ('pr', 'ADLC-ARCH'): 'architect'}
     for (kind, number), cs in comments.items():

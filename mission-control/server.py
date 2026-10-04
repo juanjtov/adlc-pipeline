@@ -67,7 +67,7 @@ class App:
     def state(self, wanted=None):
         repo = self.repo(wanted)
         mode = 'demo' if self.demo else 'live'
-        return state.build(self.store, repo, agents=self.agents, github=self.poller.status.get(repo), mode=mode)
+        return state.build(self.store, repo, agents=self.agents, github=self.poller.status.get(repo), mode=mode, plugin_root=PLUGIN_ROOT)
 
     def meta(self):
         return {'stations': [self.agents[st] for st in pipeline.STATIONS], 'demo': self.demo, 'port': self.port}

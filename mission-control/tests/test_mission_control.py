@@ -2,20 +2,29 @@
 
 Run: python3 -m unittest discover -s mission-control/tests
 """
+import json
 import os
+import shutil
+import subprocess
 import sys
+import tempfile
+import threading
 import unittest
+import urllib.error
+import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, '..'))
 
 import fixtures as fx  # noqa: E402
+import server  # noqa: E402
 from mc import github, ingest, pipeline, state  # noqa: E402
 from mc.store import Store  # noqa: E402
 
 REPO = 'acme/shop'
 PLUGIN = os.path.join(HERE, '..', '..')
+HOOK = os.path.join(HERE, '..', 'hook.sh')
 
 
 class FakeRepos:
@@ -157,13 +166,18 @@ class Line(unittest.TestCase):
         t = fx.T0 + 3990
         ing.hook(fx.hook('SessionStart'), now=t)
         ing.hook(fx.hook('UserPromptSubmit', prompt='You are the ADLC Builder. Implement issue #3.'), now=t)
+        ing.hook(fx.hook('PreToolUse', tool_name='Skill', tool_input={'skill': 'adlc:charter'}, tool_use_id='t0'), now=t + 1)
+        ing.hook(fx.hook('PostToolUse', tool_name='Skill', tool_input={'skill': 'adlc:charter'}, tool_use_id='t0', tool_response='ok'), now=t + 1)
         ing.hook(fx.hook('PreToolUse', tool_name='Edit', tool_input={'file_path': '/work/shop/src/reset.ts'}, tool_use_id='t1'), now=t + 2)
         ing.otlp_logs(fx.otlp('s-build', 'builder'))
         agents = {st: pipeline.read_agent(PLUGIN, st) for st in pipeline.STATIONS}
-        doc = state.build(store, REPO, now=fx.T0 + 4000, agents=agents)
+        doc = state.build(store, REPO, now=fx.T0 + 4000, agents=agents, plugin_root=PLUGIN)
+        skills = [c for c in doc['stations']['builder']['run']['ctx'] if c['id'] == 'skills'][0]
+        self.assertEqual([s['name'] for s in skills['items']], ['adlc:charter'])   # only what the run loaded, not what it was told to load
+        self.assertGreater(skills['tok'], 500)
         self.assertEqual((by_n(doc)[3]['phase'], by_n(doc)[3]['since']), ('working', t))
         run = doc['stations']['builder']['run']
-        self.assertEqual((run['n'], run['live'], run['steps'][0]['label']), (3, True, 'Editing src/reset.ts'))
+        self.assertEqual((run['n'], run['live'], run['steps'][-1]['label']), (3, True, 'Editing src/reset.ts'))
         self.assertEqual(run['acc']['cacheRead'], 20000)
         self.assertEqual(run['ctx'][0]['id'], 'agent')
         self.assertTrue(run['ctx'][0]['text'].startswith('You are the **Builder**'))
@@ -183,6 +197,98 @@ class Line(unittest.TestCase):
         self.assertIn('not installed', str(ctx.exception))
         self.assertEqual(ingest.parse_remote('git@github.com:acme/shop.git'), REPO)
         self.assertEqual(ingest.parse_remote('https://github.com/acme/shop'), REPO)
+
+
+class OverHttp(unittest.TestCase):
+    """The real server and the real hook script, over a real socket."""
+
+    def setUp(self):
+        self.home = tempfile.mkdtemp()
+        self.app = server.App(seeded(), REPO, poll=False)
+        self.app.ingest.repos = FakeRepos()
+        server.Handler.app = self.app
+        self.httpd = server.ThreadingHTTPServer(('127.0.0.1', 0), server.Handler)
+        self.url = 'http://127.0.0.1:%d' % self.httpd.server_address[1]
+        threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
+        with open(os.path.join(self.home, 'server.json'), 'w') as fh:
+            json.dump({'port': self.httpd.server_address[1], 'pid': 1}, fh)
+
+    def tearDown(self):
+        self.httpd.shutdown()
+        self.httpd.server_close()
+        shutil.rmtree(self.home)
+
+    def hook(self, ev, home=None):
+        env = dict(os.environ, ADLC_MC_HOME=home or self.home)
+        return subprocess.run(['bash', HOOK], input=json.dumps(ev), text=True, capture_output=True, env=env, timeout=10)
+
+    def get(self, path):
+        with urllib.request.urlopen(self.url + path, timeout=5) as res:
+            return res.status, res.read()
+
+    def post(self, path, doc, **headers):
+        head = {'Content-Type': 'application/json'}
+        head.update(headers)
+        req = urllib.request.Request(self.url + path, data=json.dumps(doc).encode(), headers=head)
+        try:
+            with urllib.request.urlopen(req, timeout=5) as res:
+                return res.status
+        except urllib.error.HTTPError as exc:
+            return exc.code
+
+    def builder_run(self):
+        return json.loads(self.get('/api/state')[1])['stations']['builder']['run']
+
+    def test_the_hook_script_reports_a_pipeline_run(self):
+        out = self.hook(fx.hook('SessionStart'))
+        self.assertEqual((out.returncode, out.stdout, out.stderr), (0, '', ''))
+        self.hook(fx.hook('PreToolUse', tool_name='Bash', tool_input={'command': 'npm test'}, tool_use_id='t1'))
+        run = self.builder_run()
+        self.assertEqual((run['live'], run['steps'][0]['label']), (True, 'npm test'))
+
+    def test_sessions_outside_the_pipeline_are_never_sent(self):
+        plain = {'hook_event_name': 'PreToolUse', 'session_id': 's-other', 'cwd': '/work/shop', 'tool_name': 'Bash', 'tool_input': {'command': 'cat notes.txt'}}
+        self.assertEqual(self.hook(plain).returncode, 0)
+        self.assertIsNone(self.builder_run())
+        self.assertEqual(self.app.store.q('SELECT * FROM runs'), [])
+
+    def test_the_hook_is_silent_when_mission_control_is_not_running(self):
+        empty = tempfile.mkdtemp()
+        try:
+            out = self.hook(fx.hook('SessionStart'), home=empty)
+            self.assertEqual((out.returncode, out.stdout, out.stderr), (0, '', ''))
+            with open(os.path.join(empty, 'server.json'), 'w') as fh:
+                json.dump({'port': 9, 'pid': 1}, fh)             # a stale marker: nothing listens there
+            out = self.hook(fx.hook('SessionStart'), home=empty)
+            self.assertEqual((out.returncode, out.stdout, out.stderr), (0, '', ''))
+        finally:
+            shutil.rmtree(empty)
+
+    def test_telemetry_over_http(self):
+        self.post('/hooks', fx.hook('SessionStart'))
+        self.assertEqual(self.post('/v1/logs', fx.otlp('s-build', 'builder')), 200)
+        self.assertEqual(self.builder_run()['acc']['cacheRead'], 20000)
+        self.assertEqual(self.post('/v1/metrics', {'resourceMetrics': []}), 200)   # accepted and ignored
+
+    def test_only_this_machine_may_post(self):
+        self.assertEqual(self.post('/hooks', fx.hook('SessionStart'), Origin='https://elsewhere.example'), 403)
+        self.assertEqual(self.post('/hooks', fx.hook('SessionStart'), Host='elsewhere.example'), 403)
+        req = urllib.request.Request(self.url + '/v1/logs', data=b'\x0a\x02hi', headers={'Content-Type': 'application/x-protobuf'})
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            urllib.request.urlopen(req, timeout=5)
+        self.assertEqual(ctx.exception.code, 415)
+        self.assertIsNone(self.builder_run())
+
+    def test_pages_are_served_and_nothing_outside_web(self):
+        status, body = self.get('/')
+        self.assertEqual(status, 200)
+        self.assertIn(b'<div id="app">', body)
+        self.assertEqual(self.get('/app.js')[0], 200)
+        meta = json.loads(self.get('/api/meta')[1])
+        self.assertEqual([a['station'] for a in meta['stations']], pipeline.STATIONS)
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            self.get('/%2e%2e/server.py')
+        self.assertEqual(ctx.exception.code, 404)
 
 
 if __name__ == '__main__':

@@ -1,0 +1,10 @@
+{
+  "_comment": "OPT-IN telemetry for ADLC Mission Control. Merge this `env` block into the repo's .claude/settings.local.json (or settings.json) so Claude Code sends each model reply's tokens, cost and duration to Mission Control on this machine. No collector and no Docker: Mission Control receives OTLP over HTTP/JSON itself. Only new sessions pick it up. If you already use templates/settings.telemetry.json (the Docker collector), use one or the other: both set the same keys.",
+  "env": {
+    "CLAUDE_CODE_ENABLE_TELEMETRY": "1",
+    "OTEL_LOGS_EXPORTER": "otlp",
+    "OTEL_EXPORTER_OTLP_PROTOCOL": "http/json",
+    "OTEL_EXPORTER_OTLP_ENDPOINT": "http://localhost:4319",
+    "OTEL_LOGS_EXPORT_INTERVAL": "2000"
+  }
+}
