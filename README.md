@@ -4,7 +4,37 @@ Export the four-agent software-delivery pipeline (Product Analyst → Architect 
 QA/Release-Ops, with two human gates) to **any** repository — whether it's greenfield (only
 a PRD) or a mature codebase — and be running in minutes.
 
+![Claude Code plugin](https://img.shields.io/badge/Claude_Code-plugin-D97757)
+![Version](https://img.shields.io/badge/version-0.1.0-555)
+![Guardrails](https://img.shields.io/badge/guardrails-unit--tested-2D4F3A)
+
+## At a glance
+
+```mermaid
+flowchart LR
+    I[Issue / PRD] --> A[Product Analyst]
+    A --> G1{{Gate 1<br/>human approves stories}}
+    G1 --> R[Architect<br/>design + ADR]
+    R --> B[Builder<br/>scoped change]
+    B --> V[Adversarial + security review]
+    V -->|findings| B
+    V --> Q[QA / Release-Ops]
+    Q --> G2{{Gate 2<br/>human merges}}
+    G2 --> D[Deploy]
+    A -.->|trivial change,<br/>human-approved| F[Fast lane] --> V
+    V -. findings .-> RT[Retro loop<br/>findings → tests, CI checks]
+```
+
+- **Two human gates, never skipped.** Agents move work *up to* a gate, never through it. No agent verifies, merges, or deploys its own work.
+- **Deterministic where it matters.** Path scope, direct-push detection, fix-loop caps and verdict parsing are small unit-tested shell scripts shared by CI and a local pre-commit hook.
+- **Gets better every run.** Review findings are logged as structured data and turned into regression tests and CI checks, not longer prompts.
+- **Cost is measured, not guessed.** Per-lane latency from Actions run data; per-agent tokens, cost and prompt-cache hit rate via opt-in OpenTelemetry.
+- **Works on any repo.** A bootstrap wizard adapts the pipeline to a greenfield PRD or a mature codebase in minutes.
+
 ## What's inside
+
+<details>
+<summary>Repository layout</summary>
 
 ```
 .claude-plugin/plugin.json     # manifest (plugin name: "adlc")
@@ -45,6 +75,8 @@ templates/                     # what the wizard fills into the host repo
 tests/run.sh                   # unit tests for the guardrail scripts (bash, no deps)
 telemetry/                     # ready-to-run local OTel collector (docker compose) for token/cost
 ```
+
+</details>
 
 ## Design philosophy
 
