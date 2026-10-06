@@ -636,7 +636,7 @@ case "$(dsout)" in *"submodule change: src/lib"*) ok "…and the cap names it" ;
   && dg add -A && dg commit -q -m "add a submodule, ignore = all" && dg push -q origin main && dg fetch -q origin ) >/dev/null 2>&1
 prhead 'git update-index --cacheinfo "160000,$(git rev-parse HEAD),src/lib"'   # a bump: it pointed at HEAD~1
 eq "" "fixture: a plain diff in that checkout shows the bump as nothing at all" \
-   "$(cd "$DS/repo" && dg fetch -q origin refs/pull/7/head && dg diff --numstat --no-renames refs/remotes/origin/main FETCH_HEAD 2>/dev/null)"
+   "$(cd "$DS/repo" && dg fetch -q origin refs/pull/7/head && dg diff --numstat --no-renames refs/remotes/origin/main FETCH_HEAD 2>/dev/null || echo GIT-FAILED)"
 case "$(cd "$DS/repo" && dg diff --numstat --no-renames --raw --ignore-submodules=none refs/remotes/origin/main FETCH_HEAD 2>/dev/null)" in
   *":160000 160000 "*"M"$'\t'"src/lib"*"1"$'\t'"1"$'\t'"src/lib"*) ok "fixture: …and with the cap's flags it is a one-line gitlink entry" ;;
   *) bad "fixture: with the cap's flags the bump must show as a gitlink entry" ;; esac
