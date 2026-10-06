@@ -63,7 +63,8 @@ directly to a fresh issue (your own triage) or after the Analyst recommends FAST
 
 ## Gate 2 — Merge + deploy (you)
 
-1. Review the Action Card. Merge the PR (agents can't — `gh pr merge` is deny-listed).
+1. Review the Action Card. Merge the PR (agents can't — the plugin's guard hook blocks
+   `gh pr merge`).
 2. Deploy per the `release-ops` skill. Destructive migration? Separate, approved, never
    coupled with the deploy.
 3. Tell the QA agent "deploy N happened" for the post-deploy watch.
