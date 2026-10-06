@@ -100,9 +100,9 @@ text{fill:var(--ink)}
 <line x1="1000" y1="108" x2="1030" y2="108" class="fl-amber" marker-end="url(#arrow-amber)"/>
 <text x="1040.0" y="111.5" class="leg" text-anchor="start" style="font-size:10.5px">scheduled · the weekly retro</text>
 <line x1="1000" y1="125" x2="1030" y2="125" class="fl-grey" marker-end="url(#arrow-grey)"/>
-<text x="1040.0" y="128.5" class="leg" text-anchor="start" style="font-size:10.5px">watch only · raises an alert, edits nothing</text>
+<text x="1040.0" y="128.5" class="leg" text-anchor="start" style="font-size:10.5px">watch only · reads, never edits</text>
 <line x1="1000" y1="142" x2="1030" y2="142" class="fl-red" marker-end="url(#arrow-red)"/>
-<text x="1040.0" y="145.5" class="leg" text-anchor="start" style="font-size:10.5px">blocked · deny rules and CI stop it</text>
+<text x="1040.0" y="145.5" class="leg" text-anchor="start" style="font-size:10.5px">blocked · the guard hook stops it</text>
 <g class="ic ic-l" transform="translate(1332.0,48.0) scale(0.667)"><path d="M8 6l-5 6 5 6M16 6l5 6-5 6M14 4l-4 16"/></g>
 <text x="1358.0" y="60.0" class="leg" text-anchor="start" style="font-size:10.5px">agent · runs as Claude</text>
 <g class="ic ic-s" transform="translate(1332.0,68.0) scale(0.667)"><path d="M4 21V6M20 21V6"/><rect x="2" y="9" width="20" height="4.6" rx="1.2"/><path d="M7.6 9l-2.4 4.6M12.6 9l-2.4 4.6M17.6 9l-2.4 4.6"/></g>
@@ -119,7 +119,7 @@ text{fill:var(--ink)}
 <text x="130.0" y="286.0" class="lab" text-anchor="middle" style="font-size:12.5px;font-weight:800">You</text>
 <text x="130.0" y="299.0" class="lab-s" text-anchor="middle" style="font-size:9px">the Principal</text>
 <rect x="290.0" y="168.0" width="850.0" height="134.0" rx="16" class="cluster"/>
-<g class="ic ic-w" transform="translate(316.0,197.0) scale(2.417)"><title>GitHub Actions running anthropics/claude-code-action: one workflow per lane, fired by label changes. templates/github/</title><path d="M12 2l8.7 5v10L12 22l-8.7-5V7z"/><path d="M12 7.5l1.4 3.1L16.5 12l-3.1 1.4L12 16.5l-1.4-3.1L7.5 12l3.1-1.4z" class="g-fill"/></g>
+<g class="ic ic-w" transform="translate(316.0,197.0) scale(2.417)"><title>GitHub Actions running anthropics/claude-code-action: one workflow per lane, fired by label changes. Each lane installs the plugin on the runner, runs as its named agent (--agent adlc:builder and so on) and is granted that lane&#x27;s tools only. templates/github/</title><path d="M12 2l8.7 5v10L12 22l-8.7-5V7z"/><path d="M12 7.5l1.4 3.1L16.5 12l-3.1 1.4L12 16.5l-1.4-3.1L7.5 12l3.1-1.4z" class="g-fill"/></g>
 <text x="390.0" y="206.0" class="clu-t" text-anchor="start" style="font-size:15px;font-weight:800">GITHUB ACTIONS</text>
 <text x="390.0" y="224.0" class="clu-s" text-anchor="start" style="font-size:10px">starts each agent when an issue&#x27;s label changes</text>
 <text x="390.0" y="246.0" class="clu-e" text-anchor="start" style="font-size:8.5px;font-weight:700">ONE WORKFLOW PER LANE</text>
@@ -139,7 +139,7 @@ text{fill:var(--ink)}
 <text x="704.0" y="291.0" class="clu-y lab-m" text-anchor="middle" style="font-size:8px">fast</text>
 <g class="ic ic-w" transform="translate(745.0,259.0) scale(0.750)"><title>adlc-ci.yml: the project&#x27;s tests, type-check and build on every PR</title><path d="M13 2.5L4.5 14H11l-1 7.5L19 10h-6.5z"/></g>
 <text x="754.0" y="291.0" class="clu-y lab-m" text-anchor="middle" style="font-size:8px">ci</text>
-<g class="ic ic-w" transform="translate(795.0,259.0) scale(0.750)"><title>adlc-diff-scope.yml: fails a PR that touches files outside its allowed scope</title><path d="M13 2.5L4.5 14H11l-1 7.5L19 10h-6.5z"/></g>
+<g class="ic ic-w" transform="translate(795.0,259.0) scale(0.750)"><title>adlc-diff-scope.yml: fails a lane PR that touches files outside its scope file, and re-runs the fast-lane cap; both run from the default branch (pull_request_target), so a PR cannot edit them</title><path d="M13 2.5L4.5 14H11l-1 7.5L19 10h-6.5z"/></g>
 <text x="804.0" y="291.0" class="clu-y lab-m" text-anchor="middle" style="font-size:8px">scope</text>
 <g class="ic ic-w" transform="translate(845.0,259.0) scale(0.750)"><title>adlc-main-tripwire.yml: alerts on any push to main that skipped a PR</title><path d="M13 2.5L4.5 14H11l-1 7.5L19 10h-6.5z"/></g>
 <text x="854.0" y="291.0" class="clu-y lab-m" text-anchor="middle" style="font-size:8px">tripwire</text>
@@ -189,8 +189,16 @@ text{fill:var(--ink)}
 <text x="130.0" y="537.2" class="lbl-s" text-anchor="middle" style="font-size:9px">filed on your yes</text>
 <circle cx="98" cy="578" r="11" class="step"/>
 <text x="98" y="582.2" class="step-t" text-anchor="middle">1</text>
+<text x="130.0" y="742.0" class="eyebrow" text-anchor="middle" style="font-size:9.5px;font-weight:700">YOUR LIVE VIEW</text>
+<circle cx="130.0" cy="800.0" r="31.7" class="tile-s"/>
+<g class="ic ic-s" transform="translate(108.0,778.0) scale(1.833)"><title>Mission Control (/adlc-mission-control, mission-control/): a live page on your machine. One station per agent, each request moving between them, and each agent&#x27;s steps, tokens and cost. It never labels, comments or merges. It reads GitHub through your gh login, agent steps through the plugin&#x27;s hooks, and tokens through opt-in telemetry (templates/settings.mission-control.json). It sees agents that run on this machine; runs on GitHub&#x27;s runners show their GitHub state only.</title><rect x="3" y="3.5" width="18" height="12" rx="1.2"/><path d="M8.5 21l3.5-5.5 3.5 5.5M7 11l3.2-3 2.8 3.5 4-4"/></g>
+<text x="130.0" y="846.0" class="lab" text-anchor="middle" style="font-size:12px;font-weight:800">Mission Control</text>
+<text x="130.0" y="859.0" class="lab-s" text-anchor="middle" style="font-size:9px">read-only, on your machine</text>
+<path d="M228,800 C210,800 190,800 168,800" class="fl-grey" marker-end="url(#arrow-grey)"/>
+<rect x="166.8" y="771.0" width="62.4" height="18.0" rx="9.0" class="lbl-g-bg"/>
+<text x="198.0" y="783.2" class="lbl-g" text-anchor="middle" style="font-size:9px">reads only</text>
 <circle cx="330.0" cy="610.0" r="36.0" class="tile-l"/>
-<g class="ic ic-l" transform="translate(305.0,585.0) scale(2.083)"><title>Product Analyst (agents/product-analyst.md): asks numbered questions if the request is unclear; otherwise writes stories with Given/When/Then acceptance criteria (full) or a one-check change brief (fast), and ends with ADLC-TRIAGE: FAST or FULL. Writes only issue comments and labels.</title><path d="M6 3h8l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/><path d="M14 3v5h5"/><path d="M8 13h8M8 17h6"/></g>
+<g class="ic ic-l" transform="translate(305.0,585.0) scale(2.083)"><title>Product Analyst (agents/product-analyst.md): asks numbered questions if the request is unclear (auto-start lane: answer, then add adlc:auto back to restart it); otherwise writes stories with Given/When/Then acceptance criteria (full) or a one-check change brief (fast), and ends with ADLC-TRIAGE: FAST or FULL. Writes only issue comments and labels.</title><path d="M6 3h8l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/><path d="M14 3v5h5"/><path d="M8 13h8M8 17h6"/></g>
 <text x="330.0" y="662.0" class="lab" text-anchor="middle" style="font-size:12.5px;font-weight:800">Analyst</text>
 <text x="330.0" y="675.0" class="lab-s" text-anchor="middle" style="font-size:9px">stories + lane advice</text>
 <circle cx="298" cy="578" r="11" class="step"/>
@@ -215,13 +223,13 @@ text{fill:var(--ink)}
 <text x="447.0" y="550.2" class="lbl-t" text-anchor="middle" style="font-size:9px">can approve</text>
 <text x="566.0" y="428.0" class="eyebrow" text-anchor="start" style="font-size:9.5px;font-weight:700">FULL LANE · NEW BEHAVIOR</text>
 <circle cx="620.0" cy="490.0" r="36.0" class="tile-l"/>
-<g class="ic ic-l" transform="translate(595.0,465.0) scale(2.083)"><title>Architect (agents/architect.md): writes docs/adr/NNNN-*.md and a task breakdown where every task declares the exact files it may touch (its diff scope), plus a blast-radius check. Writes only under docs/.</title><path d="M12 3l9 4.8-9 4.8-9-4.8z"/><path d="M3 12l9 4.8 9-4.8M3 16.2l9 4.8 9-4.8"/></g>
+<g class="ic ic-l" transform="translate(595.0,465.0) scale(2.083)"><title>Architect (agents/architect.md): writes docs/adr/NNNN-*.md and a task breakdown where every task declares the exact files it may touch (its diff scope), plus a blast-radius check. Writes only under docs/. In the Actions design lane the workflow commits those files to adlc/design-&lt;issue&gt; and moves the issue on once the ADR and its ADLC-BREAKDOWN line exist.</title><path d="M12 3l9 4.8-9 4.8-9-4.8z"/><path d="M3 12l9 4.8 9-4.8M3 16.2l9 4.8 9-4.8"/></g>
 <text x="620.0" y="542.0" class="lab" text-anchor="middle" style="font-size:12.5px;font-weight:800">Architect</text>
 <text x="620.0" y="555.0" class="lab-s" text-anchor="middle" style="font-size:9px">design + files</text>
 <circle cx="586" cy="458" r="11" class="step"/>
 <text x="586" y="462.2" class="step-t" text-anchor="middle">4</text>
 <circle cx="770.0" cy="490.0" r="36.0" class="tile-l"/>
-<g class="ic ic-l" transform="translate(745.0,465.0) scale(2.083)"><title>Builder (agents/builder.md): implements on feat/&lt;issue&gt;-&lt;slug&gt;, a test per acceptance criterion (SN-ACN ids), runs the project&#x27;s pass/fail command, opens a PR. Never merges, never pushes to main.</title><path d="M8 6l-5 6 5 6M16 6l5 6-5 6M14 4l-4 16"/></g>
+<g class="ic ic-l" transform="translate(745.0,465.0) scale(2.083)"><title>Builder (agents/builder.md): implements on feat/&lt;issue&gt;-&lt;slug&gt;, records the files it may touch in .adlc/scope/&lt;issue&gt;.txt, a test per acceptance criterion (SN-ACN ids), runs the project&#x27;s pass/fail command, opens a PR. Never merges, never pushes to main.</title><path d="M8 6l-5 6 5 6M16 6l5 6-5 6M14 4l-4 16"/></g>
 <text x="770.0" y="542.0" class="lab" text-anchor="middle" style="font-size:12.5px;font-weight:800">Builder</text>
 <text x="770.0" y="555.0" class="lab-s" text-anchor="middle" style="font-size:9px">code + tests, a PR</text>
 <circle cx="736" cy="458" r="11" class="step"/>
@@ -297,7 +305,7 @@ text{fill:var(--ink)}
 <rect x="997.2" y="695.0" width="87.6" height="18.0" rx="9.0" class="lbl-i-bg"/>
 <text x="1041.0" y="707.2" class="lbl-i" text-anchor="middle" style="font-size:9px">pass · skips QA</text>
 <circle cx="1340.0" cy="610.0" r="36.0" class="tile-n"/>
-<g class="ic ic-n" transform="translate(1315.0,585.0) scale(2.083)"><title>The main branch. Agents cannot merge or push here: gh pr merge and pushes to main are deny-listed in .claude/settings.json; public repos add branch protection.</title><circle cx="6" cy="5" r="2.2"/><circle cx="6" cy="19" r="2.2"/><circle cx="18" cy="7" r="2.2"/><path d="M6 7.2v9.6M18 9.2c0 5-6 4.6-11 8.1"/></g>
+<g class="ic ic-n" transform="translate(1315.0,585.0) scale(2.083)"><title>The main branch. Agents cannot merge or push here: the plugin&#x27;s guard hook blocks gh pr merge, pushes to main and force-pushes on every Bash command, with the deny rules in .claude/settings.json behind it. The lock that cannot be talked around is GitHub branch protection: a pull request needs an approving review.</title><circle cx="6" cy="5" r="2.2"/><circle cx="6" cy="19" r="2.2"/><circle cx="18" cy="7" r="2.2"/><path d="M6 7.2v9.6M18 9.2c0 5-6 4.6-11 8.1"/></g>
 <text x="1340.0" y="662.0" class="lab" text-anchor="middle" style="font-size:12.5px;font-weight:800">main</text>
 <text x="1340.0" y="675.0" class="lab-s" text-anchor="middle" style="font-size:9px">merged code</text>
 <path d="M1171,610 C1210,610 1260,610 1302,610" class="fl-slate fl-thick" marker-end="url(#arrow-slate)"/>
@@ -324,10 +332,10 @@ text{fill:var(--ink)}
 <text x="1392.0" y="707.2" class="lbl-g" text-anchor="middle" style="font-size:9px">watches pushes</text>
 <rect x="250.0" y="870.0" width="560.0" height="128.0" rx="12" class="legacy-strip"/>
 <text x="266.0" y="890.0" class="eyebrow" text-anchor="start" style="font-size:9px;font-weight:700">SAFETY NETS · PLAIN SCRIPTS, UNIT-TESTED, SAME IN CI AND ON YOUR MACHINE</text>
-<g class="ic ic-l2" transform="translate(288.0,912.0) scale(1.167)"><title>templates/settings.deny.json: gh pr merge, pushes to main and force-pushes are denied for every agent.</title><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></g>
-<text x="302.0" y="960.0" class="lab" text-anchor="middle" style="font-size:10.5px;font-weight:700">Deny rules</text>
+<g class="ic ic-l2" transform="translate(288.0,912.0) scale(1.167)"><title>hooks/adlc_guard.py, a PreToolUse hook on every Bash command: blocks gh pr merge, pushes to main, force-pushes and GitHub API writes, for every agent in every permission mode. It reads command text, so it is a guardrail; the deny rules in templates/settings.deny.json stay as a second layer.</title><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></g>
+<text x="302.0" y="960.0" class="lab" text-anchor="middle" style="font-size:10.5px;font-weight:700">Guard hook</text>
 <text x="302.0" y="973.0" class="lab-s" text-anchor="middle" style="font-size:8.5px">no merge, no push</text>
-<g class="ic ic-l2" transform="translate(380.0,912.0) scale(1.167)"><title>adlc-diff-scope.sh: design PRs may touch docs/ only, QA PRs test folders only, build PRs the declared scope.</title><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M3 10.5h18"/></g>
+<g class="ic ic-l2" transform="translate(380.0,912.0) scale(1.167)"><title>adlc-diff-scope.sh: holds a lane PR to the files listed in .adlc/scope/&lt;issue&gt;.txt (design PRs: docs/ only; QA PRs: test folders only), and fails a lane PR that declares no scope. In CI it runs from the default branch&#x27;s copy, so a PR cannot edit the check that judges it.</title><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M3 10.5h18"/></g>
 <text x="394.0" y="960.0" class="lab" text-anchor="middle" style="font-size:10.5px;font-weight:700">Scope check</text>
 <text x="394.0" y="973.0" class="lab-s" text-anchor="middle" style="font-size:8.5px">allowed files only</text>
 <g class="ic ic-l2" transform="translate(472.0,912.0) scale(1.167)"><title>adlc-verdict.sh: parses the reviewers&#x27; ADLC-ADV / ADLC-ARCH lines; control never trusts GitHub review state.</title><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M9.5 8c-1.6 0-2 .6-2 2v1.2c0 .9-.5 1.3-1.3 1.3.8 0 1.3.4 1.3 1.3V15c0 1.4.4 2 2 2"/><path d="M14.5 8c1.6 0 2 .6 2 2v1.2c0 .9.5 1.3 1.3 1.3-.8 0-1.3.4-1.3 1.3V15c0 1.4-.4 2-2 2"/></g>
@@ -339,7 +347,7 @@ text{fill:var(--ink)}
 <g class="ic ic-l2" transform="translate(656.0,912.0) scale(1.167)"><title>templates/hooks/pre-commit: runs the scope check before each local commit.</title><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9l3 3-3 3M12.5 15h5"/></g>
 <text x="670.0" y="960.0" class="lab" text-anchor="middle" style="font-size:10.5px;font-weight:700">Pre-commit</text>
 <text x="670.0" y="973.0" class="lab-s" text-anchor="middle" style="font-size:8.5px">same check, locally</text>
-<g class="ic ic-l2" transform="translate(748.0,912.0) scale(1.167)"><title>adlc-doctor.sh: fails a setup with missing deny rules, unfilled placeholders, missing skills or labels.</title><circle cx="12" cy="12" r="3.2"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/></g>
+<g class="ic ic-l2" transform="translate(748.0,912.0) scale(1.167)"><title>adlc-doctor.sh: fails a setup with missing deny rules, unfilled placeholders, lanes that cannot run their agent, missing guard scripts, skills or labels, and reports whether the default branch has a merge gate.</title><circle cx="12" cy="12" r="3.2"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/></g>
 <text x="762.0" y="960.0" class="lab" text-anchor="middle" style="font-size:10.5px;font-weight:700">Doctor</text>
 <text x="762.0" y="973.0" class="lab-s" text-anchor="middle" style="font-size:8.5px">checks the setup</text>
 <rect x="830.0" y="870.0" width="342.0" height="128.0" rx="12" class="legacy-strip"/>
@@ -414,5 +422,5 @@ text{fill:var(--ink)}
 <text x="1355.0" y="1114.0" class="loop-s" text-anchor="start" style="font-size:10px">You read the card, then merge</text>
 <text x="1355.0" y="1127.0" class="loop-s" text-anchor="start" style="font-size:10px">and deploy. No agent can.</text>
 </svg>
-<figcaption>Drawn from the plugin as built: agents/, skills/charter, skills/triage, skills/intake, templates/github/*.yml and templates/scripts/. The fast-lane size cap and the fix-loop limit are defaults a project can change; hover the icons for the values and files. Without GitHub Actions, you start each lane by hand in Claude Code and the gates are the same.</figcaption></figure></div>
+<figcaption>Drawn from the plugin as built: agents/, hooks/, skills/charter, skills/triage, skills/intake, templates/github/*.yml, templates/scripts/ and mission-control/. The fast-lane size cap and the fix-loop limit are defaults a project can change; hover the icons for the values and files. Without GitHub Actions, you start each lane by hand in Claude Code and the gates are the same.</figcaption></figure></div>
 </body></html>
