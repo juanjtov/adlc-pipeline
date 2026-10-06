@@ -123,15 +123,17 @@ jobs:
           stop() { echo "::error::Fast-lane cap: $1"; echo "$1" > /tmp/cap.fail; exit 1; }
           base=$(git merge-base "refs/remotes/origin/$BASE_REF" HEAD) || stop "could not find where this PR branches from $BASE_REF"
           # --no-renames: a rename would show as `old => new` with 0 lines, hiding both the
-          # sensitive path it moved to and its size. --ignore-submodules=none: the PR's own
-          # .gitmodules (`ignore = all`) must not hide a submodule change. core.quotePath=false:
-          # git would otherwise quote a path with a non-ASCII byte ("auth/caf\303\251.py"), and
-          # the quotes hide it from the denylist.
-          numstat=$(git -c core.quotePath=false diff --numstat --no-renames --ignore-submodules=none "$base" HEAD) || stop "could not read the diff against $BASE_REF"
+          # sensitive path it moved to and its size. --raw: the mode of each entry, so the script
+          # can tell a submodule (a gitlink, mode 160000) from a one-line file — a bump can bring
+          # in any amount of code. --ignore-submodules=none: the PR's own .gitmodules
+          # (`ignore = all`) must not hide a submodule change. core.quotePath=false: git would
+          # otherwise quote a path with a non-ASCII byte ("auth/caf\303\251.py"), and the quotes
+          # hide it from the denylist.
+          entries=$(git -c core.quotePath=false diff --numstat --no-renames --raw --ignore-submodules=none "$base" HEAD) || stop "could not read the diff against $BASE_REF"
           # Nor is an empty diff a small change: either the PR changes nothing, or this step is
           # not looking at the PR (a checkout of the base branch, say). Stop, as for a failed read.
-          [ -n "$numstat" ] || stop "the diff against $BASE_REF is empty — nothing to measure"
-          if printf '%s\n' "$numstat" | .adlc/scripts/adlc-triage.sh > /tmp/cap.out 2> /tmp/cap.err; then
+          [ -n "$entries" ] || stop "the diff against $BASE_REF is empty — nothing to measure"
+          if printf '%s\n' "$entries" | .adlc/scripts/adlc-triage.sh > /tmp/cap.out 2> /tmp/cap.err; then
             echo "eligible=true" >> "$GITHUB_OUTPUT"
           else
             echo "eligible=false" >> "$GITHUB_OUTPUT"

@@ -4,10 +4,16 @@ How the Principal drives the pipeline by hand. This is the reliable baseline; it
 GitHub Actions. Each stage: apply the label → invoke the agent → review the output →
 advance. Agents never advance through a gate; you do.
 
+To watch the line while you drive it, run `/adlc-mission-control`: a read-only live page on
+your own machine.
+
 ## Stage 1 — Intake → triage → stories (Product Analyst)
 
-1. Create a GitHub issue describing the requirement; label it `stage:intake`.
-2. Invoke the **product-analyst** agent with the issue number.
+1. Run `/adlc-intake` — from an idea, a PRD, an existing issue, a bug, or a Notion/Linear
+   ticket it interviews you for what's missing and files the `stage:intake` issue once you
+   confirm. (Already sharp? Create the issue yourself and label it `stage:intake`.)
+2. Invoke the **product-analyst** agent with the issue number. If it stops with numbered
+   questions, answer them with `/adlc-intake <issue>` and invoke it again.
 3. It **triages** (the `triage` skill), posting an `ADLC-TRIAGE: FAST|FULL` verdict, then either
    the full story set (FULL) or a change brief (FAST), and moves the issue to `gate:stories`.
 4. **Gate 1 (you):** accept or return. On accept, apply `stage:design` for the full pipeline —
