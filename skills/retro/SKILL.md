@@ -59,7 +59,8 @@ Open one PR that: adds the tests/checks/conventions from Step 2, removes the Ste
 candidates, and appends a row to `CONTEXT-LOG.md` for every change (date · layer · the failure
 class + evidence that earned it, or the zero-hit reason for a removal). Summarize the top
 failure classes and the metric trend in the PR body. The Principal reviews it like any PR —
-this proposal is itself subject to the QA gate and the adversarial reviewer.
+this proposal is itself subject to the QA gate and the adversarial reviewer. Never merge it.
+If nothing recurs and nothing is prunable, open no PR and say so.
 
 ## Step 5 — Promote plugin-general lessons (cross-project learning)
 
