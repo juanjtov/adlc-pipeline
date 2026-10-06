@@ -7,7 +7,8 @@
 #   .adlc/scripts/adlc-diff-scope.sh  the scope check — build|fast → .adlc/scope/<issue>.txt,
 #                                     which the Builder writes · build+qa (issue at stage:qa) →
 #                                     that scope + $ADLC_TEST_DIRS · no lane stage → skipped.
-#   .adlc/scripts/adlc-triage.sh      the fast-lane cap (size + sensitive paths), fast PRs only.
+#   .adlc/scripts/adlc-triage.sh      the fast-lane cap (size, sensitive paths, submodules),
+#                                     fast PRs only.
 # A PR is tied to its issue by a closing reference (`Closes #N`), by its branch name
 # (feat/<issue>-<slug>), or — when the Builder opened it — by the same rule the lanes use to
 # link it. Tied to an open lane issue and declaring no scope, it FAILS.
