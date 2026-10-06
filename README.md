@@ -5,27 +5,28 @@ QA/Release-Ops, with two human gates) to **any** repository — whether it's gre
 a PRD) or a mature codebase — and be running in minutes.
 
 ![Claude Code plugin](https://img.shields.io/badge/Claude_Code-plugin-D97757)
-![Version](https://img.shields.io/badge/version-0.1.0-555)
+![Version](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fjuanjtov%2Fadlc-pipeline%2Fmain%2F.claude-plugin%2Fplugin.json&query=%24.version&label=version&color=555)
 ![Guardrails](https://img.shields.io/badge/guardrails-unit--tested-2D4F3A)
 
 ## At a glance
 
 ```mermaid
 flowchart LR
-    I[Issue / PRD] --> A[Product Analyst]
-    A --> G1{{Gate 1<br/>human approves stories}}
+    I[Idea / PRD / ticket] --> N[Intake<br/>one clear issue]
+    N --> A[Product Analyst]
+    A --> G1{{"Gate 1<br/>you approve the stories<br/>(or opt-in autopilot, full lane only)"}}
     G1 --> R[Architect<br/>design + ADR]
     R --> B[Builder<br/>scoped change]
-    B --> V[Adversarial + security review]
+    B --> V[Adversarial + architect review]
     V -->|findings| B
     V --> Q[QA / Release-Ops]
     Q --> G2{{Gate 2<br/>human merges}}
     G2 --> D[Deploy]
-    A -.->|trivial change,<br/>human-approved| F[Fast lane] --> V
+    A -.->|trivial change,<br/>human-approved| F["Fast lane<br/>scoped build + adversarial/security review"] -.-> G2
     V -. findings .-> RT[Retro loop<br/>findings → tests, CI checks]
 ```
 
-- **Two human gates, never skipped.** Agents move work *up to* a gate, never through it. No agent verifies, merges, or deploys its own work.
+- **Two gates; the merge is always yours.** Agents move work *up to* a gate, never through it. Gate 1 can be handed to autopilot per issue, into the full lane only; Gate 2 never can. No agent verifies, merges, or deploys its own work.
 - **Deterministic where it matters.** Path scope, direct-push detection, fix-loop caps and verdict parsing are small unit-tested shell scripts shared by CI and a local pre-commit hook.
 - **Gets better every run.** Review findings are logged as structured data and turned into regression tests and CI checks, not longer prompts.
 - **Cost is measured, not guessed.** Per-lane latency from Actions run data; per-agent tokens, cost and prompt-cache hit rate via opt-in OpenTelemetry.
@@ -142,16 +143,9 @@ by `adlc-cost.sh` (from GitHub Actions run durations — no extra infra). Token 
 agent come from **opt-in OpenTelemetry** (`settings.telemetry.json`): Claude Code exports
 per-session tokens + cost + duration to your OTel collector, and `service.name` groups a whole
 pipeline run. A ready-to-run collector ships in `telemetry/` (`docker compose up -d`); latency
-works without one.
-
-**Mission Control.** `/adlc-mission-control` opens a live page of the line on your own machine:
-one station per agent, each request moving between them, what every agent is doing right now, and
-its tokens, cost and latency. It is read-only (it never labels, comments or merges), needs no
-install beyond Python 3, and keeps everything local: GitHub is read through your `gh` login, agent
-steps arrive through the plugin's hooks, and tokens/cost arrive as telemetry sent straight to it
-(`settings.mission-control.json`, no collector). It sees agents that run **on this machine**; runs
-on GitHub's runners show their GitHub state only. Details and limits: `mission-control/README.md`.
-Try it with made-up data: `adlc-mission-control --demo --open`.
+works without one. To see tokens and cost live, with no collector, use
+[Mission Control](#watch-it-run-mission-control) instead — one telemetry destination or the
+other per repo; the cache roll-up below needs the collector.
 
 **Prompt caching, kept honest.** The harness re-serves each run's stable prefix — the tool set,
 the loaded skills, and `CLAUDE.md` — from cache at ~0.1× input price, so cost really scales with
@@ -231,6 +225,30 @@ the exact issue, and files it once you confirm:
 Already sharp? Skip the interview: file the **Requirement** issue form (auto-start lane) or
 label your own issue `stage:intake`. Intake never writes stories or ACs (the Analyst does),
 never picks a lane, and treats PRD / ticket text as untrusted input.
+
+### Watch it run: Mission Control
+
+`/adlc-mission-control` opens a live page of the line on your own machine:
+one station per agent, each request moving between them, what every agent is doing right now, and
+its tokens, cost and latency. It is read-only (it never labels, comments or merges), needs no
+install beyond Python 3, and keeps everything local: GitHub is read through your `gh` login, agent
+steps arrive through the plugin's hooks, and tokens/cost arrive as telemetry sent straight to it
+(`settings.mission-control.json`, no collector). It sees agents that run **on this machine**; runs
+on GitHub's runners show their GitHub state only. Details and limits: `mission-control/README.md`.
+Try it with made-up data: `adlc-mission-control --demo --open`.
+
+### Commands
+
+| Command | What it does |
+|---|---|
+| `/adlc-init` | sets the pipeline up in this repo (the wizard; same as `/adlc:bootstrap`) |
+| `/adlc-intake` | starts a request: interview, preview, then a `stage:intake` issue |
+| `/adlc-mission-control` | opens the live view of the line |
+| `/adlc:retro` | runs the self-improvement review now and proposes durable fixes |
+| `/adlc:ablation` | starts the periodic context reset: on a branch it empties the persistent context, re-adds only what earns its place back, and logs that in `CONTEXT-LOG.md` |
+
+The five agents are not commands: in the local recipe you invoke them by name, as the
+generated `docs/adlc/RUNBOOK.md` lays out.
 
 ## The pipeline
 
