@@ -73,9 +73,10 @@ and Adversarial Reviewer), each Actions lane's `--allowedTools` (what runs unatt
 `diff-scope` CI job (path-level; it takes the stage from the PR's linked issue, where the
 `stage:*` labels live), and the role prompt (advisory). A role that holds the shell can write
 anywhere, so for the Builder and QA a path rule can't live in a tool grant — the diff-scope
-check is what blocks an out-of-scope write: a Builder PR is held to the scope it declares in
-`.adlc/scope/<issue>.txt` (plus the test dirs once the issue is at `stage:qa`), and fails if
-it declares none. The Architect holds no shell in the Actions design lane, so there its
+check (run from the default branch, so a PR cannot edit it) is what blocks an out-of-scope
+write: a Builder PR is held to the scope it declares in `.adlc/scope/<issue>.txt` (plus the
+test dirs once the issue is at `stage:qa`), and fails if it declares none or touches another
+issue's scope file. The Architect holds no shell in the Actions design lane, so there its
 docs-only rule IS the grant (`Edit(docs/**)`); elsewhere it, and QA's tests-only rule, are
 checked only on a PR labelled `stage:design` / `stage:qa`, and otherwise by the review. The
 hook reads command text, so it is a guardrail, not a sandbox: the hard merge gate is branch

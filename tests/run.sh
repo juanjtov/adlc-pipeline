@@ -45,6 +45,11 @@ printf 'backend/tests/t.py\n'       | ADLC_TEST_DIRS='tests|backend/tests' ds bu
 printf 'src/api/x.py\n%s\n' "$SC"   | ds fast "$SC";   check 0 "the scope file itself is in scope" $?
 printf '.adlc/scope/13.txt\n'       | ds fast "$SC";   check 1 "another issue's scope file is not" $?
 printf '%s\n' "$SC"                 | ds design "$SC"; check 1 "nor is it exempt in design/qa" $?
+# …and no prefix can bring it in: merged, it would be the scope a later PR is held to, out of that PR's diff
+scope 'src/api/\n.adlc/scope/\n'
+printf 'src/api/x.py\n%s\n.adlc/scope/13.txt\n' "$SC" | ds build "$SC"; check 1 "another issue's scope file is refused even under a declared prefix" $?
+case "$( cd "$T" && printf '.adlc/scope/13.txt\n' | bash "$S/adlc-diff-scope.sh" fast "$SC" 2>&1 )" in *"another issue's scope file"*) ok "…and the refusal says why" ;; *) bad "the refusal of another issue's scope file must say why" ;; esac
+printf '.adlc/scope/README.md\n%s\n' "$SC" | ds build "$SC"; check 0 "…while any other file under that prefix is an ordinary file" $?
 # scope lines are literal path prefixes: real paths carry regex characters
 scope 'src/routes/+page.svelte\napp/[id]/page.tsx\napp/routes/$id.tsx\nsrc/api/\n'
 printf 'src/routes/+page.svelte\napp/[id]/page.tsx\napp/routes/$id.tsx\n' | ds build "$SC"; check 0 "paths with regex characters match themselves" $?
@@ -61,6 +66,8 @@ scope '# notes\n'
 printf '# notes/x.md\n'             | ds build "$SC"; check 1 "a # line is a comment, not a prefix" $?
 scope ''
 printf 'src/api/x.py\n'             | ds build "$SC"; check 1 "an empty scope file allows nothing" $?
+{ printf 'src/api/\n'; i=0; while [ $i -lt 600 ]; do echo "p$i/"; i=$((i+1)); done; } > "$T/$SC"
+printf 'src/api/x.py\n'             | ds build "$SC"; check 1 "a scope file with hundreds of prefixes is refused" $?
 
 # The stage comes from the PR's LINKED ISSUE — the lanes never put stage:* on the PR itself.
 # These are the label sets the lane workflows actually leave behind.
@@ -138,6 +145,11 @@ printf '.adlc/scope/12/migrations/x.sql.txt\n' | bash "$S/adlc-triage.sh" >/dev/
 # would be judged. The script refuses the notation, and the workflow never produces it.
 printf '0\t0\tsrc/db/old.py => auth/new.py\n' | bash "$S/adlc-triage.sh" >/dev/null 2>&1; check 1 "rename notation is never fast-eligible" $?
 printf '0\t0\t{src/db => x/auth}/old.py\n'    | bash "$S/adlc-triage.sh" >/dev/null 2>&1; check 1 "…in its brace form either" $?
+# git C-quotes a path with a non-ASCII byte or a quote; the quote must not hide it from the denylist
+printf '3\t0\t"auth/\\303\\251.py"\n'              | bash "$S/adlc-triage.sh" >/dev/null 2>&1; check 1 "a quoted path under auth/ is still sensitive" $?
+printf '1\t0\t"src/d\\303\\251/package.json"\n'    | bash "$S/adlc-triage.sh" >/dev/null 2>&1; check 1 "a quoted dependency manifest is still sensitive" $?
+printf '"auth/a\\"b.py"\n'                            | bash "$S/adlc-triage.sh" >/dev/null 2>&1; check 1 "…also as a bare path" $?
+printf '2\t0\t"src/caf\\303\\251.py"\n'            | bash "$S/adlc-triage.sh" >/dev/null 2>&1; check 0 "a quoted innocent path is still fast" $?
 grep -q -- 'git diff --numstat --no-renames' "$ROOT/templates/github/adlc-fast.yml" && ok "adlc-fast.yml takes the cap's diff with --no-renames" || bad "adlc-fast.yml: the cap's diff must use --no-renames"
 
 echo "verdict:"
@@ -307,6 +319,9 @@ echo "lane triggers (static):"
 # No pipes into `grep -q` here: under this file's pipefail an early-exiting reader can turn a
 # match into a failure.
 for W in "$ROOT"/templates/github/adlc-*.yml; do
+  # adlc-diff-scope.yml is a check, not a lane: re-running it on any label costs seconds, and a
+  # job condition there would turn its last failed verdict into a pass (a skipped job passes).
+  [ "$(basename "$W")" = adlc-diff-scope.yml ] && continue
   # Reacts to label changes: `labeled` among its types, or an `issues` trigger with no `types:`
   # at all (which means every activity type, `labeled` included).
   reacts=$(awk '
@@ -399,17 +414,51 @@ rm -rf "$IT"
 
 echo "diff-scope step (the workflow's own run: script against a stub gh):"
 # This step decides which issue and stage a PR is checked under — the part that once resolved
-# every lane PR to "no stage" and skipped. Run it as shipped, in a checkout-shaped directory.
-DS="$(mktemp -d)"; mkdir -p "$DS/bin" "$DS/repo/.adlc/scripts"
-cp "$S/adlc-pr-stage.sh" "$S/adlc-branch-issue.sh" "$S/adlc-diff-scope.sh" "$DS/repo/.adlc/scripts/"
-step_run "$ROOT/templates/github/adlc-diff-scope.yml" '- name: Enforce declared diff scope' > "$DS/step.sh"
+# every lane PR to "no stage" and skipped. Run it as shipped, in what the job really works in: a
+# checkout of the BASE branch, with the PR reachable only as data (the API and refs/pull/N/head).
+WF="$ROOT/templates/github/adlc-diff-scope.yml"
+grep -q '^  pull_request_target:' "$WF" && ok "runs on pull_request_target (workflow and scripts from the base branch)" || bad "adlc-diff-scope.yml must run on pull_request_target"
+grep -qE '^[[:space:]]+ref:' "$WF" && bad "adlc-diff-scope.yml must never check out the PR head" || ok "…and never checks out the PR head"
+# every event that can change the verdict: a push, the Builder's lane:fast label, a body edit or retarget
+grep -q '^    timeout-minutes:' "$WF" && ok "…with a time limit (the scope file and the diff are the PR's to size)" || bad "adlc-diff-scope.yml: the job needs timeout-minutes"
+grep -q 'types: \[opened, synchronize, reopened, labeled, unlabeled, edited\]' "$WF" && ok "…on every event that can change the verdict" || bad "adlc-diff-scope.yml: types must be opened, synchronize, reopened, labeled, unlabeled, edited"
+grep -qE '^    if:' "$WF" && bad "adlc-diff-scope.yml: the job must have no if: — a skipped job would replace a failed verdict with a pass" || ok "…with no job condition (a skipped job would replace a failed verdict with a pass)"
+# For the Builder's PRs the step copies the lanes' link rule. If a lane changes how it links a PR, the copy must change too.
+# Pinned as the pair of lines, in order: the same two expressions the other way round would link a different issue.
+lanes_pair=$(cat <<'EOF'
+issue=$(gh pr view "$PR" --json closingIssuesReferences --jq '.closingIssuesReferences[0].number // empty')
+[ -z "$issue" ] && issue=$(gh pr view "$PR" --json body --jq '.body' | grep -oiE '#[0-9]+' | head -1 | tr -d '#')
+EOF
+)
+lanes_rule=same
+for wf in adlc-review.yml:2 adlc-fast.yml:1; do   # <workflow>:<how many times it links a PR>
+  got=$(grep -A1 'closingIssuesReferences' "$ROOT/templates/github/${wf%:*}" | grep -v '^--$' | sed -e 's/^[[:space:]]*//' -e 's/ || true)$/)/')
+  want=$(i=0; while [ "$i" -lt "${wf#*:}" ]; do printf '%s\n' "$lanes_pair"; i=$((i+1)); done)
+  [ "$got" = "$want" ] || lanes_rule=changed
+done
+[ "$(grep -l 'closingIssuesReferences' "$ROOT"/templates/github/*.yml | wc -l | tr -d ' ')" = 3 ] || lanes_rule=changed
+[ "$lanes_rule" = same ] && ok "the lanes still link a PR by the rule this step copies (first closing reference, else first #N in the body)" || bad "a lane's link rule changed — adlc-diff-scope.yml copies it for the Builder's PRs and must change with it"
+DS="$(mktemp -d)"; mkdir -p "$DS/bin"
+dg() { git -c user.name=t -c user.email=t@example.com -c commit.gpgsign=false -c core.hooksPath=/dev/null "$@"; }
+git init -q --bare -b main "$DS/remote.git" >/dev/null 2>&1; git init -q -b main "$DS/repo" >/dev/null 2>&1
+mkdir -p "$DS/repo/.adlc/scripts" "$DS/repo/src"; cp "$S"/*.sh "$DS/repo/.adlc/scripts/"; echo 'x = 1' > "$DS/repo/src/a.py"
+( cd "$DS/repo" && dg add -A && dg commit -q -m base && dg remote add origin "$DS/remote.git" && dg push -q origin main && dg fetch -q origin ) >/dev/null 2>&1
+step_run "$WF" '- name: Enforce declared diff scope' > "$DS/step.sh"
 cat > "$DS/bin/gh" <<'SH'
 #!/usr/bin/env bash
 # stub gh: each call answers from a file in $FX. No file → 404; a `fail-<name>` file → 502.
 case "$*" in
+  "pr view"*"closingIssuesReferences,body"*)   # the lanes' rule: `#<first closing reference of ANY repo>`, then the body
+    [ -e "$FX/fail-body" ] && { echo "gh: Bad Gateway (HTTP 502)" >&2; exit 1; }
+    any="$FX/closing"; [ -e "$FX/closing-any" ] && any="$FX/closing-any"
+    [ -s "$any" ] && sed 's/^/#/' "$any"
+    cat "$FX/body" 2>/dev/null; exit 0 ;;
   "pr view"*closingIssuesReferences*) k=closing ;;
   "pr view"*labels*)                  k=pr-labels ;;
+  "pr view"*changedFiles*)            k=nfiles ;;
   "api "*"/pulls/"*"/files"*)         k=files ;;
+  "api "*"/contents/.adlc/scope/"*"?ref=refs/pull/7/head"*"application/vnd.github.raw"*)
+                                      k="scope-$(printf '%s\n' "$*" | sed -n 's|.*/scope/\([0-9][0-9]*\)\.txt.*|\1|p')" ;;
   "api "*"/issues/"*)                 k="issue-$(printf '%s\n' "$*" | sed -n 's|.*/issues/\([0-9][0-9]*\).*|\1|p')" ;;
   *) echo "stub gh: unexpected call: $*" >&2; exit 2 ;;
 esac
@@ -418,16 +467,17 @@ esac
 cat "$FX/$k"
 SH
 chmod +x "$DS/bin/gh"
-# dsfx <PR labels> <closing reference> <issue> <its labels | - (no such issue)> <its scope file | -> <changed files>
+# dsfx <PR labels> <closing reference> <issue> <its labels | - (no such issue)> <the PR's scope file | -> <changed files>
 dsfx() {
-  rm -rf "$DS/fx" "$DS/repo/.adlc/scope"; mkdir -p "$DS/fx" "$DS/repo/.adlc/scope"
-  printf '%b' "$1" > "$DS/fx/pr-labels"; printf '%b' "$2" > "$DS/fx/closing"; printf '%b' "$6" > "$DS/fx/files"
+  rm -rf "$DS/fx" "$DS/repo/.adlc/scope"; mkdir -p "$DS/fx"
+  printf '%b' "$1" > "$DS/fx/pr-labels"; printf '%b' "$2" > "$DS/fx/closing"; printf '%b' "$6" > "$DS/fx/files"; echo 3 > "$DS/fx/nfiles"
   [ "$4" = - ] || printf '%b' "$4" > "$DS/fx/issue-$3"
-  [ "$5" = - ] || printf '%b' "$5" > "$DS/repo/.adlc/scope/$3.txt"
+  [ "$5" = - ] || printf '%b' "$5" > "$DS/fx/scope-$3"
 }
-dsrun() { # [head branch] — runs the step as Actions does (bash -e)
-  ( cd "$DS/repo" && env PATH="$DS/bin:$PATH" FX="$DS/fx" PR=7 HEAD_REF="${1:-claude/work}" ADLC_TEST_DIRS=tests bash -e "$DS/step.sh" ) >/dev/null 2>&1
+dsrun() { # [head branch] [PR author] [base branch] — runs the step as Actions does (bash -e), in the default-branch checkout
+  ( cd "$DS/repo" && env PATH="$DS/bin:$PATH" FX="$DS/fx" PR=7 HEAD_REF="${1:-claude/work}" BASE_REF="${3:-main}" AUTHOR="${2:-someone}" BUILDER_BOT=adlc-bot ADLC_TEST_DIRS=tests bash ${DSOPTS:--e} "$DS/step.sh" ) >/dev/null 2>&1
 }
+dsout() { ( cd "$DS/repo" && env PATH="$DS/bin:$PATH" FX="$DS/fx" PR=7 HEAD_REF=w BASE_REF=main AUTHOR=someone BUILDER_BOT=adlc-bot bash -e "$DS/step.sh" ) 2>&1; }
 [ -s "$DS/step.sh" ] && ok "run: script extracted from the template" || bad "could not extract the run: script"
 dsfx '' '12\n' 12 'stage:build\n' 'src/api/\n' 'src/api/x.py\n.adlc/scope/12.txt\n'
 dsrun; check 0 "full lane: a PR inside its declared scope passes" $?
@@ -435,14 +485,16 @@ dsfx '' '12\n' 12 'stage:build\n' 'src/api/\n' 'src/api/x.py\nsrc/billing/y.py\n
 dsrun; check 1 "full lane: a file outside the scope fails (was: 'no stage — skipped')" $?
 dsfx '' '12\n' 12 'stage:build\n' - 'src/api/x.py\n'
 dsrun; check 1 "full lane: a PR that declares no scope fails" $?
+dsfx '' '12\n' 12 'stage:build\n' - 'src/api/x.py\n'; mkdir -p "$DS/repo/.adlc/scope"; printf 'src/\n' > "$DS/repo/.adlc/scope/12.txt"
+dsrun; check 1 "…even when the default branch has a scope file for that issue: the PR's branch must contain it" $?
+dsfx '' '12\n' 12 'stage:build\n' 'src/api/\n' 'src/api/x.py\n.adlc/scripts/adlc-diff-scope.sh\n.github/workflows/adlc-diff-scope.yml\n'
+dsrun; check 1 "a PR that edits the guards is judged by the default branch's copy, and the edit is out of scope" $?
+dsfx '' '12\n' 12 'stage:build\n' 'src/api/\n.adlc/scope/\n' 'src/api/x.py\n.adlc/scope/12.txt\n.adlc/scope/40.txt\n'
+dsrun; check 1 "a lane PR cannot add a scope file for another issue" $?
 dsfx '' '12\n' 12 'stage:qa\ngate:deploy\n' 'src/api/\n' 'src/api/x.py\ntests/t.py\n.adlc/scope/12.txt\n'
 dsrun; check 0 "issue at stage:qa: QA's tests on the Builder's PR pass" $?
 dsfx 'adlc:changes-requested\n' '12\n' 12 'stage:qa\n' 'src/api/\n' 'tests/t.py\nsrc/billing/y.py\n'
 dsrun; check 1 "issue at stage:qa: outside scope and tests fails" $?
-dsfx '' '13\n' 13 'stage:fast\n' 'README.md\n' 'README.md\n.adlc/scope/13.txt\n'
-dsrun; check 0 "fast lane at opened (lane:fast not on the PR yet) passes in scope" $?
-dsfx 'lane:fast\n' '13\n' 13 'gate:deploy\n' 'README.md\n' 'README.md\nsrc/late.py\n'
-dsrun; check 1 "fast lane after PASS: a late out-of-scope push fails" $?
 dsfx '' '' 12 'stage:build\n' 'src/api/\n' 'src/billing/y.py\n.adlc/scope/12.txt\n'
 dsrun feat/12-add-login; check 1 "no closing reference: the branch names the issue" $?
 dsfx '' '' 12 'stage:build\n' - 'src/api/x.py\n'
@@ -451,25 +503,122 @@ dsfx '' '' 12 'stage:qa\ngate:deploy\n' 'src/api/\n' 'src/a.py\ndocs/x.md\n.adlc
 dsrun release/next; check 0 "a PR that merely carries scope files (a promotion, a cleanup) is tied to no issue" $?
 dsfx '' '' 2026 - - 'CHANGELOG.md\n'
 dsrun release/2026-10; check 0 "a branch number that is no issue here ties the PR to none" $?
+dsfx '' '' 12 'stage:build\n' 'src/api/\n' 'src/billing/y.py\n'; printf 'Implements #12, see also #3\n' > "$DS/fx/body"
+dsrun claude/work adlc-bot; check 1 "the Builder's own PR is tied by the first #N in its body, as the lanes tie it" $?
+dsrun claude/work dependabot; check 0 "anyone else's PR is not tied by a bare #N" $?
+dsfx '' '' 12 'stage:build\n' 'src/api/\n' 'src/billing/y.py\n'; printf 'Implements #12\n' > "$DS/fx/body"
+dsrun x/999-decoy adlc-bot; check 1 "a branch that names a number that is no issue does not hide the body's issue" $?
+printf 'bug\n' > "$DS/fx/issue-999"
+dsrun x/999-decoy adlc-bot; check 1 "…nor does a branch that names an issue in no lane" $?
+dsfx '' '' 12 'stage:build\n' 'src/api/\n' 'src/billing/y.py\n'; printf 'Implements #12\n' > "$DS/fx/body"
+printf 'stage:build\n' > "$DS/fx/issue-13"; printf 'src/billing/\n' > "$DS/fx/scope-13"
+dsrun feat/13-other adlc-bot; check 1 "the body's issue outranks the branch's, as in the lanes (the PR is held to #12's scope, not #13's)" $?
+dsfx '' '5\n' 12 'stage:build\n' 'src/api/\n' 'src/billing/y.py\n'; printf 'bug\n' > "$DS/fx/issue-5"
+dsrun feat/12-add-login; check 1 "a closing reference to an issue in no lane does not hide the branch's lane issue" $?
+dsfx '' '5\n' 12 'stage:build\n' 'src/api/\n' 'src/api/x.py\n'; : > "$DS/fx/issue-5"   # a closed issue: the lookup gives no labels
+dsrun feat/12-add-login; check 0 "…and the lane issue, not the one named first, names the scope file" $?
+dsfx '' '' 12 'stage:build\n' 'src/api/\n' 'src/billing/y.py\n'; printf '&#12; tidy up\n' > "$DS/fx/body"
+dsrun claude/work adlc-bot; check 1 "the lanes read an HTML entity as an issue number, so for the Builder's PR this check does too" $?
+dsfx '' '' 12 'stage:build\n' 'src/api/\n' 'src/billing/y.py\n'; printf 'See #5\n' > "$DS/fx/body"; printf 'bug\n' > "$DS/fx/issue-5"; printf '12\n' > "$DS/fx/closing-any"
+dsrun claude/work adlc-bot; check 1 "…and a closing reference to another repo's #12, which the lanes read as this repo's" $?
+dsrun claude/work someone; check 0 "…but only for the Builder: anyone else's cross-repo reference ties the PR to nothing here" $?
+dsfx '' '20\n' 12 'stage:build\n' 'src/api/\n' 'src/api/x.py\ntests/t.py\n'; printf 'Closes o/other#12, closes #20\n' > "$DS/fx/body"; printf '12\n' > "$DS/fx/closing-any"
+printf 'stage:qa\n' > "$DS/fx/issue-20"; printf 'src/api/\n' > "$DS/fx/scope-20"
+dsrun claude/work adlc-bot; check 1 "two lane issues named: the Builder's PR is judged under the one the lanes advance (#12 at build, not #20 at qa)" $?
+dsfx '' '' 0 - - 'README.md\n'; printf 'A tidy-up, tied to nothing.\n' > "$DS/fx/body"
+# `shell: bash` in a workflow means `bash -eo pipefail`: a body with no #N must still read as "no link", not as a failure
+DSOPTS='-eo pipefail' dsrun claude/work adlc-bot; check 0 "the Builder's PR with no reference at all is tied to nothing, under pipefail too" $?
+dsfx '' '' 12 'stage:build\n' 'src/api/\n' 'src/api/x.py\n.adlc/scope/12.txt\n'; printf 'Implements #12\n' > "$DS/fx/body"; : > "$DS/fx/fail-body"
+dsrun claude/work adlc-bot; check 1 "a failed gh call (the Builder's link) fails the check" $?
 dsfx '' '12\n' 12 'stage:design\n' 'README.md\n' 'src/api/x.py\ndocs/adr/7.md\n'
 dsrun; check 0 "issue at stage:design (a bounced fast PR) is skipped" $?
 dsfx 'dependencies\n' '' 0 - - 'package.json\n'
 dsrun dependabot/npm_and_yarn/left-pad-1.3.0; check 0 "a PR tied to no issue is skipped" $?
 dsfx 'stage:qa\n' '' 0 - - 'tests/t.py\nsrc/app.py\n'
 dsrun; check 1 "PR-label fallback: stage:qa is tests-only" $?
-dsfx 'lane:fast\n' '' 0 - - 'README.md\n'
-dsrun; check 1 "lane:fast with no issue and no scope file fails" $?
-for k in pr-labels files closing issue-12; do   # an API error must never read as "nothing to check"
+dsfx 'stage:build\n' '12\n' 12 'bug\n' 'src/api/\n' 'src/api/x.py\n.adlc/scope/12.txt\n'
+dsrun; check 0 "PR-label fallback: stage:build is held to the linked issue's scope file, though that issue carries no stage" $?
+for k in pr-labels files closing issue-12 nfiles scope-12; do   # an API error must never read as "nothing to check"
   dsfx '' '12\n' 12 'stage:build\n' 'src/api/\n' 'src/api/x.py\n'; : > "$DS/fx/fail-$k"
   dsrun; check 1 "a failed gh call ($k) fails the check" $?
 done
+# GitHub lists at most 3000 changed files; past that the list is cut short without a word
+dsfx '' '12\n' 12 'stage:build\n' 'src/api/\n' 'src/api/x.py\n.adlc/scope/12.txt\n'; echo 3001 > "$DS/fx/nfiles"
+dsrun; check 1 "a lane PR with more files than GitHub lists fails rather than pass on the ones listed" $?
+echo 3000 > "$DS/fx/nfiles"; dsrun; check 0 "…exactly 3000 is still judged" $?
+echo null > "$DS/fx/nfiles"; dsrun; check 1 "…and a file count that cannot be read fails the check" $?
+dsfx 'dependencies\n' '' 0 - - 'package.json\n'; echo 8161 > "$DS/fx/nfiles"
+dsrun dependabot/npm_and_yarn/left-pad-1.3.0; check 0 "…while a PR in no lane is skipped however large it is" $?
+dsfx '' '12\n' 12 'stage:build\n' - 'src/api/x.py\n'
+case "$(dsout)" in *"no scope file"*) ok "a PR whose branch has no scope file is told so" ;; *) bad "a missing scope file must be reported as that" ;; esac
+dsfx '' '12\n' 12 'stage:build\n' 'src/api/\n' 'src/api/x.py\n'; : > "$DS/fx/fail-scope-12"
+out=$(dsout)
+case "$out" in *"HTTP 502"*) case "$out" in *"no scope file"*) bad "an API error must not be reported as a missing scope file" ;; *) ok "an API error on the scope file is reported as that, not as a missing scope file" ;; esac ;; *) bad "an API error on the scope file must be reported" ;; esac
+dsfx '' '12\n' 12 'stage:design\n' - 'src/api/x.py\n'; : > "$DS/fx/fail-scope-12"
+dsrun; check 0 "a PR with no lane stage never asks for a scope file" $?
+# The fast lane: the same step also applies the cap, to the PR's real diff (refs/pull/7/head
+# against its merge base), with the BASE branch's adlc-triage.sh.
+prhead() { # <commands run in a clone of the base> — the result becomes refs/pull/7/head
+  rm -rf "$DS/pr"; git clone -q "$DS/remote.git" "$DS/pr" >/dev/null 2>&1
+  ( cd "$DS/pr" && eval "$1" && dg add -A && dg commit -q -m pr && dg push -q -f origin HEAD:refs/pull/7/head ) >/dev/null 2>&1
+}
+fastfx() { dsfx "$1" '13\n' 13 'stage:fast\n' 'src/\nauth/\n.adlc/\n' "$2"; }   # a scope wide enough to isolate the cap
+prhead 'echo "y = 2" >> src/a.py'
+fastfx '' 'src/a.py\n';                    dsrun; check 0 "fast lane: a small change inside scope and cap passes" $?
+fastfx 'lane:fast\n' 'src/a.py\n';         dsrun; check 0 "…and the same once the Builder has added lane:fast" $?
+prhead 'for f in b c d e f g; do echo x > src/$f.py; done'
+fastfx '' 'src/b.py\n';                    dsrun; check 1 "fast lane: more files than the cap fails" $?
+prhead 'mkdir -p auth; echo "k = 1" > auth/login.py'
+fastfx '' 'auth/login.py\n';               dsrun; check 1 "fast lane: a sensitive path fails" $?
+prhead 'mkdir -p auth; echo "k = 1" > auth/login.py; printf "#!/usr/bin/env bash\ncat >/dev/null; echo FAST; exit 0\n" > .adlc/scripts/adlc-triage.sh'
+fastfx '' 'auth/login.py\n.adlc/scripts/adlc-triage.sh\n'
+dsrun; check 1 "fast lane: a PR that rewrites the cap script is still judged by the base copy" $?
+dsfx '' '12\n' 12 'stage:build\n' 'src/\nauth/\n.adlc/\n' 'auth/login.py\n'
+dsrun; check 0 "the cap applies to the fast lane only" $?
+prhead 'echo "y = 2" >> src/a.py'
+dsfx '' '13\n' 13 'stage:fast\n' 'README.md\n' 'src/a.py\n'
+dsrun; check 1 "fast lane: inside the cap but outside the scope still fails" $?
+prhead 'git mv src/a.py src/b.py'
+fastfx '' 'src/b.py\nsrc/a.py\n';         dsrun; check 0 "fast lane: a small rename is counted as two files, not refused" $?
+# a link planted at the scope path on the default branch must not redirect the write into a guard
+prhead 'mkdir -p auth; echo "k = 1" > auth/login.py'
+dsfx '' '13\n' 13 'stage:fast\n' '#!/usr/bin/env bash\ncat >/dev/null; echo FAST; exit 0\n' 'auth/login.py\n'
+mkdir -p "$DS/repo/.adlc/scope"; ln -s ../scripts/adlc-triage.sh "$DS/repo/.adlc/scope/13.txt"
+dsrun; check 1 "fast lane: a link at the scope path does not let the PR rewrite the cap" $?
+cmp -s "$DS/repo/.adlc/scripts/adlc-triage.sh" "$S/adlc-triage.sh" && ok "…and the default branch's cap script is untouched" || bad "the PR's scope file was written through a link into the cap script"
+cp "$S/adlc-triage.sh" "$DS/repo/.adlc/scripts/adlc-triage.sh"
+# a base that is not the default branch: the cap is measured against the PR's base, fetched by name
+rm -rf "$DS/pr"; git clone -q "$DS/remote.git" "$DS/pr" >/dev/null 2>&1
+( cd "$DS/pr" && git checkout -q -b release && for f in r1 r2 r3 r4 r5 r6; do echo x > "src/$f.py"; done && dg add -A && dg commit -q -m "release work" && dg push -q origin release \
+  && echo "y = 3" >> src/a.py && dg add -A && dg commit -q -m pr && dg push -q -f origin HEAD:refs/pull/7/head ) >/dev/null 2>&1
+fastfx '' 'src/a.py\n';                    dsrun claude/work someone release; check 0 "fast lane: a PR into another branch is measured against that branch" $?
+# a tag named like the base branch must not stand in for it (it would hide the PR's first commits)
+prhead 'mkdir -p auth; echo "k = 1" > auth/login.py; dg add -A; dg commit -q -m first; echo "y = 2" >> src/a.py'
+( cd "$DS/repo" && dg fetch -q origin refs/pull/7/head && dg tag origin/main FETCH_HEAD~1 ) >/dev/null 2>&1
+fastfx '' 'auth/login.py\nsrc/a.py\n';     dsrun; check 1 "fast lane: a tag named origin/main does not shorten the diff" $?
+( cd "$DS/repo" && dg tag -d origin/main ) >/dev/null 2>&1
+# main moves on after the PR branched: the cap is measured from the merge base, not from the tip
+prhead 'echo "y = 2" >> src/a.py'
+( cd "$DS/repo" && for f in m1 m2 m3 m4 m5 m6; do echo x > "src/$f.py"; done && dg add -A && dg commit -q -m "main moves on" && dg push -q origin main && dg fetch -q origin ) >/dev/null 2>&1
+fastfx '' 'src/a.py\n';                    dsrun; check 0 "fast lane: the cap is measured from the merge base, not from main's tip" $?
+prhead 'echo "y = 2" >> src/a.py'
+dsfx 'lane:fast\n' '' 0 - - 'src/a.py\n'
+dsrun; check 1 "lane:fast with no issue and no scope file fails" $?
+git -C "$DS/remote.git" update-ref -d refs/pull/7/head
+fastfx '' 'src/a.py\n';                    dsrun; [ $? -ne 0 ] && ok "fast lane: a PR head that cannot be fetched fails the check" || bad "fast lane: an unfetchable PR head must fail the check"
 # The stub does not run --jq. Where a real jq exists, run the two non-trivial filters as shipped.
 if command -v jq >/dev/null 2>&1; then
   cf=$(sed -n "s/.*closingIssuesReferences --jq '\(.*\)')\$/\1/p" "$DS/step.sh")
   ff=$(sed -n "s/.*per_page=100\" --jq '\(.*\)')\$/\1/p" "$DS/step.sh")
   pr='{"url":"https://github.com/o/r/pull/7","closingIssuesReferences":[{"number":123,"url":"https://github.com/o/tracker/issues/123"},{"number":45,"url":"https://github.com/o/r/issues/45"}]}'
   eq 45 "closing reference: the first one in THIS repo"        "$(printf '%s' "$pr" | jq -r "$cf" 2>&1)"
+  lf=$(sed -n "s/.*closingIssuesReferences,body --jq '\(.*\)')\$/\1/p" "$DS/step.sh")
+  eq "#123 See #9 " "the lanes' rule: the first closing reference of any repo, then the body" "$(printf '%s' "${pr%\}},\"body\":\"See #9\"}" | jq -r "$lf" 2>&1 | tr '\n' ' ')"
+  eq "See #9 "      "the lanes' rule: no closing reference → the body alone"                  "$(printf '%s' '{"closingIssuesReferences":[],"body":"See #9"}' | jq -r "$lf" 2>&1 | tr '\n' ' ')"
   eq "" "closing reference: only another repo's → none"        "$(printf '%s' '{"url":"https://github.com/o/r/pull/7","closingIssuesReferences":[{"number":123,"url":"https://github.com/o/r-fork/issues/123"}]}' | jq -r "$cf" 2>&1)"
+  jf=$(sed -n "s/.*issues\/\$n\" --jq '\(.*\)' 2>.*/\1/p" "$DS/step.sh")
+  eq "stage:build " "issue lookup: an open issue gives its labels" "$(printf '%s' '{"state":"open","labels":[{"name":"stage:build"}]}' | jq -r "$jf" 2>&1 | tr '\n' ' ')"
+  eq ""             "issue lookup: a closed issue gives none"      "$(printf '%s' '{"state":"closed","labels":[{"name":"stage:qa"},{"name":"gate:deploy"}]}' | jq -r "$jf" 2>&1 | tr '\n' ' ')"
   eq "src/api/new.py src/db/old.py a.py " "file list: a rename counts under both paths" "$(printf '%s' '[{"filename":"src/api/new.py","previous_filename":"src/db/old.py"},{"filename":"a.py"}]' | jq -r "$ff" 2>&1 | tr '\n' ' ')"
 else
   echo "  · skipped the --jq filter checks (no jq here)"
