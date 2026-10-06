@@ -110,6 +110,9 @@ jobs:
         env:
           BASE_REF: ${{ github.base_ref }}
         run: |
+          # A self-hosted runner keeps /tmp between jobs: a stop reason an earlier job left must
+          # not be posted as this PR's if this step dies before it writes its own.
+          rm -f /tmp/cap.fail
           chmod +x .adlc/scripts/adlc-triage.sh
           # Plain assignments, never a pipe from git: this shell has no pipefail, and the script
           # answers FAST when it is given nothing — a diff that cannot be taken must fail the
@@ -119,8 +122,10 @@ jobs:
           base=$(git merge-base "refs/remotes/origin/$BASE_REF" HEAD) || stop "could not find where this PR branches from $BASE_REF"
           # --no-renames: a rename would show as `old => new` with 0 lines, hiding both the
           # sensitive path it moved to and its size. --ignore-submodules=none: the PR's own
-          # .gitmodules (`ignore = all`) must not hide a submodule change from the cap.
-          numstat=$(git diff --numstat --no-renames --ignore-submodules=none "$base" HEAD) || stop "could not read the diff against $BASE_REF"
+          # .gitmodules (`ignore = all`) must not hide a submodule change. core.quotePath=false:
+          # git would otherwise quote a path with a non-ASCII byte ("auth/caf\303\251.py"), and
+          # the quotes hide it from the denylist.
+          numstat=$(git -c core.quotePath=false diff --numstat --no-renames --ignore-submodules=none "$base" HEAD) || stop "could not read the diff against $BASE_REF"
           # Nor is an empty diff a small change: either the PR changes nothing, or this step is
           # not looking at the PR (a checkout of the base branch, say). Stop, as for a failed read.
           [ -n "$numstat" ] || stop "the diff against $BASE_REF is empty — nothing to measure"
@@ -136,7 +141,7 @@ jobs:
         if: failure() && steps.cap.outcome == 'failure'
         run: |
           reason=$(cat /tmp/cap.fail 2>/dev/null || true)
-          gh pr comment "$PR" --body "⚠️ The fast-lane cap could not measure this PR${reason:+: $reason}. Nothing changed: the PR keeps \`lane:fast\`, the issue stays at \`stage:fast\`, and no review ran. Fix the cause and push again, or re-run the failed job: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          gh pr comment "$PR" --body "⚠️ The fast-lane cap could not measure this PR${reason:+: $reason}. Nothing changed: the PR keeps \`lane:fast\`, the issue's labels are as they were, and no review ran. Fix the cause and push again, or re-run the failed job: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
 
       - name: Bounce to the full pipeline (cap exceeded)
         if: steps.cap.outputs.eligible == 'false'
