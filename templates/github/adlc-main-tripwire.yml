@@ -3,8 +3,10 @@
 # through a merged PR — i.e. someone pushed straight to main, bypassing the QA gate + Gate 2.
 # The decision is `.adlc/scripts/adlc-tripwire-check.sh` (unit-tested); this workflow just
 # resolves each commit's PR association via `gh api` and pipes it in.
-# On a PUBLIC repo use real branch protection instead. Enforcement of record is still the
-# `.claude/settings.json` deny rules; this catches a HUMAN pushing by hand, after the fact.
+# On a PUBLIC repo use real branch protection instead. Agents are stopped before the push by
+# the plugin's guard hook (backed by the `.claude/settings.json` deny rules); this catches what
+# those cannot — a HUMAN pushing by hand, or a push hidden from a command-text check — after
+# the fact.
 name: ADLC main tripwire
 
 on:

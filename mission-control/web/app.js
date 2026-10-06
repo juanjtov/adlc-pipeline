@@ -52,23 +52,24 @@ const ICON = {
 };
 const KIND = { read: ICON.file, search: ICON.search, bash: ICON.term, edit: ICON.pencil, write: ICON.pencil, gh: ICON.msg, think: ICON.spark };
 
-// What the page says about each station. Model, tools and the prompt itself come from the agent files (/api/meta).
+// What the page says about each station. The model, the prompt and every permission chip come from /api/meta (the agent
+// files, the guard hook and the lane templates); `rules` are the limits a role's instructions set, which nothing enforces.
 const STATION = {
   analyst: { name: 'Product Analyst', short: 'Analyst', icon: ICON.list, start: 'Starts on stage:intake',
     role: 'Turns a request into user stories with pass or fail acceptance checks, and recommends a lane. You choose the lane at Gate 1.',
-    boundary: 'Read-only on the repo. It can only comment on issues and move one to gate:stories.', blocked: ['Edit', 'Write', 'Any stage label'] },
+    boundary: 'Read-only on the repo. It can only comment on issues and move one to gate:stories.', rules: ['Any stage label'] },
   architect: { name: 'Architect', short: 'Architect', icon: ICON.plan, start: 'Starts on stage:design',
     role: 'Writes the design decision and splits the work into tasks, each listing the exact files allowed. Later it checks the pull request matches that design.',
-    boundary: 'Writes under docs/ only. It never touches application code and never merges.', blocked: ['Writes outside docs/', 'gh pr merge', 'Gate labels'] },
+    boundary: 'Writes under docs/ only. It never touches application code and never merges.', rules: ['Writes outside docs/', 'Gate labels'] },
   builder: { name: 'Builder', short: 'Builder', icon: ICON.code, start: 'Starts on stage:build',
     role: 'Writes the code and a test for every acceptance check, on its own branch, then opens a pull request. It never merges.',
-    boundary: 'Works on its own feature branch, inside the files the task allows. A scope check stops any commit outside them.', blocked: ['gh pr merge', 'Push to main', 'Force-push', 'Label changes'] },
+    boundary: 'Works on its own feature branch, inside the files the task allows. A scope check stops any commit outside them.', rules: ['Label changes'] },
   reviewer: { name: 'Adversarial Reviewer', short: 'Reviewer', icon: ICON.eye, start: 'Starts on a new pull request',
     role: 'Starts with fresh context, sees only the change, and tries to break it. The Architect then checks the design was followed.',
-    boundary: 'Read-only. It can only comment on the pull request. It cannot edit code, change labels or merge.', blocked: ['Edit', 'Write', 'Label changes', 'gh pr merge'] },
+    boundary: 'Read-only. It can only comment on the pull request. It cannot edit code, change labels or merge.', rules: ['Label changes'] },
   qa: { name: 'QA & Release-Ops', short: 'QA', icon: ICON.flask, start: 'Starts on stage:qa',
     role: 'Runs the full test suite, fills test gaps, does a security pass, and drafts the merge proposal for you.',
-    boundary: 'Writes in the test folders only. It never merges, deploys or runs a migration.', blocked: ['gh pr merge', 'Deploy', 'Migrations', 'Writes outside test folders'] }
+    boundary: 'Writes in the test folders only. It never merges, deploys or runs a migration.', rules: ['Deploy', 'Migrations', 'Writes outside test folders'] }
 };
 
 // ------------------------------------------------------------------------------------ small helpers
@@ -436,11 +437,25 @@ ${c.text ? h`<pre class="code scroll" style="margin-top: 10px; max-height: 240px
 <div><h3 class="h3" style="margin-bottom: 8px">Task prompt</h3><pre class="code">${run.prompt || 'The task prompt was not captured for this run.'}</pre></div>
 <div><h3 class="h3" style="margin-bottom: 8px">Trigger payload</h3><pre class="code">${JSON.stringify(run.payload || {}, null, 2)}</pre></div>
 <div>
-<h3 class="h3" style="margin-bottom: 8px">Permissions</h3>
-<div style="display: flex; flex-wrap: wrap; gap: 6px">${(agent.tools || []).map(t => h`<span class="chip mono">${t}</span>`)}</div>
-<div style="display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px">${st.blocked.map(b => h`<span class="chip chip-no">${ico(ICON.lock, 11, 2.1)}${b}</span>`)}</div>
+<h3 class="h3">Permissions</h3>
+${permissions(agent, st)}
 </div>
 </div>`;
+}
+
+// What the agent may run, row by row. "Local run": the agent file's tools, with the guard hook's command limits in place
+// of a bare Bash. "Actions lane": that lane's own grant, which can be narrower. Then what the guard and the tool grant
+// block, and what the role's instructions add on top. All of it comes from /api/meta; nothing here is typed in.
+function permissions(agent, st) {
+  const row = (label, chips, cls = 'chip mono', icon = null) => h`<div style="margin-top: 8px"><div style="font-size: 11px; color: var(--ink-3)">${label}</div>
+<div style="display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px">${chips.map(t => h`<span class="${cls}">${icon ? ico(icon, 11, 2.1) : ''}${t}</span>`)}</div></div>`;
+  const groups = [];   // lanes with the same grant share one row
+  (agent.lanes || []).forEach(l => { const key = l.tools.join(','); const g = groups.find(x => x.key === key); if (g) g.lanes.push(l.lane); else groups.push({ key, lanes: [l.lane], tools: l.tools }); });
+  return h`${agent.guard === 'missing' ? h`<div class="chip chip-no" style="height: auto; padding: 6px 8px; margin-top: 8px; white-space: normal">${ico(ICON.alert, 11, 2.1)}The plugin's guard hook could not be read. The list below is the agent file's tools line as written; what this agent may run through Bash is unknown here.</div>` : ''}
+${row('Local run', agent.tools || [])}
+${groups.map(g => row('Actions lane' + (g.lanes.length > 1 ? 's: ' : ': ') + g.lanes.join(', '), g.tools))}
+${(agent.blocked || []).length ? row('Blocked by the guard and the tool grant', agent.blocked, 'chip chip-no', ICON.lock) : ''}
+${st.rules.length ? row('By its instructions', st.rules, 'chip chip-no', ICON.lock) : ''}`;
 }
 
 function outputTab(run) {

@@ -31,7 +31,8 @@ an agent cannot run long without it.
   diff scope** and the ACs it satisfies. *Done when* a Builder could implement without
   re-deriving the design.
 - **Architect (review)** — *Done when* the PR diff ⊆ declared scope and conforms to the ADR
-  (or the deviation is justified in the review), verdict submitted via `gh pr review`.
+  (or the deviation is justified in the review), verdict submitted via `gh pr review` (in the
+  Actions review lane: as the PR comment and marker line that lane asks for).
 - **Builder** — *Done when* the project's pass/fail command is green locally (paste the real
   summary line), the diff ⊆ declared scope, and every AC has a test carrying its `SN-ACN`
   id. UI change: also browser-verified (not just built).

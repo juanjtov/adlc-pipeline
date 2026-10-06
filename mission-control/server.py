@@ -44,6 +44,9 @@ class App:
         self.version = 0
         self.watching = {}   # repo -> pages open on it. GitHub is read only for these.
         self.agents = {st: pipeline.read_agent(PLUGIN_ROOT, st) for st in pipeline.STATIONS}
+        if any(a['guard'] == 'missing' for a in self.agents.values()):
+            print("Mission Control: the plugin's guard hook (hooks/adlc_guard.py) could not be read. The Permissions panel "
+                  "shows each agent file's tools line as written and says the Bash limits are unknown.", file=sys.stderr)
         self.ingest = ingest.Ingest(store, on_repo=store.add_repo)
         if self.default_repo:
             store.add_repo(self.default_repo)

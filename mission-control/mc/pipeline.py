@@ -3,6 +3,7 @@
 Everything here is derived from the plugin's own contract (labels.sh, the charter, the agent
 files), so a change there is a change here.
 """
+import importlib.util
 import os
 import re
 
@@ -137,10 +138,13 @@ def step_label(tool, tool_input, cwd=''):
 
 
 def read_agent(plugin_root, station):
-    """The agent file for a station: frontmatter fields plus the body, which is its system prompt."""
+    """The agent file for a station — frontmatter fields plus the body, which is its system prompt — and what the
+    plugin lets that agent run: the guard hook's command limits (a local run) and each Actions lane's grant.
+    Nothing here is typed in: it is read from agents/, hooks/adlc_guard.py and templates/github/."""
     name = STATION_AGENT[station]
     path = os.path.join(plugin_root, 'agents', name + '.md')
-    info = {'station': station, 'agent': name, 'file': 'agents/' + name + '.md', 'prompt': '', 'model': '', 'tools': []}
+    info = {'station': station, 'agent': name, 'file': 'agents/' + name + '.md', 'prompt': '', 'model': '', 'tools': [],
+            'blocked': [], 'lanes': [], 'guard': 'missing'}
     try:
         with open(path, encoding='utf-8') as fh:
             text = fh.read()
@@ -156,11 +160,93 @@ def read_agent(plugin_root, station):
             info['model'] = value
         elif key == 'tools':
             info['tools'] = _split_tools(value)
+    # An agent file's `tools:` names whole tools. What a narrow role may run THROUGH Bash is held by the plugin's
+    # guard hook, so that is where the truth is: show its commands in place of a bare "Bash". When the guard cannot
+    # be read, the line stands as written and 'guard' says so — the page then shows that the limits are unknown.
+    limits = _guard_limits(plugin_root, name)
+    if limits is not None:
+        info['guard'] = 'ok'
+        if limits and 'Bash' in info['tools']:
+            at = info['tools'].index('Bash')
+            info['tools'][at:at + 1] = limits
+        info['blocked'] = _guard_blocks(info['tools'], bool(limits))
+    info['lanes'] = _lane_grants(plugin_root, name)
     return info
 
 
+# What the guard hook blocks for every agent, in every permission mode.
+GUARD_BLOCKS = ['gh pr merge', 'Push to main', 'Force-push', 'GitHub API writes']
+
+
+def _guard_blocks(tools, narrow):
+    """What this agent cannot do: the guard's universal blocks; its command list, for a narrow role; and the
+    edit tools its file does not grant."""
+    out = list(GUARD_BLOCKS)
+    if narrow:
+        out.append('Other gh and git commands')
+    out += [t for t in ('Edit', 'Write') if t not in tools]
+    return out
+
+
+def _guard_limits(plugin_root, agent):
+    """The gh and git commands the guard hook (hooks/adlc_guard.py) allows a narrow role, e.g.
+    ['gh pr diff', 'gh pr view', 'git (read-only)']. [] when the role holds the whole shell. None when the guard
+    cannot be read — the caller must not pass that off as "no limits"."""
+    try:
+        spec = importlib.util.spec_from_file_location('adlc_guard', os.path.join(plugin_root, 'hooks', 'adlc_guard.py'))
+        guard = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(guard)
+        rules = guard.ROLE_RULES.get(agent)
+        lookups = set(guard.READ_GH)        # gh auth status and the like: every role keeps them, not worth a chip
+    except Exception:
+        return None
+    if not rules:
+        return []
+    out = []
+    for group in sorted(set(rules['gh']) - lookups):
+        subs = rules['gh'][group]
+        out += ['gh ' + group] if subs is None else ['gh %s %s' % (group, sub) for sub in sorted(subs)]
+    return out + ['git (read-only)']
+
+
+LANE_AGENT_RE = re.compile(r'^\s*--agent\s+adlc:([a-z-]+)\s*$')
+LANE_TOOLS_RE = re.compile(r'--allowedTools\s+"([^"]*)"')
+
+
+def _lane_grants(plugin_root, agent):
+    """What each GitHub Actions lane grants this agent: in templates/github/adlc-*.yml, the `--allowedTools` of the
+    step that runs `--agent adlc:<name>`. A lane may grant less than the guard allows the role (the review lane
+    gives the Architect no `gh pr review`). [] when the templates are not there."""
+    folder = os.path.join(plugin_root, 'templates', 'github')
+    try:
+        files = sorted(f for f in os.listdir(folder) if f.startswith('adlc-') and f.endswith('.yml'))
+    except OSError:
+        return []
+    out = []
+    for fname in files:
+        try:
+            with open(os.path.join(folder, fname), encoding='utf-8') as fh:
+                lines = fh.read().splitlines()
+        except OSError:
+            continue
+        current = None
+        for line in lines:
+            if line.lstrip().startswith('#'):
+                continue
+            m = LANE_AGENT_RE.match(line)
+            if m:
+                current = m.group(1)
+                continue
+            m = LANE_TOOLS_RE.search(line)
+            if m:
+                if current == agent:
+                    out.append({'lane': fname[len('adlc-'):-len('.yml')], 'tools': _split_tools(m.group(1))})
+                current = None
+    return out
+
+
 def _split_tools(value):
-    """'Read, Bash(gh pr view:*), Bash(git diff:*)' -> ['Read', 'gh pr view', 'git diff']."""
+    """'Read, Bash(gh pr view:*), Edit(docs/**)' -> ['Read', 'gh pr view', 'Edit(docs/**)']."""
     out, depth, cur = [], 0, ''
     for ch in value + ',':
         if ch == '(':
