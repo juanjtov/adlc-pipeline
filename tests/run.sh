@@ -142,7 +142,7 @@ printf '.adlc/scope/12/migrations/x.sql.txt\n' | bash "$S/adlc-triage.sh" >/dev/
 # would be judged. The script refuses the notation, and the workflow never produces it.
 printf '0\t0\tsrc/db/old.py => auth/new.py\n' | bash "$S/adlc-triage.sh" >/dev/null 2>&1; check 1 "rename notation is never fast-eligible" $?
 printf '0\t0\t{src/db => x/auth}/old.py\n'    | bash "$S/adlc-triage.sh" >/dev/null 2>&1; check 1 "…in its brace form either" $?
-grep -q -- 'git diff --numstat --no-renames' "$ROOT/templates/github/adlc-fast.yml" && ok "adlc-fast.yml takes the cap's diff with --no-renames" || bad "adlc-fast.yml: the cap's diff must use --no-renames"
+grep -q -- 'diff --numstat --no-renames' "$ROOT/templates/github/adlc-fast.yml" && ok "adlc-fast.yml takes the cap's diff with --no-renames" || bad "adlc-fast.yml: the cap's diff must use --no-renames"
 
 echo "verdict:"
 eq PASS    "last marker wins"        "$(printf 'ADLC-ADV: CHANGES\nblah\nADLC-ADV: PASS\n' | bash "$S/adlc-verdict.sh" ADLC-ADV)"
@@ -424,9 +424,9 @@ echo "fast-lane cap step (the workflow's own run: script, on a real git history)
 # a remote, and nothing is pushed.
 if command -v git >/dev/null 2>&1; then
   FL="$(mktemp -d)"; FLW="$ROOT/templates/github/adlc-fast.yml"
-  # The step keeps the script's verdict and reasons in /tmp/cap.{out,err}, where the bounce step
-  # reads them. Here those two files go to the scratch dir — the one edit made to the script —
-  # so a run writes nothing outside it and two runs at once cannot cross.
+  # The step keeps the script's verdict and reasons, and its own stop reason, in /tmp/cap.*,
+  # where the later steps read them. Here those files go to the scratch dir — the one edit made
+  # to the scripts — so a run writes nothing outside it and two runs at once cannot cross.
   step_run "$FLW" '- name: Fast-lane cap' | sed "s|/tmp/cap\.|$FL/cap.|g" > "$FL/cap.sh"
   step_run "$FLW" '- name: Say that the cap could not run' | sed "s|/tmp/cap\.|$FL/cap.|g" > "$FL/tell.sh"
   mkdir -p "$FL/bin"
@@ -460,6 +460,7 @@ SH
     flpr 4 main 'mkdir -p auth; echo "k = 1" > auth/login.py; lgit add -A; lgit commit -q -m "feat: first"; echo "y = 2" >> src/a.py'
     flpr 5 main ':'                                 # a PR that changes nothing
     flpr 6 "$odd" 'echo "y = 2" >> src/a.py'
+    flpr 8 main 'mkdir -p auth; echo "k = 1" > auth/café.py'
     # a new submodule under infra/, and a .gitmodules that tells git never to show it as changed
     flpr 7 main 'mkdir -p infra/modules/net; lgit update-index --add --cacheinfo "160000,$(lgit rev-parse HEAD),infra/modules/net"; printf "[submodule \"net\"]\n\tpath = infra/modules/net\n\turl = ./net\n\tignore = all\n" > .gitmodules'
     lgit -C "$FL/seed" checkout -q main             # …and main moves on after the PRs were cut
@@ -469,13 +470,15 @@ SH
   # flrun <PR number> <base ref> — the step, run as Actions does (bash -e), in a checkout as
   # actions/checkout leaves it on a pull_request event with fetch-depth: 0: every branch a
   # remote-tracking ref, every tag, and a detached HEAD on the PR's merge commit. There is no
-  # local branch at all.
+  # local branch at all. The cap's thresholds are the script's defaults: an ADLC_FAST_* variable
+  # in the developer's shell must not change a verdict here.
   flrun() {
-    rm -rf "$FL/run" "$FL/cap.out" "$FL/cap.err" "$FL/cap.fail"; : > "$FL/out"; : > "$FL/said"
+    rm -rf "$FL/run" "$FL/cap.out" "$FL/cap.err"; : > "$FL/out"; : > "$FL/said"
+    printf 'a reason left by an earlier job\n' > "$FL/cap.fail"   # must never be posted as this PR's
     { lgit init -q "$FL/run" \
         && lgit -C "$FL/run" fetch -q "$FL/seed" '+refs/heads/*:refs/remotes/origin/*' '+refs/tags/*:refs/tags/*' "+refs/pull/$1/merge:refs/remotes/pull/$1/merge" \
         && lgit -C "$FL/run" checkout -q --detach "refs/remotes/pull/$1/merge"; } >/dev/null 2>&1 || return 99
-    ( cd "$FL/run" && env BASE_REF="$2" GITHUB_OUTPUT="$FL/out" GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 bash -e "$FL/cap.sh" ) > "$FL/said" 2>/dev/null
+    ( cd "$FL/run" && env -u ADLC_FAST_MAX_FILES -u ADLC_FAST_MAX_LINES -u ADLC_FAST_DENY BASE_REF="$2" GITHUB_OUTPUT="$FL/out" GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 bash -e "$FL/cap.sh" ) > "$FL/said" 2>/dev/null
   }
   fltell() { # the step after a failed cap, run as Actions does (bash -e), against the stub gh
     : > "$FL/gh.log"
@@ -486,17 +489,21 @@ SH
   flsaid() { tr '\n' ' ' < "$FL/gh.log"; }              # what the step after a failed cap posted
   [ -s "$FL/cap.sh" ] && ok "run: script extracted from the template" || bad "could not extract the run: script"
   [ -s "$FL/tell.sh" ] && ok "…and the step that tells the PR about a failed cap" || bad "could not extract the step that tells the PR about a failed cap"
-  # that step must name a status function: with none, `success()` is implied and it never runs
-  eq 1 "that step runs when the cap step itself failed, and only then" \
+  # its if: must name a status function (with none, `success()` is implied and it never runs) and
+  # the cap step's own outcome (an earlier step's failure must not fire it)
+  eq 1 "…whose if: is a status function plus the cap step's own outcome" \
      "$(awk '/^      - / { s = ($0 ~ /- name: Say that the cap could not run/) } s' "$FLW" | grep -cE "^ +if: (failure|always)\(\) && steps\.cap\.outcome == 'failure'[[:space:]]*$" || true)"
-  eq 2 "the cap step keeps its reasons where the bounce step reads them (/tmp/cap.err)" "$(grep -c '/tmp/cap\.err' "$FLW" || true)"
   # the first case means little unless main really has moved past the PRs' merge base
   eq 6 "fixture: after the PRs were cut, main moved on by 6 files (more than the file cap)" \
      "$(lgit -C "$FL/seed" diff --name-only 'refs/pull/1/merge^1' refs/heads/main 2>/dev/null | grep -c . || true)"
   flrun 1 main; eq "eligible=true "  "a small change is eligible — measured from the merge base, not from main's tip" "$(flout)"
+  [ ! -e "$FL/cap.fail" ] && ok "…and a stop reason an earlier job left is cleared first (a self-hosted runner keeps /tmp)" || bad "a stop reason an earlier job left must be cleared: the comment step would post it"
   flrun 2 main; eq "eligible=false " "over the line cap → not eligible (the diff reaches the script with its line counts)" "$(flout)"
   case "$(flwhy)" in *"too many lines: 41 > 40"*) ok "…and the reason is kept for the bounce step" ;; *) bad "the reason is kept for the bounce step (got '$(flwhy)')" ;; esac
   flrun 3 main; eq "eligible=false " "a sensitive path → not eligible" "$(flout)"
+  # git quotes a path with a non-ASCII byte ("auth/caf\303\251.py") unless told not to, and the
+  # quotes would hide it from the denylist's anchors
+  flrun 8 main; eq "eligible=false " "a sensitive path with a non-ASCII name → not eligible (the diff is taken unquoted)" "$(flout)"
   # A submodule change is part of the diff even when the PR's own .gitmodules says `ignore = all`,
   # which makes a plain `git diff` leave it out. PR 7 adds one under infra/.
   flrun 7 main; eq "eligible=false " "a submodule change the PR tells git to ignore still reaches the cap" "$(flout)"
