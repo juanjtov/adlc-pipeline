@@ -229,10 +229,11 @@ Everything that makes a change safe is kept:
   approval — autopilot auto-approves Gate 1 into the *full* pipeline only.
 - **Author/verifier separation** — an independent adversarial + security review still runs.
 - **A deterministic cap** — `adlc-triage.sh` re-checks the *real* diff (≤ 5 files / ≤ 40 lines by
-  default, nothing touching migrations, auth, infra, CI, deps, or secrets, and no change to a
-  submodule's pointer, which is one line in a diff however much code it brings in). Over-cap or
-  sensitive ⇒ the change is **bounced back to the full pipeline** (`stage:design`). So a
-  mis-triage — or a crafted issue arguing it's "trivial" — can't smuggle a big change through.
+  default, nothing touching migrations, auth, infra, CI, deps (`.gitmodules` included) or secrets,
+  and no change to a submodule's pointer, which is one line in a diff however much code it
+  brings in). Over-cap or sensitive ⇒ the change is **bounced back to the full pipeline**
+  (`stage:design`). So a mis-triage — or a crafted issue arguing it's "trivial" — can't smuggle a
+  big change through.
   The same cap also runs from the default branch (in `adlc-diff-scope.yml`), so a PR that edits the
   cap is still judged by the copy on `main`.
 - **Gate 2 (human merge)** — never skipped, on any lane.
