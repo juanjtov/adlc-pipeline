@@ -66,7 +66,7 @@ lanes = [("intake", "adlc-intake.yml: runs the Analyst when a requirement is fil
          ("design", "adlc-design.yml: runs the Architect on stage:design (comes with auto-start, optional; otherwise you run the Architect by hand)"),
          ("build", "adlc-builder.yml: runs the Builder on stage:build"),
          ("review", "adlc-review.yml: adversarial + architect review on every Builder PR; advances to stage:qa on two PASS verdicts"),
-         ("fix", "adlc-fix.yml: sends a PR with changes requested back to the Builder; stops once the branch's history holds 3 adlc-fix: commits, and tags needs:human"),
+         ("fix", "adlc-fix.yml: sends a PR with changes requested back to the Builder; stops once the PR holds 3 adlc-fix: commits of its own, and tags needs:human"),
          ("qa", "adlc-qa.yml: runs QA & Release-Ops on stage:qa"),
          ("fast", "adlc-fast.yml: fast lane: Builder, size cap on the real diff, adversarial + security review"),
          ("ci", "adlc-ci.yml: the project's tests, type-check and build on every PR"),
@@ -242,7 +242,7 @@ text(266, SY + 20, "SAFETY NETS · PLAIN SCRIPTS, UNIT-TESTED, SAME IN CI AND ON
 nets = [("lock", "Guard hook", "no merge, no push", "hooks/adlc_guard.py, a PreToolUse hook on every Bash command: blocks gh pr merge, pushes to main, force-pushes and GitHub API writes, for every agent in every permission mode, in sessions with the plugin enabled. It reads command text, so it is a guardrail; the deny rules in templates/settings.deny.json stay as a second layer."),
         ("folder", "Scope check", "allowed files only", "adlc-diff-scope.sh: holds a lane PR to the files its own scope file, .adlc/scope/<issue>.txt, declares (test folders count too once QA adds tests), and fails a lane PR that declares no scope. The Builder writes that file; the Architect's review checks it against the design. In CI (automated lanes only) it runs from the default branch's copy, so a PR cannot edit the check that judges it."),
         ("json", "Verdict reader", "reads PASS/CHANGES", "adlc-verdict.sh: parses the reviewers' ADLC-ADV / ADLC-ARCH lines; control never trusts GitHub review state."),
-        ("sync", "Fix cap", "then a person", "adlc-fix-cap.sh: counts the adlc-fix: commits in the branch's history; at 3 the PR is tagged needs:human."),
+        ("sync", "Fix cap", "then a person", "adlc-fix-cap.sh: counts this PR's own adlc-fix: commits (the ones its branch has and its base lacks); at 3 the PR is tagged needs:human."),
         ("terminal", "Pre-commit", "same check, locally", "templates/hooks/pre-commit: runs the scope check before each local commit."),
         ("gear", "Doctor", "checks the setup", "adlc-doctor.sh: fails a setup with missing deny rules, unfilled placeholders, lanes that cannot run their agent, missing guard scripts, skills or labels, and reports whether the default branch has a merge gate.")]
 for i, (g, t, s, tip) in enumerate(nets):
