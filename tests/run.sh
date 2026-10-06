@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Unit tests for the ADLC guardrail scripts. Plain bash, no dependencies.
+# Unit tests for the ADLC guardrail scripts. Plain bash; the guard hook also needs python3 + git.
 # Run: bash tests/run.sh   (exit 0 = all pass). These verify the deterministic guardrails
-# themselves — the same scripts CI and the local pre-commit hook call. The static checks at the
-# end cover what can't be run here for real: the workflow templates (their triggers, the intake
-# and diff-scope steps against a stub gh, and the fix loop's cap step on a real git history),
-# the pre-commit hook, and labels.sh.
+# themselves — the same scripts CI and the local pre-commit hook call — plus the plugin's guard
+# hook. The static checks cover what can't be run here for real: the workflow templates (their
+# triggers, their agent wiring, the intake, diff-scope and design-handoff steps against a stub
+# gh, and the fix loop's cap step on a real git history), the pre-commit hook, and labels.sh.
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 S="$ROOT/templates/scripts"
@@ -178,6 +178,104 @@ echo x > "$FIX/.claude/skills/project-conventions/SKILL.md"   # restore
 # false-positive regression: doc examples + bare date + prose CI-var name must NOT flag
 printf '# proj\ncreated_at looks like 2024-01-01T00:00:00Z; CI sets GITHUB_SHA.\n<!-- Last ablation: 2026-09-15 -->\n' > "$FIX/CLAUDE.md"
 ADLC_DOCTOR_SKIP_LABELS=1 bash "$S/adlc-doctor.sh" "$FIX" >/dev/null 2>&1; check 0 "allows doc timestamp / prose CI var / bare date" $?
+# a lane that calls the action with no plugin and no tools starts, and its agent can do nothing
+doctor() { ADLC_DOCTOR_SKIP_LABELS=1 bash "$S/adlc-doctor.sh" "$FIX" >/dev/null 2>&1; }
+lane()   { printf "$@" > "$FIX/.github/workflows/adlc-x.yml"; }
+J='jobs:\n  a:\n    steps:\n'
+USES='      - uses: anthropics/claude-code-action@v1\n        with:\n'
+MKT='          plugin_marketplaces: "https://github.com/o/adlc-pipeline.git"\n'
+PLUG='          plugins: "adlc@adlc-pipeline"\n'
+ARGS='          claude_args: |\n            --agent adlc:builder\n            --allowedTools "Read"\n'
+WIRED="${USES}${MKT}${PLUG}${ARGS}"'          prompt: |\n            - a bullet in the prompt is not a new step\n'
+BARE='      - name: old\n        uses: "anthropics/claude-code-action@v1"\n        with:\n          prompt: go\n'
+lane "${J}${USES}"'          prompt: go\n';                    doctor; check 1 "flags a lane with no plugin / no tools" $?
+lane "${J}${WIRED}";                                         doctor; check 0 "passes a lane that installs the plugin + grants tools" $?
+lane "${J}${USES}${PLUG}${ARGS}";                            doctor; check 1 "flags a step with no plugin_marketplaces" $?
+lane "${J}${USES}${MKT}"'          plugins: "other@somewhere"\n'"${ARGS}"; doctor; check 1 "flags a step that installs some other plugin" $?
+lane "${J}${USES}${MKT}"'          plugins: |\n            other@somewhere\n            adlc@my-fork\n'"${ARGS}"; doctor; check 0 "plugins as a block list, adlc among them" $?
+lane "${J}${USES}${MKT}${PLUG}"'          claude_args: --agent adlc:builder --allowedTools "Read"\n'; doctor; check 0 "flags written on the claude_args line itself" $?
+lane "${J}${USES}${MKT}${PLUG}"'          claude_args: |\n            --agent adlc:builder --permission-mode dontAsk --allowedTools "Read"\n'; doctor; check 0 "flags sharing one line of the block" $?
+lane "${J}${USES}"'          # plugin_marketplaces: "https://x.git"\n          # plugins: "adlc@adlc-pipeline"\n          # claude_args: --allowedTools "Read"\n          prompt: go\n'
+doctor; check 1 "commented-out wiring does not count" $?
+lane "${J}"'      # - uses: anthropics/claude-code-action@v1\n      - run: echo hi\n'
+eq 0 "a commented-out agent step is not an agent step" "$(ADLC_DOCTOR_SKIP_LABELS=1 bash "$S/adlc-doctor.sh" "$FIX" 2>&1 | grep -c 'agent step')"
+lane "${J}"'      - uses: actions/checkout@v4\n'"${WIRED}${BARE}"; doctor; check 1 "one wired step does not vouch for an unwired one (quoted uses: too)" $?
+lane "${J}"'      - uses: actions/checkout@v4\n'"${WIRED}"'  b:\n    steps:\n'"${WIRED}"; doctor; check 0 "passes two wired steps across two jobs" $?
+eq 1 "says how many agent steps it checked" "$(ADLC_DOCTOR_SKIP_LABELS=1 bash "$S/adlc-doctor.sh" "$FIX" 2>&1 | grep -c 'all 2 agent steps')"
+lane 'jobs:\n  a:\n    steps:  # the lane\n      - uses: actions/checkout@v4\n'"${WIRED}${BARE}"; doctor; check 1 "a comment after steps: does not hide an unwired step" $?
+printf "${J}"'      - uses: actions/checkout@v4\n'"${WIRED}${BARE}" | awk '{ printf "%s\r\n", $0 }' > "$FIX/.github/workflows/adlc-x.yml"
+doctor; check 1 "CRLF line endings do not hide an unwired step" $?
+lane "${J}${USES}${MKT}${PLUG}"'          prompt: |\n            Remember to pass --allowedTools "Read" some day.\n'; doctor; check 1 "a prompt that only mentions --allowedTools is not a grant" $?
+# the prompt comes BEFORE the wiring here: if its `steps:` line opened a new list, the wiring
+# below it would belong to no agent step and the lane would be flagged
+lane "${J}${USES}"'          prompt: |\n            Follow these\n            steps:\n            - one\n'"${MKT}${PLUG}${ARGS}"; doctor; check 0 "a prompt line reading steps: does not split a wired step" $?
+lane "${J}${WIRED}"'      -\n        uses: anthropics/claude-code-action@v1\n        with:\n          prompt: go\n'; doctor; check 1 "a step whose dash sits on its own line is still its own step" $?
+# steps listed at the indent of their `steps:` key (valid YAML): job a wired, job b not
+flush_left() { printf "$1" | sed 's/^  //'; }
+{ printf 'jobs:\n  a:\n    steps:\n'; flush_left "${WIRED}"; printf '  b:\n    steps:\n'; flush_left "${BARE}"; } > "$FIX/.github/workflows/adlc-x.yml"
+doctor; check 1 "steps at the indent of their steps: key — an unwired second job is caught" $?
+{ printf 'jobs:\n  a:\n    steps:\n'; flush_left "${WIRED}"; printf '  b:\n    steps:\n'"${BARE}"; } > "$FIX/.github/workflows/adlc-x.yml"
+doctor; check 1 "…also when the second job indents its steps" $?
+eq 2 "fixture really has two jobs with one agent step each" "$(grep -c 'claude-code-action' "$FIX/.github/workflows/adlc-x.yml")"
+lane 'jobs:\n  t:\n    steps:\n      - run: echo hi\n'
+eq 0 "claims nothing when no workflow runs an agent" "$(ADLC_DOCTOR_SKIP_LABELS=1 bash "$S/adlc-doctor.sh" "$FIX" 2>&1 | grep -c 'agent steps')"
+# a lane that calls a guard script the host never installed
+lane 'jobs:\n  t:\n    steps:\n      - run: |\n          chmod +x .adlc/scripts/adlc-verdict.sh\n          .adlc/scripts/adlc-verdict.sh < c.txt\n'
+doctor; check 1 "flags a lane whose script is not installed" $?
+mkdir -p "$FIX/.adlc/scripts"; : > "$FIX/.adlc/scripts/adlc-verdict.sh"
+doctor; check 0 "…and passes once it is" $?
+lane 'jobs:\n  t:\n    steps:\n      # .adlc/scripts/adlc-gone.sh used to run here\n      - run: echo hi\n'
+doctor; check 0 "a script named only in a comment is not required" $?
+# the merge gate — asked of a stub gh that answers each lookup from a file (no file = that call fails)
+mkdir -p "$FIX/bin"
+cat > "$FIX/bin/gh" <<'SH'
+#!/usr/bin/env bash
+echo "$*" >> "$DFX/calls"
+case "$*" in
+  "auth status"*) exit 0 ;;
+  "label list"*)  printf '%s\n' stage:intake gate:stories stage:design stage:build stage:qa gate:deploy; exit 0 ;;
+  "repo view"*)                 k=default ;;
+  "api "*"/protection"*)        k=classic ;;
+  "api "*"/rules/branches/"*)   k=ruleset ;;
+  "api "*"/branches/"*)         k=protected ;;
+  *) exit 2 ;;
+esac
+[ -e "$DFX/$k" ] || { echo '{"message":"Not Found"}'; exit 1; }
+cat "$DFX/$k"
+SH
+chmod +x "$FIX/bin/gh"
+gate() { # <protected flag | -> <approvals in classic protection | -> <approvals in a ruleset, or none | -> [tripwire]
+  rm -rf "$FIX/fx"; mkdir -p "$FIX/fx"; echo main > "$FIX/fx/default"
+  [ "$1" = - ] || echo "$1" > "$FIX/fx/protected"
+  [ "$2" = - ] || echo "$2" > "$FIX/fx/classic"
+  [ "$3" = - ] || echo "$3" > "$FIX/fx/ruleset"
+  rm -f "$FIX/.github/workflows/adlc-main-tripwire.yml"
+  if [ "${4:-}" = tripwire ]; then echo 'name: tripwire' > "$FIX/.github/workflows/adlc-main-tripwire.yml"; fi
+  GATE=$(DFX="$FIX/fx" PATH="$FIX/bin:$PATH" bash "$S/adlc-doctor.sh" "$FIX" 2>&1)
+}
+says_gate() { case "$GATE" in *"$1"*) echo yes ;; *) echo no ;; esac; }
+lane "${J}${WIRED}"   # a lane runs an agent here: the gate matters
+gate true 1 none;            check 0 "gate: protected + 1 required approval passes" $?
+eq yes "…and says so" "$(says_gate "needs 1 approving review")"
+gate true 0 none;            check 1 "gate: protected but no approval required is flagged (a lane's token could merge its own PR)" $?
+eq yes "…with the reason" "$(says_gate "needs no approving review")"
+gate true - none;            check 0 "gate: protected, approvals unreadable (not an admin) passes with a reminder" $?
+eq yes "…the reminder" "$(says_gate "could not read whether a pull request needs")"
+gate false - 2;              check 0 "gate: a ruleset that requires approvals counts as protection" $?
+eq yes "…with its count" "$(says_gate "needs 2 approving review")"
+gate false - none tripwire;  check 0 "gate: not protected, tripwire installed passes" $?
+eq yes "…and says what the tripwire cannot do" "$(says_gate "cannot stop a merge")"
+gate false - none;           check 1 "gate: not protected and no tripwire is flagged" $?
+eq yes "…as no merge gate" "$(says_gate "no merge gate")"
+gate - - -;                  check 1 "gate: a failed lookup is flagged, not passed" $?
+gate true 1 none; rm "$FIX/fx/default"
+DFX="$FIX/fx" PATH="$FIX/bin:$PATH" bash "$S/adlc-doctor.sh" "$FIX" >/dev/null 2>&1; check 1 "gate: an unreadable default branch is flagged" $?
+lane 'jobs:\n  t:\n    steps:\n      - run: echo hi\n'   # no lane runs an agent: nothing to gate
+gate false - none;           check 0 "gate: not checked when no lane runs an agent" $?
+eq 0 "…no lookup is made" "$(grep -c '^api ' "$FIX/fx/calls" 2>/dev/null || true)"
+lane "${J}${WIRED}"; rm -rf "$FIX/fx"; mkdir -p "$FIX/fx"
+DFX="$FIX/fx" PATH="$FIX/bin:$PATH" ADLC_DOCTOR_SKIP_LABELS=1 bash "$S/adlc-doctor.sh" "$FIX" >/dev/null 2>&1
+eq "" "ADLC_DOCTOR_SKIP_LABELS=1 keeps the doctor off gh entirely" "$(cat "$FIX/fx/calls" 2>/dev/null)"
 rm -rf "$FIX"
 
 echo "cache (hit-rate rollup):"
@@ -503,6 +601,273 @@ chmod +x "$LB/gh"; : > "$LB/created"
 LB_OUT="$LB/created" PATH="$LB:$PATH" bash "$ROOT/templates/github/labels.sh" >/dev/null 2>&1; check 0 "labels.sh runs to the end (no description over GitHub's 100-char limit)" $?
 eq "$(grep -c '^create "' "$ROOT/templates/github/labels.sh")" "…and creates every label it lists" "$(grep -c . "$LB/created")"
 rm -rf "$LB"
+
+echo "design → build handoff steps (the workflows' own run: scripts, real git + a stub gh):"
+# The Architect cannot commit. adlc-design.yml's last step commits its docs/ to adlc/design-<n>
+# (plus the scope file that keeps the ADR in scope on the Builder's PR) and only then advances
+# the issue; adlc-builder.yml's first step starts the Builder from that branch. Run both as
+# shipped: a bare origin, fresh clones as the runner's checkout, and a git that refuses to
+# guess an identity (so a commit that names none fails here as it would on a bare runner).
+if command -v git >/dev/null 2>&1; then
+  HO="$(mktemp -d)"; mkdir -p "$HO/bin"
+  step_run "$ROOT/templates/github/adlc-design.yml"  '- name: Hand the design to the Builder' > "$HO/handoff.sh"
+  step_run "$ROOT/templates/github/adlc-builder.yml" '- name: Start from the design branch'   > "$HO/start.sh"
+  cat > "$HO/bin/gh" <<'SH'
+#!/usr/bin/env bash
+# stub gh: the issue's comments come from $HO_COMMENTS; the write calls the handoff makes are logged
+case "$1 $2" in
+  "issue view") [ -z "${HO_FAIL_VIEW:-}" ] || { echo "gh: Bad Gateway (HTTP 502)" >&2; exit 1; }
+                case "$*" in *"--json comments"*) cat "$HO_COMMENTS" ;; *) exit 2 ;; esac ;;
+  "issue comment"|"issue edit") shift; echo "$*" >> "$HO_CALLS" ;;
+  *) exit 2 ;;
+esac
+SH
+  chmod +x "$HO/bin/gh"
+  hgit() { env GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 git "$@"; }
+  hgit init -q --bare "$HO/origin.git"; hgit -C "$HO/origin.git" symbolic-ref HEAD refs/heads/main
+  hgit init -q "$HO/seed"; hgit -C "$HO/seed" symbolic-ref HEAD refs/heads/main
+  mkdir -p "$HO/seed/.adlc/scripts" "$HO/seed/docs/adr" "$HO/seed/src/api"
+  cp "$S/adlc-diff-scope.sh" "$HO/seed/.adlc/scripts/"
+  echo template > "$HO/seed/docs/adr/template.md"; echo first > "$HO/seed/docs/adr/0001-adopt.md"
+  echo guide > "$HO/seed/docs/guide.md"; echo x > "$HO/seed/src/api/a.py"
+  ( cd "$HO/seed" && hgit add -A && hgit -c user.name=t -c user.email=t@example.com commit -qm init \
+    && hgit remote add origin "$HO/origin.git" && hgit push -q origin main ) >/dev/null 2>&1
+  runner() { rm -rf "$HO/run"; hgit clone -q "$HO/origin.git" "$HO/run" >/dev/null 2>&1; }   # a fresh checkout, as each job gets
+  hstep() { # <script> <issue> [ENV=val …] — runs it as Actions does (bash -e) in the runner checkout
+    local script="$1" n="$2"; shift 2
+    : > "$HO/calls"
+    ( cd "$HO/run" && env PATH="$HO/bin:$PATH" HO_CALLS="$HO/calls" HO_COMMENTS="$HO/comments" N="$n" \
+        GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 \
+        GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=user.useConfigOnly GIT_CONFIG_VALUE_0=true \
+        "$@" bash -e "$HO/$script" ) >/dev/null 2>&1
+  }
+  says()   { printf '%b' "$1" > "$HO/comments"; }                     # the issue's comments
+  hcalls() { cut -d' ' -f1-6 "$HO/calls" | tr '\n' '|'; }
+  lacks()  { grep -c -- "finished without $1" "$HO/calls" 2>/dev/null || true; }   # what the step said was missing
+  otree()  { hgit -C "$HO/origin.git" -c core.quotePath=false ls-tree -r --name-only "$1" 2>/dev/null | tr '\n' '|'; }
+  oref()   { hgit -C "$HO/origin.git" rev-parse -q --verify "refs/heads/$1" 2>/dev/null; }
+  oscope() { hgit -C "$HO/origin.git" show "adlc/design-$1:.adlc/scope/$1.txt" 2>/dev/null | tr '\n' '|'; }
+  [ -s "$HO/handoff.sh" ] && [ -s "$HO/start.sh" ] && ok "both run: scripts extracted from the templates" || bad "could not extract the handoff run: scripts"
+  main0=$(oref main)
+
+  # ── no ADR ⇒ no advance ──
+  runner; echo stray > "$HO/run/src/api/b.py"; says 'ADLC-BREAKDOWN: docs/adr/0002-login.md\n'
+  hstep handoff.sh 7; check 1 "no ADR: the step fails" $?
+  eq "comment 7 --body ⚠️ The design|" "…says so on the issue and leaves the labels alone" "$(hcalls)"
+  eq "" "…and pushes no design branch" "$(oref adlc/design-7)"
+  # (each has a breakdown line naming it, so only the ADR rule can be what stops the step)
+  runner; echo changed > "$HO/run/docs/adr/template.md"; echo more > "$HO/run/docs/guide.md"; says 'ADLC-BREAKDOWN: docs/adr/template.md\n'
+  hstep handoff.sh 7; check 1 "the template (and other docs) are not an ADR" $?
+  eq 1 "…and that is what the step reports" "$(lacks 'an ADR')"
+  runner; rm "$HO/run/docs/adr/0001-adopt.md"; says 'ADLC-BREAKDOWN: docs/adr/0001-adopt.md\n'
+  hstep handoff.sh 7; check 1 "a deleted ADR is not a design" $?
+  eq 1 "…and that is what the step reports" "$(lacks 'an ADR')"
+
+  # ── no task breakdown ⇒ no advance ──
+  runner; echo adr > "$HO/run/docs/adr/0002-login.md"; says 'Stories look fine.\n'
+  hstep handoff.sh 7; check 1 "ADR but no task-breakdown comment: the step fails" $?
+  eq 1 "…for the missing breakdown" "$(lacks 'a task-breakdown comment')"
+  eq "comment 7 --body ⚠️ The design|" "…says so, and neither pushes nor relabels" "$(hcalls)$(oref adlc/design-7)"
+  runner; echo adr > "$HO/run/docs/adr/0002-login.md"; says '## Tasks\nADLC-BREAKDOWN: docs/adr/0001-adopt.md\n'
+  hstep handoff.sh 7; check 1 "a breakdown that names another ADR (an earlier round) does not count" $?
+  runner; echo adr > "$HO/run/docs/adr/0002-login.md"
+  hstep handoff.sh 7 HO_FAIL_VIEW=1; check 1 "a failed read of the comments fails the step" $?
+  eq "" "…without claiming the breakdown is missing" "$(hcalls)"
+
+  # ── ADR + breakdown ⇒ hand off ──
+  runner; echo adr > "$HO/run/docs/adr/0002-login.md"; echo more > "$HO/run/docs/guide.md"; echo stray > "$HO/run/src/api/b.py"
+  says 'Q: which roles?\n## Task breakdown\n- T1 …\n\nADLC-BREAKDOWN: `docs/adr/0002-login.md`\r\n'
+  hstep handoff.sh 7; check 0 "ADR + breakdown: the handoff succeeds (the commit names its own identity)" $?
+  eq ".adlc/scope/7.txt|.adlc/scripts/adlc-diff-scope.sh|docs/adr/0001-adopt.md|docs/adr/0002-login.md|docs/adr/template.md|docs/guide.md|src/api/a.py|" \
+     "the design branch holds the docs and the scope file, not the stray file" "$(otree adlc/design-7)"
+  eq "docs/adr/0002-login.md|docs/guide.md|" "the scope file lists exactly the design files it committed" "$(oscope 7)"
+  eq "adlc-design <adlc-design@users.noreply.github.com>" "the commit is the design lane's" "$(hgit -C "$HO/origin.git" log -1 --format='%an <%ae>' adlc/design-7 2>/dev/null)"
+  eq "comment 7 --body 📐 Design handed|edit 7 --remove-label stage:design --add-label stage:build|" "the issue advances, after the push" "$(hcalls)"
+  eq "$main0" "main is untouched" "$(oref main)"
+
+  # ── the Builder starts from it ──
+  runner; hstep start.sh 7; check 0 "builder: the start step runs" $?
+  eq "adlc/design-7" "builder: starts on the design branch" "$(hgit -C "$HO/run" symbolic-ref --short HEAD 2>/dev/null)"
+  [ -f "$HO/run/docs/adr/0002-login.md" ] && ok "builder: the ADR is in its checkout" || bad "builder: the ADR is in its checkout"
+  # the Builder's PR, as the diff-scope check sees it: the ADR + the scope file + its own change
+  bcommit() { ( cd "$HO/run" && hgit add -A && hgit -c user.name=t -c user.email=t@example.com commit -qm "$1" ) >/dev/null 2>&1; }
+  # (-z: raw names, as the pull-request files API gives them to the real check)
+  bscope()  { ( cd "$HO/run" && hgit diff --name-only --no-renames -z origin/main...HEAD | tr '\0' '\n' | bash .adlc/scripts/adlc-diff-scope.sh build ".adlc/scope/$1.txt" ) >/dev/null 2>&1; }
+  ( cd "$HO/run" && hgit checkout -q -b feat/7-login && echo y > src/api/b.py && echo src/api/ >> .adlc/scope/7.txt ) >/dev/null 2>&1; bcommit build
+  bscope 7; check 0 "builder PR: the ADR it carries is in the declared scope" $?
+  echo src/api/ > "$HO/run/.adlc/scope/7.txt"; bcommit overwrite
+  bscope 7; check 1 "builder PR: a scope file that drops the design lines fails the check (loud, not silent)" $?
+  runner; hstep start.sh 8; check 0 "builder: no design branch for the issue → the step still passes" $?
+  eq "main" "builder: …and builds on the default branch" "$(hgit -C "$HO/run" symbolic-ref --short HEAD 2>/dev/null)"
+  runner; hgit -C "$HO/run" remote set-url origin "$HO/nowhere.git"
+  hstep start.sh 7; check 1 "builder: an unreachable origin fails the step (it is not 'no design branch')" $?
+
+  # ── odd names, a moved doc ──
+  runner; odd='docs/adr/0003-café "new" login.md'; echo adr > "$HO/run/$odd"
+  ( cd "$HO/run" && mv docs/guide.md docs/handbook.md )
+  says 'ADLC-BREAKDOWN: docs/adr/0003-café "new" login.md\n'
+  hstep handoff.sh 9; check 0 "an ADR name with a space, a quote and a non-ASCII letter hands off" $?
+  eq "$odd|docs/guide.md|docs/handbook.md|" "its scope file holds the raw names, and a moved doc under both paths" "$(oscope 9)"
+  runner; hstep start.sh 9
+  ( cd "$HO/run" && hgit checkout -q -b feat/9-x && echo y > src/api/c.py && echo src/api/ >> .adlc/scope/9.txt ) >/dev/null 2>&1; bcommit build
+  bscope 9; check 0 "…and the Builder's PR passes the scope check with them" $?
+
+  # ── re-runs and failures ──
+  runner; echo adr2 > "$HO/run/docs/adr/0004-roles.md"; says 'ADLC-BREAKDOWN: docs/adr/0004-roles.md\n'
+  hstep handoff.sh 7; check 0 "a re-run of the design lane hands off again" $?
+  case "$(otree adlc/design-7)" in *0002-login*) bad "a re-run replaces the design branch" ;; *0004-roles*) ok "a re-run replaces the design branch" ;; *) bad "a re-run replaces the design branch (branch missing)" ;; esac
+  runner; echo adr > "$HO/run/docs/adr/0005-x.md"; says 'ADLC-BREAKDOWN: docs/adr/0005-x.md\n'
+  hgit -C "$HO/run" remote set-url origin "$HO/nowhere.git"
+  hstep handoff.sh 11; rc=$?
+  [ "$rc" -ne 0 ] && ok "a failed push fails the step" || bad "a failed push fails the step"
+  eq "" "…before any comment or label change" "$(hcalls)"
+  rm -rf "$HO"
+else
+  bad "handoff step tests need git"
+fi
+
+echo "lanes (each template runs its agent with the plugin + tools):"
+T="$ROOT/templates/github"
+for f in "$T"/adlc-*.yml; do
+  body=$(grep -vE '^[[:space:]]*#' "$f")
+  n=$(printf '%s\n' "$body" | grep -cE 'uses:[[:space:]]*anthropics/claude-code-action' || true)
+  [ "$n" -gt 0 ] || continue
+  b=$(basename "$f")
+  count() { printf '%s\n' "$body" | grep -cE -- "$1" || true; }
+  eq "$n" "$b: installs the plugin"        "$(count '^[[:space:]]*plugins:[[:space:]]*"adlc@')"
+  eq "$n" "$b: names the marketplace"      "$(count '^[[:space:]]*plugin_marketplaces:[[:space:]]*"https://.*\.git"')"
+  eq "$n" "$b: grants tools"               "$(count '--allowedTools "')"
+  eq "$n" "$b: denies everything else"     "$(count '--permission-mode dontAsk')"
+  eq "$n" "$b: lists the dispatch bot"     "$(count '^[[:space:]]*allowed_bots:')"
+  eq "$n" "$b: runs a named agent or skill" "$(count '--agent adlc:[a-z-]+$|prompt: "/adlc:[a-z-]+"')"
+done
+# WHAT each lane may do is the security boundary of the unattended pipeline, so it is pinned
+# here: widening a grant, or running a lane as another agent, has to change this table too.
+grants() { # <template> → "<agent>=<tools>;" per agent step, in file order ("-" = no --agent)
+  awk '
+    /^[ \t]*#/ { next }
+    /uses:[ \t]*anthropics\/claude-code-action/ { if (seen) printf "%s=%s;", agent, tools; seen = 1; agent = "-"; tools = "" }
+    seen && /^[ \t]*--agent / { agent = $2 }
+    seen && /^[ \t]*--allowedTools / { t = $0; sub(/^[^"]*"/, "", t); sub(/".*$/, "", t); tools = t }
+    END { if (seen) printf "%s=%s;", agent, tools }' "$T/$1"
+}
+FULL='Read,Edit,Write,Skill,Bash'
+GITRO='Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*)'
+REVIEW="Skill,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*),Bash(gh pr list:*),Bash(gh pr checks:*),Bash(gh issue view:*),$GITRO"
+eq "adlc:product-analyst=Skill,Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh issue edit:*),Bash(gh issue list:*),Bash(gh label list:*),Bash(gh search:*),Bash(.adlc/scripts/adlc-triage.sh:*);" \
+   "intake: the Analyst, named gh commands, no edit tools" "$(grants adlc-intake.yml)"
+eq "adlc:architect=Edit(docs/**),Skill,Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh issue list:*),Bash(gh pr view:*),Bash(gh pr list:*),Bash(gh pr diff:*),$GITRO;" \
+   "design: the Architect, edits under docs/ only, no commit/push/label" "$(grants adlc-design.yml)"
+eq "adlc:adversarial-reviewer=$REVIEW;adlc:architect=$REVIEW;" "review: both reviewers read and comment only" "$(grants adlc-review.yml)"
+eq "adlc:builder=$FULL;adlc:adversarial-reviewer=$REVIEW;"      "fast: the Builder builds, the reviewer reads and comments" "$(grants adlc-fast.yml)"
+eq "adlc:builder=$FULL;"         "builder: the Builder"  "$(grants adlc-builder.yml)"
+eq "adlc:builder=$FULL;"         "fix: the Builder"      "$(grants adlc-fix.yml)"
+eq "adlc:qa-release-ops=$FULL;"  "qa: QA"                "$(grants adlc-qa.yml)"
+eq "-=$FULL;"                    "retro: the /adlc:retro skill, no agent" "$(grants adlc-retro.yml)"
+for f in "$T"/adlc-*.yml; do   # no template this table does not know about
+  case "$(basename "$f")" in adlc-intake.yml|adlc-design.yml|adlc-review.yml|adlc-fast.yml|adlc-builder.yml|adlc-fix.yml|adlc-qa.yml|adlc-retro.yml) ;;
+    *) eq "" "$(basename "$f"): runs no agent (or add it to the grants table)" "$(grants "$(basename "$f")")" ;; esac
+done
+for a in $(grep -hoE -- '--agent adlc:[a-z-]+' "$T"/adlc-*.yml | sed 's/.*adlc://' | sort -u); do
+  [ -f "$ROOT/agents/$a.md" ] && ok "lane agent exists: $a" || bad "lane names a missing agent: $a"
+done
+# `tools:` takes tool NAMES. A command specifier there is ignored and grants the whole tool.
+for f in "$ROOT"/agents/*.md; do
+  case "$(grep -m1 '^tools:' "$f")" in
+    *"("*) bad "$(basename "$f"): tools: has a command specifier" ;;
+    *Skill*) ok "$(basename "$f"): tools: are plain names, Skill included" ;;
+    *) bad "$(basename "$f"): tools: lacks Skill (the agent could not load its skills)" ;;
+  esac
+done
+
+echo "guard hook (merge / push-to-main / force-push / role limits):"
+if command -v python3 >/dev/null 2>&1 && command -v git >/dev/null 2>&1; then
+  H="$ROOT/hooks/adlc-guard.sh"
+  # hooks.json is shared with Mission Control's reporter: find the guard by what it is (the
+  # Bash matcher + its command), not by its position, and check neither feature lost its wiring.
+  guard_cmd() { python3 -c 'import json,sys
+found = [h["command"] for e in json.load(open(sys.argv[1]))["hooks"]["PreToolUse"] if e.get("matcher") == "Bash"
+         for h in e["hooks"] if "hooks/adlc-guard.sh" in h["command"]]
+assert len(found) == 1, found
+print(found[0])' "$ROOT/hooks/hooks.json" 2>/dev/null; }
+  [ -n "$(guard_cmd)" ] && ok "hooks.json wires the guard to Bash, once" || bad "hooks.json wires the guard to Bash, once"
+  python3 -c 'import json,sys
+hooks = json.load(open(sys.argv[1]))["hooks"]
+events = ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "PostToolUseFailure", "SubagentStart", "SubagentStop", "Stop", "SessionEnd"]
+for ev in events:
+    assert any("mission-control/hook.sh" in h["command"] and "matcher" not in e for e in hooks[ev] for h in e["hooks"]), ev' "$ROOT/hooks/hooks.json" 2>/dev/null \
+    && ok "…and Mission Control's reporter is still on all nine events" || bad "hooks.json lost Mission Control's reporter on some event"
+  GR="$(mktemp -d)"; GIT="git -c user.email=t@t -c user.name=t -c commit.gpgsign=false"
+  git init -q --bare -b main "$GR/origin.git"
+  git init -q -b main "$GR/feat" && ( cd "$GR/feat" && echo x > f && mkdir src && echo y > src/a && git add -A && $GIT commit -qm init \
+    && git remote add origin "$GR/origin.git" && git push -q -u origin main && git checkout -q -b feat/1-x ) >/dev/null 2>&1
+  git clone -q "$GR/origin.git" "$GR/onmain" >/dev/null 2>&1
+  git clone -q "$GR/origin.git" "$GR/track" >/dev/null 2>&1 && ( cd "$GR/track" && git checkout -q -b topic origin/main ) >/dev/null 2>&1
+  git init -q --bare -b trunk "$GR/origin2.git"
+  git init -q -b trunk "$GR/t0" && ( cd "$GR/t0" && echo x > f && git add f && $GIT commit -qm init \
+    && git remote add origin "$GR/origin2.git" && git push -q -u origin trunk ) >/dev/null 2>&1
+  git clone -q "$GR/origin2.git" "$GR/trunk" >/dev/null 2>&1 && ( cd "$GR/trunk" && git checkout -q -b feat/x ) >/dev/null 2>&1
+  git clone -q "$GR/origin.git" "$GR/matching" >/dev/null 2>&1 && ( cd "$GR/matching" && git checkout -q -b feat/2-y && git config push.default matching ) >/dev/null 2>&1
+  hook_json() { # hook_json <role|-> <cwd> <command>  → the PreToolUse input the harness sends
+    python3 -c 'import json,sys
+d={"hook_event_name":"PreToolUse","tool_name":"Bash","cwd":sys.argv[2],"tool_input":{"command":sys.argv[3]}}
+if sys.argv[1]!="-": d["agent_type"]=sys.argv[1]
+print(json.dumps(d))' "$@"
+  }
+  g() { # g <A|D> <role|-> <repo> <command>
+    local got rc
+    hook_json "$2" "$GR/$3" "$4" | GITHUB_ACTIONS=true bash "$H" >/dev/null 2>&1; rc=$?
+    case $rc in 0) got=A ;; 2) got=D ;; *) got="exit-$rc" ;; esac
+    [ "$got" = "$1" ] && pass=$((pass+1)) || bad "guard [$2] want $1 got $got: $(printf '%s' "$4" | head -1)"
+  }
+  # the cases mean nothing unless each fixture really is where its name says
+  eq feat/1-x     "fixture feat is on its feature branch"  "$(git -C "$GR/feat" symbolic-ref --short HEAD 2>/dev/null)"
+  eq main         "fixture onmain is on main"              "$(git -C "$GR/onmain" symbolic-ref --short HEAD 2>/dev/null)"
+  eq origin/main  "fixture track follows origin/main"      "$(git -C "$GR/track" rev-parse --abbrev-ref '@{upstream}' 2>/dev/null)"
+  eq origin/trunk "fixture trunk's default branch is trunk" "$(git -C "$GR/trunk" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null)"
+  eq matching     "fixture matching pushes every matching branch" "$(git -C "$GR/matching" config push.default 2>/dev/null)"
+  before=$pass; before_fail=$fail
+  . "$ROOT/tests/guard-cases.sh"
+  [ "$fail" -eq "$before_fail" ] && printf '  ✓ %s command cases (see tests/guard-cases.sh)\n' "$((pass-before))"
+  # scope: a no-op outside CI unless the repo adopted ADLC; fails CLOSED without python3.
+  # Run from a directory that is NOT an ADLC repo, with the CI marker unset, so the result
+  # does not depend on where (or under which runner) this suite itself runs.
+  M="$(hook_json - "$GR/feat" 'gh pr merge 5')"
+  mkdir -p "$GR/adopted/.adlc" "$GR/adopted/sub/dir" "$GR/chartered/docs/adlc" "$GR/plain" "$GR/fakepy" "$GR/plug in/hooks"; : > "$GR/chartered/docs/adlc/CHARTER.md"
+  local_hook() { # <project dir | -> [ENV=val …] — the launcher as a local session runs it, from $GR/plain
+    local proj="$1"; shift
+    if [ "$proj" = - ]; then ( cd "$GR/plain" && printf '%s' "$M" | env -u GITHUB_ACTIONS -u CLAUDE_PROJECT_DIR "$@" bash "$H" ) >/dev/null 2>&1
+    else ( cd "$GR/plain" && printf '%s' "$M" | env -u GITHUB_ACTIONS CLAUDE_PROJECT_DIR="$proj" "$@" bash "$H" ) >/dev/null 2>&1; fi
+  }
+  local_hook "$GR/plain";            check 0 "no-op in a repo that has not adopted ADLC" $?
+  local_hook -;                      check 0 "…also with no project dir at all" $?
+  local_hook "$GR/adopted";          check 2 "active locally when .adlc/ exists" $?
+  local_hook "$GR/adopted/sub/dir";  check 2 "active from a subdirectory of an ADLC repo" $?
+  local_hook "$GR/chartered";        check 2 "active locally when docs/adlc/CHARTER.md exists" $?
+  ( cd "$GR/adopted/sub/dir" && printf '%s' "$M" | env -u GITHUB_ACTIONS CLAUDE_PROJECT_DIR="$GR/plain" bash "$H" ) >/dev/null 2>&1
+  check 2 "active when the session has moved INTO an ADLC repo (its project dir is elsewhere)" $?
+  printf '%s' "$M" | env -i GITHUB_ACTIONS=true PATH=/nonexistent /bin/bash "$H" >/dev/null 2>&1;               check 2 "fails closed in scope when python3 is missing" $?
+  ( cd "$GR/plain" && printf '%s' "$M" | env -i PATH=/nonexistent CLAUDE_PROJECT_DIR="$GR/plain" /bin/bash "$H" ) >/dev/null 2>&1; check 0 "stays a no-op out of scope when python3 is missing" $?
+  printf '#!/bin/sh\nexit 1\n' > "$GR/fakepy/python3"; chmod +x "$GR/fakepy/python3"
+  printf '%s' "$M" | GITHUB_ACTIONS=true PATH="$GR/fakepy:$PATH" bash "$H" >/dev/null 2>&1;                    check 2 "fails closed when python3 itself fails (exit 1 would let the command run)" $?
+  printf '#!/bin/sh\nexit 0\n' > "$GR/fakepy/python3"
+  printf '%s' "$M" | GITHUB_ACTIONS=true PATH="$GR/fakepy:$PATH" bash "$H" >/dev/null 2>&1;                    check 0 "…and passes on only when the guard says so (exit 0)" $?
+  printf 'not json' | GITHUB_ACTIONS=true bash "$H" >/dev/null 2>&1;                                           check 2 "fails closed on unreadable hook input" $?
+  printf '{"tool_name":"Write","tool_input":{"content":"gh pr merge 5"}}' | GITHUB_ACTIONS=true bash "$H" >/dev/null 2>&1; check 0 "ignores tools other than Bash" $?
+  # the command hooks.json really registers, run the way the harness runs it — from a plugin
+  # directory whose path has a space in it
+  cp "$ROOT/hooks/adlc-guard.sh" "$ROOT/hooks/adlc_guard.py" "$GR/plug in/hooks/"
+  HC="$(guard_cmd)"
+  printf '%s' "$M" | GITHUB_ACTIONS=true CLAUDE_PLUGIN_ROOT="$GR/plug in" CLAUDE_PROJECT_DIR="$GR/feat" bash -c "$HC" >/dev/null 2>&1; check 2 "the hooks.json command blocks a merge (plugin path with a space)" $?
+  printf '%s' "$(hook_json - "$GR/feat" 'git status')" | GITHUB_ACTIONS=true CLAUDE_PLUGIN_ROOT="$GR/plug in" CLAUDE_PROJECT_DIR="$GR/feat" bash -c "$HC" >/dev/null 2>&1; check 0 "…and lets an ordinary command through" $?
+  hook_json - "$GR/feat" 'git push origin release' | GITHUB_ACTIONS=true ADLC_PROTECTED_BRANCHES="release, staging" bash "$H" >/dev/null 2>&1; check 2 "ADLC_PROTECTED_BRANCHES adds protected names" $?
+  eq "ADLC guard: blocked" "tells the agent why" "$(printf '%s' "$M" | GITHUB_ACTIONS=true bash "$H" 2>&1 >/dev/null | cut -c1-19)"
+  eq 1 "…and, for a program named by a variable, how to get past a wrong guess" \
+     "$(hook_json - "$GR/onmain" '"$DOCKER" push image:tag' | GITHUB_ACTIONS=true bash "$H" 2>&1 >/dev/null | grep -c 'write its name out')"
+  rm -rf "$GR"
+else
+  bad "guard tests need python3 and git"
+fi
 
 echo ""
 echo "== $pass passed, $fail failed =="

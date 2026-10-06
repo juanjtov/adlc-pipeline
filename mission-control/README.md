@@ -28,7 +28,7 @@ Requirements: Python 3.9 or newer (the one that ships with macOS developer tools
 | Where each request is, gates waiting on you, verdicts, merges | GitHub, read with your `gh` login (one GraphQL call) | every 15 s while the page is open |
 | What each agent is doing, step by step | The plugin's hooks (`hooks/hooks.json` -> `hook.sh`) | at once |
 | Tokens, cache use, cost, latency | Claude Code telemetry sent straight here (OTLP over HTTP/JSON) | about 2 s |
-| System prompt, tool grants | The agent files in `agents/` | on load |
+| System prompt, what each agent may run | The agent files in `agents/`; the guard hook (`hooks/adlc_guard.py`) for a narrow role's command list; the lane templates (`templates/github/`) for each Actions lane's grant | on load |
 
 Telemetry is opt-in. Merge the `env` block of `templates/settings.mission-control.json` into
 the repo's `.claude/settings.local.json` and start a new Claude Code session. Without it the

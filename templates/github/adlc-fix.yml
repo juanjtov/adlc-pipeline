@@ -5,7 +5,8 @@
 # Capped: after 3 fix rounds it stops and tags `needs:human` instead of fixing again.
 #
 # It removes the label before fixing so the review lane can re-add it (a re-add is what fires the
-# next round). PREREQUISITES: CLAUDE_CODE_OAUTH_TOKEN + ADLC_DISPATCH_TOKEN.
+# next round). PREREQUISITES: CLAUDE_CODE_OAUTH_TOKEN + ADLC_DISPATCH_TOKEN. The agent step
+# installs the plugin and runs as `adlc:builder` (see adlc-builder.yml, HOW THE AGENT RUNS).
 name: ADLC fix loop
 
 on:
@@ -70,10 +71,16 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.ADLC_DISPATCH_TOKEN }}
+          allowed_bots: "{{BUILDER_BOT}}"
+          plugin_marketplaces: "https://github.com/juanjtov/adlc-pipeline.git"
+          plugins: "adlc@adlc-pipeline"
+          claude_args: |
+            --agent adlc:builder
+            --permission-mode dontAsk
+            --allowedTools "Read,Edit,Write,Skill,Bash"
           prompt: |
-            You are the ADLC Builder. PR #${{ github.event.pull_request.number }} was labelled
-            adlc:changes-requested. Read the architect + adversarial review comments on the PR, fix
-            the issues WITHIN the declared diff scope, keep the AC-traced tests green, commit with a
-            message starting `adlc-fix:` and push to the same branch. Load the builder agent
-            definition + project-conventions + adlc:security-gate. Do not merge, do not change labels
-            — the push re-runs the review lane.
+            PR #${{ github.event.pull_request.number }} was labelled adlc:changes-requested. Load
+            your role's skills with the Skill tool first. Read the architect + adversarial review
+            comments on the PR, fix the issues WITHIN the declared diff scope, keep the AC-traced
+            tests green, commit with a message starting `adlc-fix:` and push to the same branch.
+            Do not merge, do not change labels — the push re-runs the review lane.
