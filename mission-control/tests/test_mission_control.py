@@ -101,7 +101,44 @@ class PipelineRules(unittest.TestCase):
         info = pipeline.read_agent(PLUGIN, 'builder')
         self.assertTrue(info['prompt'].startswith('You are the **Builder**'))
         self.assertIn('Bash', info['tools'])
-        self.assertIn('gh pr diff', pipeline.read_agent(PLUGIN, 'reviewer')['tools'])
+        self.assertEqual(info['guard'], 'ok')
+        # A narrow role's limits come from the guard hook, not from the agent file: they replace its bare "Bash".
+        reviewer = pipeline.read_agent(PLUGIN, 'reviewer')
+        self.assertIn('gh pr diff', reviewer['tools'])
+        self.assertIn('git (read-only)', reviewer['tools'])
+        self.assertNotIn('Bash', reviewer['tools'])
+        analyst = pipeline.read_agent(PLUGIN, 'analyst')['tools']
+        self.assertIn('gh issue edit', analyst)
+        self.assertNotIn('gh issue delete', analyst)
+        # What is blocked follows from the same sources: the guard for everyone, the tools line for Edit and Write.
+        self.assertEqual(info['blocked'], ['gh pr merge', 'Push to main', 'Force-push', 'GitHub API writes'])
+        self.assertEqual(reviewer['blocked'], ['gh pr merge', 'Push to main', 'Force-push', 'GitHub API writes',
+                                               'Other gh and git commands', 'Edit', 'Write'])
+
+    def test_lane_grants_are_read_from_the_templates(self):
+        lanes = {l['lane']: l['tools'] for l in pipeline.read_agent(PLUGIN, 'architect')['lanes']}
+        self.assertEqual(sorted(lanes), ['design', 'review'])
+        self.assertIn('Edit(docs/**)', lanes['design'])
+        self.assertIn('gh issue comment', lanes['design'])
+        self.assertNotIn('gh pr review', lanes['design'])       # a lane can grant less than the guard allows the role
+        self.assertNotIn('gh pr review', lanes['review'])
+        self.assertNotIn('Edit(docs/**)', lanes['review'])
+        builder = pipeline.read_agent(PLUGIN, 'builder')['lanes']
+        self.assertEqual(sorted(l['lane'] for l in builder), ['builder', 'fast', 'fix'])
+        self.assertTrue(all('Bash' in l['tools'] for l in builder))
+        self.assertEqual(pipeline.read_agent(PLUGIN, 'analyst')['lanes'][0]['tools'][-1], '.adlc/scripts/adlc-triage.sh')
+
+    def test_without_the_guard_the_limits_are_marked_unknown(self):
+        root = tempfile.mkdtemp()
+        try:
+            shutil.copytree(os.path.join(PLUGIN, 'agents'), os.path.join(root, 'agents'))
+            info = pipeline.read_agent(root, 'reviewer')
+            self.assertEqual(info['guard'], 'missing')
+            self.assertIn('Bash', info['tools'])          # the file's line as written: nothing is invented
+            self.assertEqual(info['blocked'], [])
+            self.assertEqual(info['lanes'], [])
+        finally:
+            shutil.rmtree(root)
 
     def test_a_remote_in_any_form_names_the_repo(self):
         for url in ('git@github.com:acme/shop.git', 'https://github.com/acme/shop', 'https://github.com/Acme/Shop.git/',
@@ -643,6 +680,7 @@ class OverHttp(unittest.TestCase):
         self.assertEqual(self.get('/app.js')[0], 200)
         meta = json.loads(self.get('/api/meta')[1])
         self.assertEqual([a['station'] for a in meta['stations']], pipeline.STATIONS)
+        self.assertTrue(all(a['guard'] == 'ok' and a['lanes'] and 'blocked' in a for a in meta['stations']))
         # asked for raw: urllib would tidy these paths before sending them
         for path in ('/../server.py', '/../mc/store.py', '/..%2fserver.py', '//etc/passwd', '/./../server.py'):
             reply = self.raw('GET %s HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n' % path)

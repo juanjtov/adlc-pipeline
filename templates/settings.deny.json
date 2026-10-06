@@ -1,5 +1,5 @@
 {
-  "_comment": "Merge the permissions.deny entries below into the host repo's .claude/settings.json. These enforce charter §2 at the harness level: no agent session can push to main, force-push, or merge a PR. Keep any existing deny entries and other settings intact.",
+  "_comment": "Merge the permissions.deny entries below into the host repo's .claude/settings.json. They are the BACKSTOP for charter §2 (no agent pushes to main, force-pushes, or merges a PR) in a session that runs without the plugin. They are prefix matches on the command text, so another spelling (git push origin HEAD:main, bash -c '...') gets past them; the plugin's PreToolUse guard hook is the primary block. Keep any existing deny entries and other settings intact.",
   "permissions": {
     "deny": [
       "Bash(git push origin main)",
