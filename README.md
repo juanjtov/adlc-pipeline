@@ -4,14 +4,45 @@ Export the four-agent software-delivery pipeline (Product Analyst → Architect 
 QA/Release-Ops, with two human gates) to **any** repository — whether it's greenfield (only
 a PRD) or a mature codebase — and be running in minutes.
 
+![Claude Code plugin](https://img.shields.io/badge/Claude_Code-plugin-D97757)
+![Version](https://img.shields.io/badge/version-0.1.0-555)
+![Guardrails](https://img.shields.io/badge/guardrails-unit--tested-2D4F3A)
+
+## At a glance
+
+```mermaid
+flowchart LR
+    I[Issue / PRD] --> A[Product Analyst]
+    A --> G1{{Gate 1<br/>human approves stories}}
+    G1 --> R[Architect<br/>design + ADR]
+    R --> B[Builder<br/>scoped change]
+    B --> V[Adversarial + security review]
+    V -->|findings| B
+    V --> Q[QA / Release-Ops]
+    Q --> G2{{Gate 2<br/>human merges}}
+    G2 --> D[Deploy]
+    A -.->|trivial change,<br/>human-approved| F[Fast lane] --> V
+    V -. findings .-> RT[Retro loop<br/>findings → tests, CI checks]
+```
+
+- **Two human gates, never skipped.** Agents move work *up to* a gate, never through it. No agent verifies, merges, or deploys its own work.
+- **Deterministic where it matters.** Path scope, direct-push detection, fix-loop caps and verdict parsing are small unit-tested shell scripts shared by CI and a local pre-commit hook.
+- **Gets better every run.** Review findings are logged as structured data and turned into regression tests and CI checks, not longer prompts.
+- **Cost is measured, not guessed.** Per-lane latency from Actions run data; per-agent tokens, cost and prompt-cache hit rate via opt-in OpenTelemetry.
+- **Works on any repo.** A bootstrap wizard adapts the pipeline to a greenfield PRD or a mature codebase in minutes.
+
 ## What's inside
+
+<details>
+<summary>Repository layout</summary>
 
 ```
 .claude-plugin/plugin.json     # manifest (plugin name: "adlc")
 .claude-plugin/marketplace.json  # marketplace "adlc-pipeline" — how the lanes install it
 agents/                        # the 4 role agents + adversarial-reviewer (stack-agnostic)
-hooks/                         # PreToolUse guard: no merge / push-to-main / force-push
-  hooks.json · adlc-guard.sh · adlc_guard.py
+hooks/
+  hooks.json                   # wires both hooks below into every session that enables the plugin
+  adlc-guard.sh · adlc_guard.py  # the guard, on every Bash command: no merge / push-to-main / force-push
 skills/
   charter/                     # portable process rules: principles, roles, state machine, gates
   triage/                      # size an issue → fast lane (trivial) vs full pipeline
@@ -25,6 +56,10 @@ skills/
   ablation/                    # periodic context reset so the setup doesn't rot append-only
   bootstrap/                   # ← the dual-mode adoption WIZARD
 commands/adlc-init.md          # friendly alias that launches the wizard
+commands/adlc-mission-control.md   # opens Mission Control, the live view of the line
+mission-control/               # ← MISSION CONTROL: local live view (Python stdlib server + static page)
+bin/adlc-mission-control       # its launcher (on the Bash PATH when the plugin is enabled)
+mission-control/hook.sh        # reports pipeline-agent activity to Mission Control when it is running
 templates/                     # what the wizard fills into the host repo
   host-CLAUDE.md.tmpl          # minimalist CLAUDE.md (commands + gotchas + pointers)
   skills/project-conventions.SKILL.md.tmpl   # lean: only what the code doesn't reveal
@@ -32,6 +67,7 @@ templates/                     # what the wizard fills into the host repo
   charter.md.tmpl · RUNBOOK.md.tmpl · adr-template.md · CONTEXT-LOG.md.tmpl
   settings.deny.json           # harness deny rules (no push-to-main / no self-merge)
   settings.telemetry.json      # opt-in OTel env for per-agent token/cost/latency
+  settings.mission-control.json   # opt-in OTel env that sends the same data straight to Mission Control
   github/labels.sh · adlc-builder.yml · adlc-qa.yml · adlc-review.yml · adlc-fix.yml
   github/adlc-intake.yml · adlc-design.yml        # auto-start (autopilot) lanes
   github/adlc-fast.yml                            # ← fast lane for trivial changes
@@ -48,6 +84,8 @@ templates/                     # what the wizard fills into the host repo
 tests/run.sh                   # unit tests: guardrail scripts, guard hook, lane wiring
 telemetry/                     # ready-to-run local OTel collector (docker compose) for token/cost
 ```
+
+</details>
 
 ## Design philosophy
 
@@ -96,6 +134,15 @@ agent come from **opt-in OpenTelemetry** (`settings.telemetry.json`): Claude Cod
 per-session tokens + cost + duration to your OTel collector, and `service.name` groups a whole
 pipeline run. A ready-to-run collector ships in `telemetry/` (`docker compose up -d`); latency
 works without one.
+
+**Mission Control.** `/adlc-mission-control` opens a live page of the line on your own machine:
+one station per agent, each request moving between them, what every agent is doing right now, and
+its tokens, cost and latency. It is read-only (it never labels, comments or merges), needs no
+install beyond Python 3, and keeps everything local: GitHub is read through your `gh` login, agent
+steps arrive through the plugin's hooks, and tokens/cost arrive as telemetry sent straight to it
+(`settings.mission-control.json`, no collector). It sees agents that run **on this machine**; runs
+on GitHub's runners show their GitHub state only. Details and limits: `mission-control/README.md`.
+Try it with made-up data: `adlc-mission-control --demo --open`.
 
 **Prompt caching, kept honest.** The harness re-serves each run's stable prefix — the tool set,
 the loaded skills, and `CLAUDE.md` — from cache at ~0.1× input price, so cost really scales with
