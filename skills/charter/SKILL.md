@@ -70,7 +70,7 @@ and the role prompt (advisory). Path restrictions can't be expressed in Claude C
 grants directly — the diff-scope check (run from the default branch, so a PR cannot edit it) is
 what actually blocks an out-of-scope write: a Builder PR is held to the scope it declares in
 `.adlc/scope/<issue>.txt` (plus the test dirs once the issue is at `stage:qa`), and fails if it
-declares none. The Architect's docs-only and QA's
+declares none or touches another issue's scope file. The Architect's docs-only and QA's
 tests-only rules are checked only on a PR labelled `stage:design` / `stage:qa`; otherwise the
 review enforces them.
 
