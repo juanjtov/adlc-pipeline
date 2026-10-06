@@ -40,7 +40,7 @@ for i, (cls, mk, s) in enumerate([
         ("fl-teal", "arrow-teal", "automation starts or installs something"),
         ("fl-amber", "arrow-amber", "scheduled · the weekly retro"),
         ("fl-grey", "arrow-grey", "watch only · reads, never edits"),
-        ("fl-red", "arrow-red", "blocked · the guard hook stops it")]):
+        ("fl-red", "arrow-red", "not allowed · guard hook, workflow or role rule")]):
     yy = ly + 17 + i * 17
     c.line(lx, yy, lx + 30, yy, cls, mk); text(lx + 40, yy + 3.5, s, "leg", size=10.5)
 lx2 = 1330
@@ -58,12 +58,12 @@ node("person", 130, 232, "You", "the Principal", size=52, cls="ic-s", tile="tile
 # engine cluster: what starts each agent
 CX, CY, CW, CH = 290, 168, 850, 134
 rect(CX, CY, CW, CH, "cluster", r=16)
-icon("hex", 345, 226, 58, "ic-w", title="GitHub Actions running anthropics/claude-code-action: one workflow per lane, fired by label changes. Each lane installs the plugin on the runner, runs as its named agent (--agent adlc:builder and so on) and is granted that lane's tools only. templates/github/")
+icon("hex", 345, 226, 58, "ic-w", title="GitHub Actions running anthropics/claude-code-action: one workflow per lane, fired by label changes and pull-request events. Each lane installs the plugin on the runner, runs as its named agent (--agent adlc:builder and so on) and is granted that lane's tools only. templates/github/")
 text(390, 206, "GITHUB ACTIONS", "clu-t", size=15, weight=800)
 text(390, 224, "starts each agent when an issue's label changes", "clu-s", size=10)
 text(390, 246, "ONE WORKFLOW PER LANE", "clu-e", size=8.5, weight=700)
 lanes = [("intake", "adlc-intake.yml: runs the Analyst when a requirement is filed (auto-start, optional)"),
-         ("design", "adlc-design.yml: runs the Architect on stage:design"),
+         ("design", "adlc-design.yml: runs the Architect on stage:design (comes with auto-start, optional; otherwise you run the Architect by hand)"),
          ("build", "adlc-builder.yml: runs the Builder on stage:build"),
          ("review", "adlc-review.yml: adversarial + architect review on every Builder PR; advances to stage:qa on two PASS verdicts"),
          ("fix", "adlc-fix.yml: sends a PR with changes requested back to the Builder; stops after 3 rounds and tags needs:human"),
@@ -76,7 +76,7 @@ lanes = [("intake", "adlc-intake.yml: runs the Analyst when a requirement is fil
 for i, (n, tip) in enumerate(lanes):
     cx = 404 + i * 50
     sched = n == "retro"
-    icon("clock" if sched else "bolt", cx, 268, 18, "ic-a" if sched else "ic-w", dashed=sched or n == "intake", title=tip)
+    icon("clock" if sched else "bolt", cx, 268, 18, "ic-a" if sched else "ic-w", dashed=sched or n in ("intake", "design"), title=tip)
     text(cx, 291, n, "clu-y lab-m", anchor="middle", size=8)
 a(f'<line x1="955" y1="{CY+18}" x2="955" y2="{CY+CH-18}" stroke="#3A4A78" stroke-width="1"/>')
 text(980, 200, "OR BY HAND", "clu-e", size=8.5, weight=700)
@@ -188,9 +188,9 @@ label(845, 412, "changes · fix, review again", "lbl-i", size=9)
 BY = 730
 text(600, 676, "FAST LANE · SMALL FIXES", "eyebrow", size=9.5, weight=700)
 node("api", 620, BY, "Builder", "small change + test", size=50, cls="ic-l", tile="tile-l",
-     title="Builder on the fast lane (adlc-fast.yml): works from the change brief, no ADR; writes the scope to .adlc/scope.txt, adds a test for S1-AC1, opens a PR labelled lane:fast.")
+     title="Builder on the fast lane (adlc-fast.yml): works from the change brief, no ADR; writes the scope to .adlc/scope/<issue>.txt, adds a test for S1-AC1, opens a PR labelled lane:fast.")
 node("gauge", 790, BY, "Size check", "small, nothing sensitive", size=50, cls="ic-l2", tile="plate",
-     title="adlc-triage.sh re-checks the real diff: default max 5 files and 40 changed lines, and no migrations, auth, infra, CI, .github/.claude, dependency manifests or secrets. Over the cap, the change goes to the full lane.")
+     title="adlc-triage.sh re-checks the real diff: default max 5 files and 40 changed lines, and no paths named for migrations, auth, security or infra, no CI or pipeline files, dependency manifests or secrets. It matches file paths, not what the code does. A change that fails goes to the full lane.")
 node("eye", 960, BY, "Reviewer", "break it + security", size=50, cls="ic-l", tile="tile-l",
      title="Adversarial Reviewer on the fast lane: diff + change brief only, walks every security-gate attack class, ends with ADLC-ADV: PASS or CHANGES.")
 flow("M656,730 C690,730 720,730 752,730", "fl-ind", "arrow-ind")
@@ -206,7 +206,7 @@ label(739, 600, "too big → full lane", "lbl-i", size=9)
 # blocked: no agent or autopilot chooses the fast lane
 flow("M330,690 C330,760 470,782 560,766", "fl-red", "arrow-red")
 c.nogo(411, 760)
-label(411, 790, "no agent or autopilot picks it", "lbl-r", size=9)
+label(411, 790, "only you may pick it", "lbl-r", size=9)
 
 # ---------------------------------------------------------------- both lanes end at the Action card
 node("contract", 1135, RY, "Action card", "risk, proof, undo", size=50, cls="ic-l", tile="tile-l",
@@ -228,10 +228,10 @@ flow("M1376,610 C1396,610 1414,610 1434,610", "fl-slate", "arrow-slate")
 # blocked: agents merging or pushing
 flow("M1070,454 C1070,436 1086,428 1110,428 C1200,428 1300,428 1318,428 C1336,428 1340,444 1340,572", "fl-red", "arrow-red")
 c.nogo(BX, 428)
-label(1118, 428, "agents can't merge or push", "lbl-r", size=9)
+label(1118, 428, "agents may not merge or push", "lbl-r", size=9)
 # tripwire
-node("flag", 1405, 800, "Tripwire", "alerts on a direct push", size=36, cls="ic-l2", tile="plate",
-     title="adlc-main-tripwire.yml + adlc-tripwire-check.sh: on every push to main, fails and files a bug if a commit arrived without a merged PR. The free-plan stand-in for branch protection on private repos.")
+node("flag", 1405, 800, "Tripwire", "alerts on a direct push", size=36, cls="ic-l2", tile="plate", dashed=True,
+     title="adlc-main-tripwire.yml + adlc-tripwire-check.sh: on every push to main, fails and files a bug if a commit arrived without a pull request. Installed for private repos on the free plan, where branch protection is not available; it reports after the fact and cannot stop a merge.")
 flow("M1362,640 C1385,680 1405,720 1405,772", "fl-grey", "arrow-grey")
 label(1392, 704, "watches pushes", "lbl-g", size=9)
 
@@ -240,9 +240,9 @@ SY = 870
 rect(250, SY, 560, 128, "legacy-strip", r=12)
 text(266, SY + 20, "SAFETY NETS · PLAIN SCRIPTS, UNIT-TESTED, SAME IN CI AND ON YOUR MACHINE", "eyebrow", size=9, weight=700)
 nets = [("lock", "Guard hook", "no merge, no push", "hooks/adlc_guard.py, a PreToolUse hook on every Bash command: blocks gh pr merge, pushes to main, force-pushes and GitHub API writes, for every agent in every permission mode. It reads command text, so it is a guardrail; the deny rules in templates/settings.deny.json stay as a second layer."),
-        ("folder", "Scope check", "allowed files only", "adlc-diff-scope.sh: holds a lane PR to the files listed in .adlc/scope/<issue>.txt (design PRs: docs/ only; QA PRs: test folders only), and fails a lane PR that declares no scope. In CI it runs from the default branch's copy, so a PR cannot edit the check that judges it."),
+        ("folder", "Scope check", "allowed files only", "adlc-diff-scope.sh: holds a lane PR to the files its own scope file, .adlc/scope/<issue>.txt, declares (test folders count too once QA adds tests), and fails a lane PR that declares no scope. The Builder writes that file; the Architect's review checks it against the design. In CI (automated lanes only) it runs from the default branch's copy, so a PR cannot edit the check that judges it."),
         ("json", "Verdict reader", "reads PASS/CHANGES", "adlc-verdict.sh: parses the reviewers' ADLC-ADV / ADLC-ARCH lines; control never trusts GitHub review state."),
-        ("sync", "Fix cap", "then a person", "adlc-fix-cap.sh: counts adlc-fix: commits; after 3 rounds the PR is tagged needs:human."),
+        ("sync", "Fix cap", "then a person", "adlc-fix-cap.sh: counts the adlc-fix: commits in the branch's history; at 3 the PR is tagged needs:human."),
         ("terminal", "Pre-commit", "same check, locally", "templates/hooks/pre-commit: runs the scope check before each local commit."),
         ("gear", "Doctor", "checks the setup", "adlc-doctor.sh: fails a setup with missing deny rules, unfilled placeholders, lanes that cannot run their agent, missing guard scripts, skills or labels, and reports whether the default branch has a merge gate.")]
 for i, (g, t, s, tip) in enumerate(nets):
@@ -255,7 +255,7 @@ rect(830, SY, 342, 128, "legacy-strip", r=12)
 text(846, SY + 20, "LEARNING LOOP · OPTIONAL", "eyebrow", size=9, weight=700)
 loop = [(880, "doc", "Findings", "logged by every review", "Every review and QA finding is written as an ADLC-FINDING line in the PR comment; adlc-log-findings.sh builds .adlc/metrics/findings.jsonl from them."),
         (1000, "clock", "Retro", "weekly, or /adlc:retro", "retro skill + adlc-retro.yml (Mondays by default): ranks recurring mistakes."),
-        (1120, "docout", "Fix PR", "tests first, then checks", "A propose-only PR: a regression test first, then a CI check, then a convention. It goes through both gates like any change.")]
+        (1120, "docout", "Fix PR", "tests first, then checks", "A propose-only PR: a regression test first, then a CI check, then a convention. It is reviewed like any pull request, and you merge it.")]
 for x, g, t, s, tip in loop:
     icon(g, x, SY + 56, 30, "ic-a", dashed=True, tile="tile-a", title=tip)
     text(x, SY + 92, t, "lab", anchor="middle", size=10.5, weight=700)
@@ -274,7 +274,7 @@ items = [(1, "inbox", "Request", "Bring an idea, a PRD or a ticket. /adlc-intake
          (5, "api", "Builder", "Writes code plus a test per check on a branch, then opens a PR."),
          (6, "eye", "Two reviewers", "One tries to break it, one checks the design. Changes loop back."),
          (7, "check", "QA", "Runs every test and a security pass, then drafts the Action card."),
-         (8, "person", "Gate 2", "You read the card, then merge and deploy. No agent can.")]
+         (8, "person", "Gate 2", "You read the card, then merge and deploy. Agents may not.")]
 cw = (W - 120) / len(items)
 for i, (n, g, t, s) in enumerate(items):
     x = 60 + i * cw
