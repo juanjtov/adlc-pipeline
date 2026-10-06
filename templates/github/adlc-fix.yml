@@ -26,15 +26,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 0   # the loop cap needs the base branch and all of this PR's commits
           ref: ${{ github.event.pull_request.head.ref }}
           token: ${{ secrets.ADLC_DISPATCH_TOKEN }}
 
       - name: Loop cap (count prior fix rounds)
         id: cap
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
         run: |
           chmod +x .adlc/scripts/adlc-fix-cap.sh
-          d=$(git log --format='%s' | .adlc/scripts/adlc-fix-cap.sh 3)
+          # Count the fix rounds of THIS PR only: the commits its branch has that its base branch
+          # does not. A bare `git log` reads the whole history — every merged PR's `adlc-fix:`
+          # commits with it — and a new PR would start at the cap. A plain assignment, never a
+          # pipe from git: this shell has no pipefail, and a failed read must fail the step, not
+          # count as zero rounds.
+          subjects=$(git log --format='%s' "refs/remotes/origin/$BASE_REF..HEAD" --)
+          d=$(printf '%s\n' "$subjects" | .adlc/scripts/adlc-fix-cap.sh 3)
           echo "decision=$d"
           if [ "$d" = "STOP" ]; then echo "stop=true" >> "$GITHUB_OUTPUT"; else echo "stop=false" >> "$GITHUB_OUTPUT"; fi
 
