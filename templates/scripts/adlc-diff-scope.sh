@@ -28,7 +28,10 @@ case "$stage" in
     fi
     self="$scope_file"
     while IFS= read -r p || [ -n "$p" ]; do prefixes+=("$p"); done \
-      < <(sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e '/^#/d' -e '/^$/d' "$scope_file")
+      < <(sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e '/^#/d' -e '/^$/d' "$scope_file" | head -n 501)
+    if [ "${#prefixes[@]}" -gt 500 ]; then   # its size is the PR author's to choose
+      echo "scope file $scope_file lists more than 500 prefixes — that is not a declared scope" >&2; exit 1
+    fi
     if [ "$stage" = "build+qa" ]; then pat="^(${ADLC_TEST_DIRS:-tests})"; fi ;;
   ""|other) echo "no ADLC stage — skipped"; exit 0 ;;
   *) echo "unknown stage '$stage'" >&2; exit 2 ;;

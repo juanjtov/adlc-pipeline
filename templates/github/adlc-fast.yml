@@ -95,7 +95,9 @@ jobs:
           [ -z "$issue" ] && issue=$(gh pr view "$PR" --json body --jq '.body' | grep -oiE '#[0-9]+' | head -1 | tr -d '#')
           echo "issue=$issue" >> "$GITHUB_OUTPUT"
 
-      # THE deterministic backstop: re-check the real diff. Over-cap or sensitive ⇒ full pipeline.
+      # Re-check the real diff. Over-cap or sensitive ⇒ full pipeline. This step ROUTES; it runs
+      # from the PR's own checkout, so the verdict a PR cannot edit is the same cap in
+      # adlc-diff-scope.yml, which runs from the default branch.
       - name: Fast-lane cap (real diff)
         id: cap
         run: |
@@ -146,7 +148,7 @@ jobs:
             if [ -n "${{ steps.link.outputs.issue }}" ]; then
               gh issue edit "${{ steps.link.outputs.issue }}" --remove-label stage:fast --add-label gate:deploy || true
             fi
-            gh pr comment "$PR" --body $'## Proposed Action Card — Gate 2 (fast lane)\nAction:     merge PR #'"$PR"$' to main\nRisk:       low — trivial change, within the deterministic fast-lane cap, adversarial + security review PASS\nEvidence:   see the review comment (PASS) and the CI checks on this PR\nMigrations: none (a migration would have forced the full pipeline)\nRollback:   revert the merge commit\nAwaiting:   Principal approval'
+            gh pr comment "$PR" --body $'## Proposed Action Card — Gate 2 (fast lane)\nAction:     merge PR #'"$PR"$' to main\nRisk:       low — trivial change, within the fast-lane cap (the ADLC diff-scope check on this PR confirms it from the default branch), adversarial + security review PASS\nEvidence:   see the review comment (PASS) and the CI checks on this PR\nMigrations: none (a migration would have forced the full pipeline)\nRollback:   revert the merge commit\nAwaiting:   Principal approval'
           else
             gh pr edit "$PR" --add-label "adlc:changes-requested" || true
             echo "Adversarial review requested changes → fix loop runs (adlc-fix.yml)."
