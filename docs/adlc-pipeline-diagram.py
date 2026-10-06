@@ -39,8 +39,8 @@ for i, (cls, mk, s) in enumerate([
         ("fl-slate", "arrow-slate", "your decision · file, approve, pick a lane, merge"),
         ("fl-teal", "arrow-teal", "automation starts or installs something"),
         ("fl-amber", "arrow-amber", "scheduled · the weekly retro"),
-        ("fl-grey", "arrow-grey", "watch only · raises an alert, edits nothing"),
-        ("fl-red", "arrow-red", "blocked · deny rules and CI stop it")]):
+        ("fl-grey", "arrow-grey", "watch only · reads, never edits"),
+        ("fl-red", "arrow-red", "blocked · the guard hook stops it")]):
     yy = ly + 17 + i * 17
     c.line(lx, yy, lx + 30, yy, cls, mk); text(lx + 40, yy + 3.5, s, "leg", size=10.5)
 lx2 = 1330
@@ -58,7 +58,7 @@ node("person", 130, 232, "You", "the Principal", size=52, cls="ic-s", tile="tile
 # engine cluster: what starts each agent
 CX, CY, CW, CH = 290, 168, 850, 134
 rect(CX, CY, CW, CH, "cluster", r=16)
-icon("hex", 345, 226, 58, "ic-w", title="GitHub Actions running anthropics/claude-code-action: one workflow per lane, fired by label changes. templates/github/")
+icon("hex", 345, 226, 58, "ic-w", title="GitHub Actions running anthropics/claude-code-action: one workflow per lane, fired by label changes. Each lane installs the plugin on the runner, runs as its named agent (--agent adlc:builder and so on) and is granted that lane's tools only. templates/github/")
 text(390, 206, "GITHUB ACTIONS", "clu-t", size=15, weight=800)
 text(390, 224, "starts each agent when an issue's label changes", "clu-s", size=10)
 text(390, 246, "ONE WORKFLOW PER LANE", "clu-e", size=8.5, weight=700)
@@ -70,7 +70,7 @@ lanes = [("intake", "adlc-intake.yml: runs the Analyst when a requirement is fil
          ("qa", "adlc-qa.yml: runs QA & Release-Ops on stage:qa"),
          ("fast", "adlc-fast.yml: fast lane: Builder, size cap on the real diff, adversarial + security review"),
          ("ci", "adlc-ci.yml: the project's tests, type-check and build on every PR"),
-         ("scope", "adlc-diff-scope.yml: fails a PR that touches files outside its allowed scope"),
+         ("scope", "adlc-diff-scope.yml: fails a lane PR that touches files outside its scope file, and re-runs the fast-lane cap; both run from the default branch (pull_request_target), so a PR cannot edit them"),
          ("tripwire", "adlc-main-tripwire.yml: alerts on any push to main that skipped a PR"),
          ("retro", "adlc-retro.yml: weekly retro, opens a proposal PR (optional)")]
 for i, (n, tip) in enumerate(lanes):
@@ -126,10 +126,17 @@ flow("M130,500 C130,522 130,548 130,570", "fl-slate", "arrow-slate")
 label(130, 534, "filed on your yes", "lbl-s", size=9)
 step(98, 578, 1)
 
+# ---------------------------------------------------------------- Mission Control (your live view, outside the zones)
+text(130, 742, "YOUR LIVE VIEW", "eyebrow", anchor="middle", size=9.5, weight=700)
+node("board", 130, 800, "Mission Control", "read-only, on your machine", size=44, cls="ic-s", tile="tile-s", label_size=12,
+     title="Mission Control (/adlc-mission-control, mission-control/): a live page on your machine. One station per agent, each request moving between them, and each agent's steps, tokens and cost. It never labels, comments or merges. It reads GitHub through your gh login, agent steps through the plugin's hooks, and tokens through opt-in telemetry (templates/settings.mission-control.json). It sees agents that run on this machine; runs on GitHub's runners show their GitHub state only.")
+flow("M228,800 C210,800 190,800 168,800", "fl-grey", "arrow-grey")
+label(198, 780, "reads only", "lbl-g", size=9)
+
 # ---------------------------------------------------------------- shared start: Analyst + Gate 1
 RY = 610
 node("doc", 330, RY, "Analyst", "stories + lane advice", size=50, cls="ic-l", tile="tile-l",
-     title="Product Analyst (agents/product-analyst.md): asks numbered questions if the request is unclear; otherwise writes stories with Given/When/Then acceptance criteria (full) or a one-check change brief (fast), and ends with ADLC-TRIAGE: FAST or FULL. Writes only issue comments and labels.")
+     title="Product Analyst (agents/product-analyst.md): asks numbered questions if the request is unclear (auto-start lane: answer, then add adlc:auto back to restart it); otherwise writes stories with Given/When/Then acceptance criteria (full) or a one-check change brief (fast), and ends with ADLC-TRIAGE: FAST or FULL. Writes only issue comments and labels.")
 step(298, 578, 2)
 flow("M166,610 C210,610 250,610 292,610", "fl-ind fl-thick", "arrow-ind")
 label(214, 592, "stage:intake", "lbl-i", size=9)
@@ -149,10 +156,10 @@ label(447, 547, "can approve", "lbl-t", size=9)
 AY = 490
 text(566, 428, "FULL LANE · NEW BEHAVIOR", "eyebrow", size=9.5, weight=700)
 node("layers", 620, AY, "Architect", "design + files", size=50, cls="ic-l", tile="tile-l",
-     title="Architect (agents/architect.md): writes docs/adr/NNNN-*.md and a task breakdown where every task declares the exact files it may touch (its diff scope), plus a blast-radius check. Writes only under docs/.")
+     title="Architect (agents/architect.md): writes docs/adr/NNNN-*.md and a task breakdown where every task declares the exact files it may touch (its diff scope), plus a blast-radius check. Writes only under docs/. In the Actions design lane the workflow commits those files to adlc/design-<issue> and moves the issue on once the ADR and its ADLC-BREAKDOWN line exist.")
 step(586, 458, 4)
 node("api", 770, AY, "Builder", "code + tests, a PR", size=50, cls="ic-l", tile="tile-l",
-     title="Builder (agents/builder.md): implements on feat/<issue>-<slug>, a test per acceptance criterion (SN-ACN ids), runs the project's pass/fail command, opens a PR. Never merges, never pushes to main.")
+     title="Builder (agents/builder.md): implements on feat/<issue>-<slug>, records the files it may touch in .adlc/scope/<issue>.txt, a test per acceptance criterion (SN-ACN ids), runs the project's pass/fail command, opens a PR. Never merges, never pushes to main.")
 step(736, 458, 5)
 node("eye", 920, AY, "Two reviewers", "break it · match design", size=50, cls="ic-l", tile="tile-l",
      title="Adversarial Reviewer (agents/adversarial-reviewer.md): fresh context, sees only the diff, tries to break it, ends with ADLC-ADV: PASS or CHANGES. Then the Architect checks the PR against the design: ADLC-ARCH: PASS or CHANGES.")
@@ -211,7 +218,7 @@ label(1041, 704, "pass · skips QA", "lbl-i", size=9)
 
 # ---------------------------------------------------------------- crossing the membrane
 node("branch", 1340, RY, "main", "merged code", size=50, cls="ic-n", tile="tile-n",
-     title="The main branch. Agents cannot merge or push here: gh pr merge and pushes to main are deny-listed in .claude/settings.json; public repos add branch protection.")
+     title="The main branch. Agents cannot merge or push here: the plugin's guard hook blocks gh pr merge, pushes to main and force-pushes on every Bash command, with the deny rules in .claude/settings.json behind it. The lock that cannot be talked around is GitHub branch protection: a pull request needs an approving review.")
 flow("M1171,610 C1210,610 1260,610 1302,610", "fl-slate fl-thick", "arrow-slate")
 label(1231, 590, "Gate 2 · you merge", "lbl-s", size=9.5)
 step(1231, 632, 8)
@@ -232,12 +239,12 @@ label(1392, 704, "watches pushes", "lbl-g", size=9)
 SY = 870
 rect(250, SY, 560, 128, "legacy-strip", r=12)
 text(266, SY + 20, "SAFETY NETS · PLAIN SCRIPTS, UNIT-TESTED, SAME IN CI AND ON YOUR MACHINE", "eyebrow", size=9, weight=700)
-nets = [("lock", "Deny rules", "no merge, no push", "templates/settings.deny.json: gh pr merge, pushes to main and force-pushes are denied for every agent."),
-        ("folder", "Scope check", "allowed files only", "adlc-diff-scope.sh: design PRs may touch docs/ only, QA PRs test folders only, build PRs the declared scope."),
+nets = [("lock", "Guard hook", "no merge, no push", "hooks/adlc_guard.py, a PreToolUse hook on every Bash command: blocks gh pr merge, pushes to main, force-pushes and GitHub API writes, for every agent in every permission mode. It reads command text, so it is a guardrail; the deny rules in templates/settings.deny.json stay as a second layer."),
+        ("folder", "Scope check", "allowed files only", "adlc-diff-scope.sh: holds a lane PR to the files listed in .adlc/scope/<issue>.txt (design PRs: docs/ only; QA PRs: test folders only), and fails a lane PR that declares no scope. In CI it runs from the default branch's copy, so a PR cannot edit the check that judges it."),
         ("json", "Verdict reader", "reads PASS/CHANGES", "adlc-verdict.sh: parses the reviewers' ADLC-ADV / ADLC-ARCH lines; control never trusts GitHub review state."),
         ("sync", "Fix cap", "then a person", "adlc-fix-cap.sh: counts adlc-fix: commits; after 3 rounds the PR is tagged needs:human."),
         ("terminal", "Pre-commit", "same check, locally", "templates/hooks/pre-commit: runs the scope check before each local commit."),
-        ("gear", "Doctor", "checks the setup", "adlc-doctor.sh: fails a setup with missing deny rules, unfilled placeholders, missing skills or labels.")]
+        ("gear", "Doctor", "checks the setup", "adlc-doctor.sh: fails a setup with missing deny rules, unfilled placeholders, lanes that cannot run their agent, missing guard scripts, skills or labels, and reports whether the default branch has a merge gate.")]
 for i, (g, t, s, tip) in enumerate(nets):
     cx = 302 + i * 92
     icon(g, cx, SY + 56, 28, "ic-l2", title=tip)
@@ -284,7 +291,7 @@ import shutil, tempfile
 here = os.path.dirname(os.path.abspath(__file__))
 out = os.path.join(tempfile.gettempdir(), "adlc-pipeline-diagram")
 body, standalone = c.write(os.path.join(out, "adlc-pipeline.html"),
-        caption="Drawn from the plugin as built: agents/, skills/charter, skills/triage, skills/intake, templates/github/*.yml and templates/scripts/. "
+        caption="Drawn from the plugin as built: agents/, hooks/, skills/charter, skills/triage, skills/intake, templates/github/*.yml, templates/scripts/ and mission-control/. "
                 "The fast-lane size cap and the fix-loop limit are defaults a project can change; hover the icons for the values and files. "
                 "Without GitHub Actions, you start each lane by hand in Claude Code and the gates are the same.")
 
