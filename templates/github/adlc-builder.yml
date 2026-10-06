@@ -14,6 +14,21 @@
 #     private = ~2,000 min/month).
 #   - Untrusted-input discipline: only act on issues authored by the allowlist below.
 #
+# HOW THE AGENT RUNS (every ADLC lane does these same things — the action grants NO shell,
+# edit or gh access on its own, and knows nothing about the plugin until it is installed):
+#   - `plugin_marketplaces` + `plugins` install the ADLC plugin on the runner, so the agent
+#     definitions, the adlc:* skills and the guard hook exist there. If you installed the
+#     plugin from a fork or a private marketplace, point both at yours (a private one also
+#     needs the runner to have git access to it).
+#   - `--agent adlc:<role>` runs the session AS that agent (its prompt, model and tools).
+#   - `--permission-mode dontAsk` + `--allowedTools` grant this lane's tools; anything else
+#     that would need approval is denied (file reads and read-only commands still run). The
+#     plugin's PreToolUse guard additionally blocks merge, push-to-main and force-push in
+#     every lane, whatever the tools.
+#   - `allowed_bots`: the action refuses a run triggered by a bot. When ADLC_DISPATCH_TOKEN is
+#     a GitHub App token the App is the actor on every chained lane, so it must be listed
+#     ({{BUILDER_BOT}}). A human's handle here is harmless — the list only applies to bots.
+#
 # This is a STARTING TEMPLATE. The reliable baseline is the manual RUNBOOK; adopt
 # automation once the local recipe is proven. Adapt commands/paths to this repo.
 name: ADLC Builder
@@ -39,20 +54,54 @@ jobs:
         with:
           fetch-depth: 0
 
+      # The design lane leaves the ADR on `adlc/design-<issue>`. Start there, so the branch the
+      # Builder cuts — and its PR — carries the ADR. No such branch (stage:build applied by hand,
+      # no design lane) ⇒ build on the default branch as before. Ask origin, and tell "no such
+      # branch" (exit 2) from "could not ask" (anything else): an outage must fail the step,
+      # not start a build without its ADR.
+      - name: Start from the design branch, if the design lane left one
+        env:
+          N: ${{ github.event.issue.number }}
+        run: |
+          b="adlc/design-$N"
+          rc=0
+          git ls-remote --exit-code origin "refs/heads/$b" >/dev/null || rc=$?
+          if [ "$rc" = 0 ]; then
+            git fetch -q origin "+refs/heads/$b:refs/remotes/origin/$b"
+            git checkout -q -B "$b" "origin/$b"
+            echo "Building on $b (it carries the ADR)."
+          elif [ "$rc" = 2 ]; then
+            echo "No $b — building on the default branch."
+          else
+            echo "::error::could not ask origin for $b (git ls-remote exit $rc)"
+            exit 1
+          fi
+
       - name: Run Builder agent
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.ADLC_DISPATCH_TOKEN }}   # PR authored by the bot; handoffs trigger next lane
-          # The action invokes the plugin's builder agent on this issue. The agent branches,
-          # implements within declared diff scope, writes AC-traced tests, runs the project
-          # commands from the project-conventions skill, and opens a PR. It never merges.
+          allowed_bots: "{{BUILDER_BOT}}"
+          plugin_marketplaces: "https://github.com/juanjtov/adlc-pipeline.git"
+          plugins: "adlc@adlc-pipeline"
+          # The session runs as the plugin's builder agent. It branches, implements within the
+          # declared diff scope, writes AC-traced tests, runs the project commands from the
+          # project-conventions skill, and opens a PR. It never merges.
+          claude_args: |
+            --agent adlc:builder
+            --permission-mode dontAsk
+            --allowedTools "Read,Edit,Write,Skill,Bash"
           prompt: |
-            You are the ADLC Builder. Implement issue #${{ github.event.issue.number }}
-            following its task breakdown and ADR. Load the builder agent definition and the
-            project-conventions + adlc:security-gate skills. Write the task's declared diff scope
-            to .adlc/scope/${{ github.event.issue.number }}.txt (one path prefix per line; the
-            diff-scope check enforces it). Open a PR whose body starts
+            Implement issue #${{ github.event.issue.number }} following its task breakdown and
+            ADR. Load your role's skills with the Skill tool first. When the design lane ran, this
+            branch already holds its commit: the ADR under docs/adr/, and
+            .adlc/scope/${{ github.event.issue.number }}.txt listing those design files. Cut your
+            feature branch from here so your PR carries the ADR, and leave the ADR unchanged.
+            Record the task's declared diff scope in
+            .adlc/scope/${{ github.event.issue.number }}.txt — one path prefix per line, ADDED
+            below any lines already there (the diff-scope check holds the whole PR to that file,
+            the ADR included). Open a PR whose body starts
             `Closes #${{ github.event.issue.number }}`; never merge.
 
       # After the PR is opened, Architect review advances stage:build → stage:qa. Whatever

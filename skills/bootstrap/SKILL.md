@@ -96,7 +96,8 @@ detected values pre-selected as the recommended option. Cover:
      gate is real **branch protection** (free on public repos); unlimited Actions minutes.
    - **Full automation · private repo (Free plan)** — lanes still auto-trigger (~2,000
      Actions min/month free); branch protection isn't available, so the merge gate is the
-     `settings.json` deny rules + the **`adlc-main-tripwire.yml`** backstop + human Gate 2.
+     plugin's guard hook (backed by the `settings.json` deny rules) + the
+     **`adlc-main-tripwire.yml`** backstop + human Gate 2.
    Full automation (either kind) needs two secrets — `CLAUDE_CODE_OAUTH_TOKEN` and a
    `ADLC_DISPATCH_TOKEN` (PAT/App token) — see Phase 3. Best added once the local recipe
    is proven.
@@ -142,7 +143,11 @@ Create/write:
 3. `.claude/settings.json`
    — merge the deny rules from `templates/settings.deny.json` (block `git push` to main,
    force-push, `gh pr merge`). If the file exists, merge the `permissions.deny` array and
-   preserve everything else; never clobber existing settings.
+   preserve everything else; never clobber existing settings. These prefix rules are the
+   **backstop** for a session that runs without the plugin; the primary block is the plugin's
+   own guard hook, which needs nothing installed in the host repo. Do **not** add
+   `permissions.allow` rules here — they would apply to every role alike. Each Actions lane
+   grants its own tools in its workflow (Phase 3).
 
 4. `docs/adlc/CHARTER.md`
    — from `templates/charter.md.tmpl`. This is the per-project charter: it references the
@@ -201,6 +206,17 @@ machine: `stage:intake`, `gate:stories`, `stage:design`, `stage:build`, `stage:q
 `gate:deploy`, `stage:fast` + `lane:fast` for the fast lane, plus `adlc:auto` and a bug
 label). **Show the commands and ask before running** — this writes to their GitHub repo.
 
+**How a lane runs its agent — keep these lines intact in every workflow you copy.** The action
+gives a prompt no shell, edit or `gh` access, and it knows nothing about this plugin. So each
+agent step (a) installs the plugin on the runner with `plugin_marketplaces` + `plugins`,
+(b) runs as its named agent with `--agent adlc:<role>`, and (c) grants exactly that lane's
+tools with `--permission-mode dontAsk` + `--allowedTools`. Nothing is vendored into the host
+repo: the agent definitions, the `adlc:*` skills and the guard hook all come from that install.
+If the user installed the plugin from a fork or a private marketplace (check
+`claude plugin marketplace list`), replace the marketplace URL and the `@adlc-pipeline` suffix
+in every copied workflow, and tell them a private marketplace needs the runner to have git
+access to it.
+
 **Full-automation only:** copy the lane workflows into `.github/workflows/`
 (`adlc-builder.yml`, `adlc-qa.yml`, and `adlc-review.yml`), filled with the repo's
 required-check names and the author allowlist. `adlc-review.yml` runs **both** reviews on each
@@ -245,7 +261,11 @@ Builder on its own and the human only reads + merges the clean PR.
 
 **Allowlists — fill them, never leave a literal placeholder** (a leftover placeholder means
 that lane never fires). Every lane guards on two accounts: `{{PRINCIPAL}}` (who may auto-trigger)
-and `{{BUILDER_BOT}}` (the account the Builder uses to open PRs). Offer the user both ways:
+and `{{BUILDER_BOT}}` (the account the Builder uses to open PRs — the identity behind
+`ADLC_DISPATCH_TOKEN`). `{{BUILDER_BOT}}` also fills each agent step's `allowed_bots`: the
+action refuses a run triggered by a bot, and with a GitHub App token the App is the actor on
+every chained lane, so its name (e.g. `my-adlc-app[bot]`) must be listed or those lanes fail
+at startup. Offer the user both ways:
 - **(a) Auto-fill** — take `{{PRINCIPAL}}` from the Phase 1 handle and `{{BUILDER_BOT}}` from the
   GitHub App / dispatch-token identity (or the Principal's own handle if they run it themselves),
   and replace both across every copied workflow.
@@ -260,6 +280,12 @@ starts). Confirm the author allowlist, then describe the honest flow — on eith
 Analyst runs once per filing (the lanes' own label moves never re-run it); if it stops to ask
 clarifying questions the workflow takes `adlc:auto` off and the issue waits at `stage:intake`
 until the Principal answers and adds `adlc:auto` back:
+- **Design → build handoff:** in the design lane the Architect can edit files under `docs/`
+  only, and cannot commit or push. Once an ADR file and a task-breakdown comment naming it
+  (`ADLC-BREAKDOWN: <ADR path>`) exist, `adlc-design.yml` commits the `docs/` changes to
+  `adlc/design-<issue>` — with `.adlc/scope/<issue>.txt` listing them, so the diff-scope check
+  accepts the ADR in the Builder's PR — and only then moves the issue to `stage:build`;
+  `adlc-builder.yml` starts from that branch, so the ADR rides in the Builder's PR.
 - **Auto-start:** file → Analyst → **Gate 1 (you approve)** → Architect → build → PR
   (adversarial + architect review + CI) → QA → **Gate 2 (you merge + deploy)**.
 - **Full autopilot:** file → the whole chain runs → you review and merge the QA-approved,
@@ -270,9 +296,10 @@ the merge gate according to the repo's visibility (the Phase 1 choice):
   task (free on public repos): protect `main`, require the CI checks + a review, block direct
   pushes. This is the hard gate.
 - **Private repo (Free plan)** → also copy `adlc-main-tripwire.yml` into `.github/workflows/`.
-  Branch protection isn't available, so the merge gate is: the `settings.json` deny rules
-  (already written in Phase 2) + this tripwire (fails and files a bug on any direct push to
-  main) + the human Gate 2. Actions minutes are the ~2,000/month free tier — note it.
+  Branch protection isn't available, so the merge gate is: the plugin's guard hook (backed by
+  the `settings.json` deny rules written in Phase 2) + this tripwire (fails and files a bug
+  on any direct push to main) + the human Gate 2. Actions minutes are the ~2,000/month free
+  tier — note it.
 
 Then print the **one-time manual infra checklist** (Principal tasks — you cannot do these):
 - Two repo secrets: `CLAUDE_CODE_OAUTH_TOKEN` (`claude setup-token` — subscription, no API
@@ -314,8 +341,12 @@ automation is live.
 ## Phase 4 — Verify & first run
 
 1. **Self-check.** Run `.adlc/scripts/adlc-doctor.sh` and report its output — it deterministically
-   checks the deny rules, unfilled `{{...}}` placeholders, the project skills, and (with gh) the
-   state-machine labels. Also confirm the charter + RUNBOOK + ADR, CLAUDE.md (with the
+   checks the deny rules, unfilled `{{...}}` placeholders, that every lane installs the plugin and
+   grants its agent tools, that the scripts the lanes call are installed, the project skills, and
+   (with gh) the state-machine labels and the **merge gate**: whether the default branch requires
+   an approving review on a pull request, or at least has the tripwire. If it reports no gate,
+   say plainly that nothing outside the agents' own guard stops a merge there. Also
+   confirm the charter + RUNBOOK + ADR, CLAUDE.md (with the
    ablation-date comment), CONTEXT-LOG.md, and (if chosen) the workflows exist. Report a short
    ✅/⬜ checklist.
 2. **Offer the first pipeline run:**
