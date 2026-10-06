@@ -102,7 +102,7 @@ text{fill:var(--ink)}
 <line x1="1000" y1="125" x2="1030" y2="125" class="fl-grey" marker-end="url(#arrow-grey)"/>
 <text x="1040.0" y="128.5" class="leg" text-anchor="start" style="font-size:10.5px">watch only · reads, never edits</text>
 <line x1="1000" y1="142" x2="1030" y2="142" class="fl-red" marker-end="url(#arrow-red)"/>
-<text x="1040.0" y="145.5" class="leg" text-anchor="start" style="font-size:10.5px">blocked · the guard hook stops it</text>
+<text x="1040.0" y="145.5" class="leg" text-anchor="start" style="font-size:10.5px">not allowed · guard hook, workflow or role rule</text>
 <g class="ic ic-l" transform="translate(1332.0,48.0) scale(0.667)"><path d="M8 6l-5 6 5 6M16 6l5 6-5 6M14 4l-4 16"/></g>
 <text x="1358.0" y="60.0" class="leg" text-anchor="start" style="font-size:10.5px">agent · runs as Claude</text>
 <g class="ic ic-s" transform="translate(1332.0,68.0) scale(0.667)"><path d="M4 21V6M20 21V6"/><rect x="2" y="9" width="20" height="4.6" rx="1.2"/><path d="M7.6 9l-2.4 4.6M12.6 9l-2.4 4.6M17.6 9l-2.4 4.6"/></g>
@@ -119,13 +119,13 @@ text{fill:var(--ink)}
 <text x="130.0" y="286.0" class="lab" text-anchor="middle" style="font-size:12.5px;font-weight:800">You</text>
 <text x="130.0" y="299.0" class="lab-s" text-anchor="middle" style="font-size:9px">the Principal</text>
 <rect x="290.0" y="168.0" width="850.0" height="134.0" rx="16" class="cluster"/>
-<g class="ic ic-w" transform="translate(316.0,197.0) scale(2.417)"><title>GitHub Actions running anthropics/claude-code-action: one workflow per lane, fired by label changes. Each lane installs the plugin on the runner, runs as its named agent (--agent adlc:builder and so on) and is granted that lane&#x27;s tools only. templates/github/</title><path d="M12 2l8.7 5v10L12 22l-8.7-5V7z"/><path d="M12 7.5l1.4 3.1L16.5 12l-3.1 1.4L12 16.5l-1.4-3.1L7.5 12l3.1-1.4z" class="g-fill"/></g>
+<g class="ic ic-w" transform="translate(316.0,197.0) scale(2.417)"><title>GitHub Actions running anthropics/claude-code-action: one workflow per lane, fired by label changes and pull-request events. Each lane installs the plugin on the runner, runs as its named agent (--agent adlc:builder and so on) and is granted that lane&#x27;s tools only. templates/github/</title><path d="M12 2l8.7 5v10L12 22l-8.7-5V7z"/><path d="M12 7.5l1.4 3.1L16.5 12l-3.1 1.4L12 16.5l-1.4-3.1L7.5 12l3.1-1.4z" class="g-fill"/></g>
 <text x="390.0" y="206.0" class="clu-t" text-anchor="start" style="font-size:15px;font-weight:800">GITHUB ACTIONS</text>
 <text x="390.0" y="224.0" class="clu-s" text-anchor="start" style="font-size:10px">starts each agent when an issue&#x27;s label changes</text>
 <text x="390.0" y="246.0" class="clu-e" text-anchor="start" style="font-size:8.5px;font-weight:700">ONE WORKFLOW PER LANE</text>
 <g class="ic ic-w" transform="translate(395.0,259.0) scale(0.750)" stroke-dasharray="2.2 1.6"><title>adlc-intake.yml: runs the Analyst when a requirement is filed (auto-start, optional)</title><path d="M13 2.5L4.5 14H11l-1 7.5L19 10h-6.5z"/></g>
 <text x="404.0" y="291.0" class="clu-y lab-m" text-anchor="middle" style="font-size:8px">intake</text>
-<g class="ic ic-w" transform="translate(445.0,259.0) scale(0.750)"><title>adlc-design.yml: runs the Architect on stage:design</title><path d="M13 2.5L4.5 14H11l-1 7.5L19 10h-6.5z"/></g>
+<g class="ic ic-w" transform="translate(445.0,259.0) scale(0.750)" stroke-dasharray="2.2 1.6"><title>adlc-design.yml: runs the Architect on stage:design (comes with auto-start, optional; otherwise you run the Architect by hand)</title><path d="M13 2.5L4.5 14H11l-1 7.5L19 10h-6.5z"/></g>
 <text x="454.0" y="291.0" class="clu-y lab-m" text-anchor="middle" style="font-size:8px">design</text>
 <g class="ic ic-w" transform="translate(495.0,259.0) scale(0.750)"><title>adlc-builder.yml: runs the Builder on stage:build</title><path d="M13 2.5L4.5 14H11l-1 7.5L19 10h-6.5z"/></g>
 <text x="504.0" y="291.0" class="clu-y lab-m" text-anchor="middle" style="font-size:8px">build</text>
@@ -266,11 +266,11 @@ text{fill:var(--ink)}
 <text x="845.0" y="415.2" class="lbl-i" text-anchor="middle" style="font-size:9px">changes · fix, review again</text>
 <text x="600.0" y="676.0" class="eyebrow" text-anchor="start" style="font-size:9.5px;font-weight:700">FAST LANE · SMALL FIXES</text>
 <circle cx="620.0" cy="730.0" r="36.0" class="tile-l"/>
-<g class="ic ic-l" transform="translate(595.0,705.0) scale(2.083)"><title>Builder on the fast lane (adlc-fast.yml): works from the change brief, no ADR; writes the scope to .adlc/scope.txt, adds a test for S1-AC1, opens a PR labelled lane:fast.</title><path d="M8 6l-5 6 5 6M16 6l5 6-5 6M14 4l-4 16"/></g>
+<g class="ic ic-l" transform="translate(595.0,705.0) scale(2.083)"><title>Builder on the fast lane (adlc-fast.yml): works from the change brief, no ADR; writes the scope to .adlc/scope/&lt;issue&gt;.txt, adds a test for S1-AC1, opens a PR labelled lane:fast.</title><path d="M8 6l-5 6 5 6M16 6l5 6-5 6M14 4l-4 16"/></g>
 <text x="620.0" y="782.0" class="lab" text-anchor="middle" style="font-size:12.5px;font-weight:800">Builder</text>
 <text x="620.0" y="795.0" class="lab-s" text-anchor="middle" style="font-size:9px">small change + test</text>
 <circle cx="790.0" cy="730.0" r="36.0" class="plate"/>
-<g class="ic ic-l2" transform="translate(765.0,705.0) scale(2.083)"><title>adlc-triage.sh re-checks the real diff: default max 5 files and 40 changed lines, and no migrations, auth, infra, CI, .github/.claude, dependency manifests or secrets. Over the cap, the change goes to the full lane.</title><path d="M3.5 17.5a8.5 8.5 0 1 1 17 0"/><path d="M12 17.5l4.6-5.6"/><circle cx="12" cy="17.5" r="1.5" class="g-fill"/><path d="M6.3 11.3l1.3 1M12 8.2v1.7M17.7 11.3l-1.3 1"/></g>
+<g class="ic ic-l2" transform="translate(765.0,705.0) scale(2.083)"><title>adlc-triage.sh re-checks the real diff: default max 5 files and 40 changed lines, and no paths named for migrations, auth, security or infra, no CI or pipeline files, dependency manifests or secrets. It matches file paths, not what the code does. A change that fails goes to the full lane.</title><path d="M3.5 17.5a8.5 8.5 0 1 1 17 0"/><path d="M12 17.5l4.6-5.6"/><circle cx="12" cy="17.5" r="1.5" class="g-fill"/><path d="M6.3 11.3l1.3 1M12 8.2v1.7M17.7 11.3l-1.3 1"/></g>
 <text x="790.0" y="782.0" class="lab" text-anchor="middle" style="font-size:12.5px;font-weight:800">Size check</text>
 <text x="790.0" y="795.0" class="lab-s" text-anchor="middle" style="font-size:9px">small, nothing sensitive</text>
 <circle cx="960.0" cy="730.0" r="36.0" class="tile-l"/>
@@ -292,8 +292,8 @@ text{fill:var(--ink)}
 <path d="M330,690 C330,760 470,782 560,766" class="fl-red" marker-end="url(#arrow-red)"/>
 <circle cx="411" cy="760" r="10" class="nogo"/>
 <line x1="405.5" y1="754.5" x2="416.5" y2="765.5" class="nogo-x"/><line x1="416.5" y1="754.5" x2="405.5" y2="765.5" class="nogo-x"/>
-<rect x="329.4" y="781.0" width="163.2" height="18.0" rx="9.0" class="lbl-r-bg"/>
-<text x="411.0" y="793.2" class="lbl-r" text-anchor="middle" style="font-size:9px">no agent or autopilot picks it</text>
+<rect x="354.6" y="781.0" width="112.8" height="18.0" rx="9.0" class="lbl-r-bg"/>
+<text x="411.0" y="793.2" class="lbl-r" text-anchor="middle" style="font-size:9px">only you may pick it</text>
 <circle cx="1135.0" cy="610.0" r="36.0" class="tile-l"/>
 <g class="ic ic-l" transform="translate(1110.0,585.0) scale(2.083)"><title>Proposed Action Card (charter skill): action, risk, evidence, migrations none/additive/DESTRUCTIVE, rollback step. Posted with gate:deploy; awaits your approval.</title><path d="M6 3h8l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/><path d="M14 3v5h5M8 12h6"/><circle cx="14.5" cy="17" r="2.6"/></g>
 <text x="1135.0" y="662.0" class="lab" text-anchor="middle" style="font-size:12.5px;font-weight:800">Action card</text>
@@ -321,12 +321,12 @@ text{fill:var(--ink)}
 <path d="M1070,454 C1070,436 1086,428 1110,428 C1200,428 1300,428 1318,428 C1336,428 1340,444 1340,572" class="fl-red" marker-end="url(#arrow-red)"/>
 <circle cx="1231" cy="428" r="10" class="nogo"/>
 <line x1="1225.5" y1="422.5" x2="1236.5" y2="433.5" class="nogo-x"/><line x1="1236.5" y1="422.5" x2="1225.5" y2="433.5" class="nogo-x"/>
-<rect x="1046.5" y="419.0" width="143.0" height="18.0" rx="9.0" class="lbl-r-bg"/>
-<text x="1118.0" y="431.2" class="lbl-r" text-anchor="middle" style="font-size:9px">agents can&#x27;t merge or push</text>
+<rect x="1041.4" y="419.0" width="153.1" height="18.0" rx="9.0" class="lbl-r-bg"/>
+<text x="1118.0" y="431.2" class="lbl-r" text-anchor="middle" style="font-size:9px">agents may not merge or push</text>
 <circle cx="1405.0" cy="800.0" r="25.9" class="plate"/>
-<g class="ic ic-l2" transform="translate(1387.0,782.0) scale(1.500)"><title>adlc-main-tripwire.yml + adlc-tripwire-check.sh: on every push to main, fails and files a bug if a commit arrived without a merged PR. The free-plan stand-in for branch protection on private repos.</title><path d="M5 21V4M5 4h12l-2 4 2 4H5"/></g>
-<text x="1405.0" y="838.0" class="lab" text-anchor="middle" style="font-size:12.5px;font-weight:800">Tripwire</text>
-<text x="1405.0" y="851.0" class="lab-s" text-anchor="middle" style="font-size:9px">alerts on a direct push</text>
+<g class="ic ic-l2" transform="translate(1387.0,782.0) scale(1.500)" stroke-dasharray="2.2 1.6"><title>adlc-main-tripwire.yml + adlc-tripwire-check.sh: on every push to main, fails and files a bug if a commit arrived without a pull request. Installed for private repos on the free plan, where branch protection is not available; it reports after the fact and cannot stop a merge.</title><path d="M5 21V4M5 4h12l-2 4 2 4H5"/></g>
+<text x="1405.0" y="838.0" class="lab-g" text-anchor="middle" style="font-size:12.5px;font-weight:800">Tripwire</text>
+<text x="1405.0" y="851.0" class="lab-g" text-anchor="middle" style="font-size:9px">alerts on a direct push</text>
 <path d="M1362,640 C1385,680 1405,720 1405,772" class="fl-grey" marker-end="url(#arrow-grey)"/>
 <rect x="1350.7" y="695.0" width="82.6" height="18.0" rx="9.0" class="lbl-g-bg"/>
 <text x="1392.0" y="707.2" class="lbl-g" text-anchor="middle" style="font-size:9px">watches pushes</text>
@@ -335,13 +335,13 @@ text{fill:var(--ink)}
 <g class="ic ic-l2" transform="translate(288.0,912.0) scale(1.167)"><title>hooks/adlc_guard.py, a PreToolUse hook on every Bash command: blocks gh pr merge, pushes to main, force-pushes and GitHub API writes, for every agent in every permission mode. It reads command text, so it is a guardrail; the deny rules in templates/settings.deny.json stay as a second layer.</title><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></g>
 <text x="302.0" y="960.0" class="lab" text-anchor="middle" style="font-size:10.5px;font-weight:700">Guard hook</text>
 <text x="302.0" y="973.0" class="lab-s" text-anchor="middle" style="font-size:8.5px">no merge, no push</text>
-<g class="ic ic-l2" transform="translate(380.0,912.0) scale(1.167)"><title>adlc-diff-scope.sh: holds a lane PR to the files listed in .adlc/scope/&lt;issue&gt;.txt (design PRs: docs/ only; QA PRs: test folders only), and fails a lane PR that declares no scope. In CI it runs from the default branch&#x27;s copy, so a PR cannot edit the check that judges it.</title><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M3 10.5h18"/></g>
+<g class="ic ic-l2" transform="translate(380.0,912.0) scale(1.167)"><title>adlc-diff-scope.sh: holds a lane PR to the files its own scope file, .adlc/scope/&lt;issue&gt;.txt, declares (test folders count too once QA adds tests), and fails a lane PR that declares no scope. The Builder writes that file; the Architect&#x27;s review checks it against the design. In CI (automated lanes only) it runs from the default branch&#x27;s copy, so a PR cannot edit the check that judges it.</title><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M3 10.5h18"/></g>
 <text x="394.0" y="960.0" class="lab" text-anchor="middle" style="font-size:10.5px;font-weight:700">Scope check</text>
 <text x="394.0" y="973.0" class="lab-s" text-anchor="middle" style="font-size:8.5px">allowed files only</text>
 <g class="ic ic-l2" transform="translate(472.0,912.0) scale(1.167)"><title>adlc-verdict.sh: parses the reviewers&#x27; ADLC-ADV / ADLC-ARCH lines; control never trusts GitHub review state.</title><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M9.5 8c-1.6 0-2 .6-2 2v1.2c0 .9-.5 1.3-1.3 1.3.8 0 1.3.4 1.3 1.3V15c0 1.4.4 2 2 2"/><path d="M14.5 8c1.6 0 2 .6 2 2v1.2c0 .9.5 1.3 1.3 1.3-.8 0-1.3.4-1.3 1.3V15c0 1.4-.4 2-2 2"/></g>
 <text x="486.0" y="960.0" class="lab" text-anchor="middle" style="font-size:10.5px;font-weight:700">Verdict reader</text>
 <text x="486.0" y="973.0" class="lab-s" text-anchor="middle" style="font-size:8.5px">reads PASS/CHANGES</text>
-<g class="ic ic-l2" transform="translate(564.0,912.0) scale(1.167)"><title>adlc-fix-cap.sh: counts adlc-fix: commits; after 3 rounds the PR is tagged needs:human.</title><path d="M20 12a8 8 0 0 1-13.9 5.4M4 12a8 8 0 0 1 13.9-5.4"/><path d="M18 3v4h-4M6 21v-4h4"/></g>
+<g class="ic ic-l2" transform="translate(564.0,912.0) scale(1.167)"><title>adlc-fix-cap.sh: counts the adlc-fix: commits in the branch&#x27;s history; at 3 the PR is tagged needs:human.</title><path d="M20 12a8 8 0 0 1-13.9 5.4M4 12a8 8 0 0 1 13.9-5.4"/><path d="M18 3v4h-4M6 21v-4h4"/></g>
 <text x="578.0" y="960.0" class="lab" text-anchor="middle" style="font-size:10.5px;font-weight:700">Fix cap</text>
 <text x="578.0" y="973.0" class="lab-s" text-anchor="middle" style="font-size:8.5px">then a person</text>
 <g class="ic ic-l2" transform="translate(656.0,912.0) scale(1.167)"><title>templates/hooks/pre-commit: runs the scope check before each local commit.</title><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9l3 3-3 3M12.5 15h5"/></g>
@@ -361,7 +361,7 @@ text{fill:var(--ink)}
 <text x="1000.0" y="962.0" class="lab" text-anchor="middle" style="font-size:10.5px;font-weight:700">Retro</text>
 <text x="1000.0" y="975.0" class="lab-s" text-anchor="middle" style="font-size:8.5px">weekly, or /adlc:retro</text>
 <circle cx="1120.0" cy="926.0" r="21.6" class="tile-a"/>
-<g class="ic ic-a" transform="translate(1105.0,911.0) scale(1.250)" stroke-dasharray="2.2 1.6"><title>A propose-only PR: a regression test first, then a CI check, then a convention. It goes through both gates like any change.</title><path d="M6 3h8l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/><path d="M14 3v5h5"/><path d="M8.5 16h7M13 13.5l2.5 2.5-2.5 2.5"/></g>
+<g class="ic ic-a" transform="translate(1105.0,911.0) scale(1.250)" stroke-dasharray="2.2 1.6"><title>A propose-only PR: a regression test first, then a CI check, then a convention. It is reviewed like any pull request, and you merge it.</title><path d="M6 3h8l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/><path d="M14 3v5h5"/><path d="M8.5 16h7M13 13.5l2.5 2.5-2.5 2.5"/></g>
 <text x="1120.0" y="962.0" class="lab" text-anchor="middle" style="font-size:10.5px;font-weight:700">Fix PR</text>
 <text x="1120.0" y="975.0" class="lab-s" text-anchor="middle" style="font-size:8.5px">tests first, then checks</text>
 <path d="M904,926 C924,926 950,926 974,926" class="fl-amber" marker-end="url(#arrow-amber)"/>
@@ -420,7 +420,7 @@ text{fill:var(--ink)}
 <g class="ic ic-s" transform="translate(1383.0,1078.0) scale(0.833)"><circle cx="12" cy="8" r="4"/><path d="M4.5 21a7.5 7.5 0 0 1 15 0"/></g>
 <text x="1411.0" y="1092.0" class="loop-t" text-anchor="start" style="font-size:12.5px;font-weight:800">Gate 2</text>
 <text x="1355.0" y="1114.0" class="loop-s" text-anchor="start" style="font-size:10px">You read the card, then merge</text>
-<text x="1355.0" y="1127.0" class="loop-s" text-anchor="start" style="font-size:10px">and deploy. No agent can.</text>
+<text x="1355.0" y="1127.0" class="loop-s" text-anchor="start" style="font-size:10px">and deploy. Agents may not.</text>
 </svg>
 <figcaption>Drawn from the plugin as built: agents/, hooks/, skills/charter, skills/triage, skills/intake, templates/github/*.yml, templates/scripts/ and mission-control/. The fast-lane size cap and the fix-loop limit are defaults a project can change; hover the icons for the values and files. Without GitHub Actions, you start each lane by hand in Claude Code and the gates are the same.</figcaption></figure></div>
 </body></html>

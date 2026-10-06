@@ -11,7 +11,7 @@ Think of it as an assembly line for code changes. Each station is an AI agent wi
 - **What goes in:** an idea, a document or a ticket, turned into one clear GitHub issue, such as "add a password reset link".
 - **What comes out:** a pull request (a proposed code change) that one agent built, a separate agent reviewed and QA checked, ready for a human to merge.
 - **Where it works:** a brand-new project that only has a requirements document, or an existing codebase. A setup wizard adapts it to either.
-- **What it never does:** merge, deploy or push to the main branch on its own.
+- **What agents may not do:** merge, deploy or push to the main branch. Those stay with you.
 - **How you watch it:** Mission Control, a live page on your own machine.
 
 The name stands for Agentic Software Development Life Cycle: the usual plan, design, build, test and release steps, run by agents.
@@ -24,7 +24,7 @@ Every request passes two gates. At Gate 1 you approve the plan and pick the lane
 
 ## The team
 
-Five AI agents do the work, and one person, called the Principal, owns the decisions. Each agent gets only the tools its job needs: its file names them, and each automated lane grants a fixed list. A guard built into the plugin also checks every shell command, and a scope check holds each pull request to its allowed files.
+Five AI agents do the work, and one person, called the Principal, owns the decisions. Each agent gets only the tools its job needs: its file names them, and each automated lane grants a fixed list. A guard built into the plugin checks every shell command. The table shows each role's rules; the limits on which files a role may change are backed by the scope check on the Builder's pull request and by the reviews.
 
 | Who | Their one job | What they may change | What they never do |
 | --- | --- | --- | --- |
@@ -39,7 +39,7 @@ The rule that ties the team together: whoever builds something never verifies, m
 
 ## Step by step
 
-A request goes through eight steps, and you act in only two of them. GitHub labels track where it is: a `stage:` label means an agent is working, a `gate:` label means it is waiting for you.
+A request goes through eight steps. Agents do five of them; the first step and the two gates are yours. GitHub labels track where it is: a `stage:` label means an agent is working, a `gate:` label means it is waiting for you.
 
 1. **You start a request.** Run `/adlc-intake` with an idea, a document or a ticket, or open a GitHub issue yourself. Either way it becomes one issue with the `stage:intake` label.
 2. **The Product Analyst writes the stories.** If the request is unclear, it asks numbered questions on the issue and stops. Otherwise it writes user stories with pass/fail acceptance criteria and recommends a lane, then moves the issue to `gate:stories`.
@@ -48,19 +48,24 @@ A request goes through eight steps, and you act in only two of them. GitHub labe
 5. **The Builder writes the code.** On its own branch it implements the tasks and lists the files it may touch in a scope file, `.adlc/scope/<issue>.txt`. It adds a test for each acceptance criterion, runs the tests and opens a pull request.
 6. **Two independent reviews.** The Adversarial Reviewer tries to break the change, and the Architect checks it matches the design. If either finds a real problem, the Builder fixes it and both run again, up to 3 rounds before a human is called in.
 7. **QA proves it works.** It runs the full test suite, fills missing tests and does a security pass. If all is clean, it moves the issue to `gate:deploy` and posts a Proposed Action Card: the action, its risk, the evidence and how to undo it.
-8. **Gate 2: you merge.** You read the card and the pull request, then merge and deploy yourself. No agent can do this step.
+8. **Gate 2: you merge.** You read the card and the pull request, then merge and deploy yourself. Agents may not: the guard blocks any merge command an agent types.
 
-Running underneath every step:
+The safety nets, and when each one is on:
 
-- **A guard on every command.** The plugin checks each shell command an agent types and blocks merges, pushes to the main branch, force-pushes and direct writes to GitHub's API, in every permission mode. It also applies to your own Claude Code sessions in that repo. It reads the command's text, so treat it as a strong guardrail, not a lock; the deny rules the wizard writes stay as a second layer.
-- **Branch protection is the lock.** GitHub's own rule on the main branch, that a pull request needs an approving review, is the part that cannot be talked around: the pipeline's bot cannot approve its own pull request. The setup check, `adlc-doctor.sh`, tells you whether your repo has it.
-- **A scope check** fails a pull request that touches files outside its scope file, and stops such a commit on your machine. It runs from the main branch's copy, so a pull request cannot edit the check that judges it.
-- **A main-branch tripwire** files an alert if anyone pushes straight to main without a reviewed pull request.
-- **A weekly retro** reads past review findings and proposes regression tests and checks for repeat mistakes, as a normal pull request you approve.
+| Safety net | What it does | When it is on |
+| --- | --- | --- |
+| Guard hook | Blocks merges, pushes to the main branch, force-pushes and direct writes to GitHub's API that an agent types, in every permission mode | Always, in a repo set up with the pipeline, including your own Claude Code sessions there |
+| Deny rules | A second, simpler block on the same commands | Always; the wizard writes them |
+| Scope check | Holds a change to the files its scope file declares | On your machine, for commits on a Builder branch; on pull requests once the automated lanes are installed |
+| Branch protection | GitHub's own rule that a pull request needs an approving review. The pipeline's bot cannot approve its own pull request | When you turn it on; it is free on public repos |
+| Main-branch tripwire | Files an alert when a commit reaches main without a pull request | Private repos on the free plan, where branch protection is not available |
+| Weekly retro | Reads past review findings and proposes tests and checks for repeat mistakes, as a pull request you approve | If you switch on the improvement loop |
+
+The guard reads the text of a command, so treat it as a strong guardrail, not a lock. Branch protection is the part that cannot be talked around. On pull requests the scope check runs from the main branch's copy, so a pull request cannot edit the check that judges it. With the automated lanes installed, the setup check, `adlc-doctor.sh`, tells you whether your main branch has such a gate.
 
 ## Two lanes
 
-Small, low-risk changes can skip the design steps, but only with your approval and only if the real change stays small. The Analyst recommends a lane for every request; it never chooses one.
+Small, low-risk changes can skip the design steps, but only with your approval and only if the real change stays small. The Analyst recommends a lane for every request; choosing it is yours.
 
 | Step | Full lane | Fast lane |
 | --- | --- | --- |
@@ -74,11 +79,11 @@ Small, low-risk changes can skip the design steps, but only with your approval a
 | Automatic size check | Not needed | Yes, on the real change |
 | Gate 2: you merge | Yes | Yes |
 
-A change qualifies when it touches one small area and its design is obvious: a text fix, a config value, a log line, a small bug with a clear cause. The size check holds it to 5 files and 40 changed lines by default. It must not touch database migrations, login or access-control code, infrastructure, CI, dependency files or secrets. If the real change breaks any of these limits, it goes back to the full lane automatically. Like the scope check, the size check also runs from the main branch's copy.
+A change qualifies when it touches one small area and its design is obvious: a text fix, a config value, a log line, a small bug with a clear cause. An automatic check then looks at the real change. It allows 5 files and 40 changed lines by default, and rejects paths that look sensitive: folders named for migrations, auth, security or infrastructure, CI and pipeline files, dependency files and secrets. A change that fails goes back to the full lane. The check goes by size and file paths only, so sensitive code under an ordinary name still depends on triage and the review. Like the scope check, it also runs from the main branch's copy.
 
 Two rules keep the shortcut honest:
 
-- **The fast lane never starts on its own.** A person must apply `stage:fast`, even when autopilot is on. Autopilot can only approve Gate 1 into the full lane.
+- **The fast lane is yours to start.** You apply `stage:fast`. Autopilot never does, and can only approve Gate 1 into the full lane; the Analyst is instructed only to recommend.
 - **Gate 2 is never skipped.** Every change, in every lane, waits for a human to merge it.
 
 ## Using it
@@ -96,11 +101,11 @@ You also choose how much runs on its own:
 | Mode | How each step starts | Your part |
 | --- | --- | --- |
 | Local recipe (start here) | You run each agent by hand, following the runbook | Each step, plus both gates |
-| Full automation | Moving a label starts the next agent in GitHub Actions | The first label, Gate 1 and Gate 2 |
-| Auto-start | Filing a requirement starts the Analyst right away | Gate 1 and Gate 2 |
+| Full automation | GitHub Actions runs the Builder, the reviews and QA as labels and pull requests move. You still run the Analyst and the Architect by hand | Those two steps, plus both gates |
+| Auto-start | Filing a requirement starts the Analyst, and approving Gate 1 starts the Architect | Gate 1 and Gate 2 |
 | Full autopilot | Gate 1 is approved for you, full lane only | Gate 2: review and merge |
 
-In the automated modes each step installs the plugin on GitHub's runner and runs as its named agent with a fixed list of tools. The agents, their skills and the guard come from that install; they are not copied into your repo.
+In the automated modes each step installs the plugin on GitHub's runner and runs as its named agent with a fixed list of tools. The agents, their skills and the guard come from that install and are not copied into your repo; the workflow files and the small check scripts are.
 
 Any automated mode needs two GitHub secrets: `CLAUDE_CODE_OAUTH_TOKEN`, made with `claude setup-token` from your Claude subscription, and `ADLC_DISPATCH_TOKEN`, which lets one workflow start the next. It does not need GitHub Pro. Later, `/adlc:retro` runs the improvement review on demand.
 
@@ -133,7 +138,7 @@ Mission Control is a live page of the line on your own machine: one station per 
 - **It sees agents on this machine.** Runs on GitHub's runners show their GitHub state (labels, pull request, verdicts), not their steps or tokens.
 - **Token and cost figures are opt-in.** They appear in new sessions once you add the settings in `templates/settings.mission-control.json`; the command offers to do it.
 
-It needs Python 3.9 or newer, and `gh` signed in. There is nothing else to install.
+It needs Python 3.9 or newer, `git`, `curl` and a signed-in `gh`. There are no packages to install.
 
 ## Glossary
 
