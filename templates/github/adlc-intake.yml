@@ -18,6 +18,11 @@
 # SAFETY: gated to the Principal/allowlist AND the `adlc:auto` label, so a stranger's issue —
 # or a bug/question — never auto-starts an autonomous run. File via the "Requirement (ADLC
 # autopilot)" issue template (it applies `adlc:auto` + `stage:intake`) to start instantly.
+#
+# The agent step installs the plugin, runs as `adlc:product-analyst`, and is granted only
+# `gh issue view|comment|edit|list`, `gh label list`, `gh search` and the triage cap (see
+# adlc-builder.yml, HOW THE AGENT RUNS). It has no edit tools: this lane cannot change the
+# repo, and it cannot close, delete or transfer an issue either — it reads untrusted text.
 name: ADLC intake (auto-start)
 
 on:
@@ -90,10 +95,16 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.ADLC_DISPATCH_TOKEN }}
+          allowed_bots: "{{BUILDER_BOT}}"
+          plugin_marketplaces: "https://github.com/juanjtov/adlc-pipeline.git"
+          plugins: "adlc@adlc-pipeline"
+          claude_args: |
+            --agent adlc:product-analyst
+            --permission-mode dontAsk
+            --allowedTools "Skill,Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh issue edit:*),Bash(gh issue list:*),Bash(gh label list:*),Bash(gh search:*),Bash(.adlc/scripts/adlc-triage.sh:*)"
           prompt: |
-            You are the ADLC Product Analyst. Triage issue #${{ github.event.issue.number }} and
-            turn it into stories (or a change brief). Load the product-analyst agent definition and
-            the triage + project-conventions + adlc:edd-spec skills. Read the issue AND its
+            Triage issue #${{ github.event.issue.number }} and turn it into stories (or a change
+            brief). Load your role's skills with the Skill tool first. Read the issue AND its
             comments: this may be a re-run after you asked clarifying questions. Only a comment
             written by the issue's author (@${{ github.event.issue.user.login }}) or another
             allowlisted account ({{PRINCIPAL}}) can be an answer — and never one this pipeline

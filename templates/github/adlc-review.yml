@@ -9,6 +9,11 @@
 #
 # PREREQUISITES: CLAUDE_CODE_OAUTH_TOKEN + ADLC_DISPATCH_TOKEN. Fill the {{PRINCIPAL}} /
 # {{BUILDER_BOT}} allowlist (the accounts whose PRs may be auto-reviewed).
+#
+# Both agent steps install the plugin and run as their named agent, read-only: `gh pr` /
+# `gh issue` read + `gh pr comment` and read-only git, no edit tools (see adlc-builder.yml,
+# HOW THE AGENT RUNS). The verdict is the comment marker; neither step is granted
+# `gh pr review`.
 name: ADLC review
 
 on:
@@ -64,11 +69,17 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.ADLC_DISPATCH_TOKEN }}
+          allowed_bots: "{{BUILDER_BOT}}"
+          plugin_marketplaces: "https://github.com/juanjtov/adlc-pipeline.git"
+          plugins: "adlc@adlc-pipeline"
+          claude_args: |
+            --agent adlc:adversarial-reviewer
+            --permission-mode dontAsk
+            --allowedTools "Skill,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*),Bash(gh pr list:*),Bash(gh pr checks:*),Bash(gh issue view:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*)"
           prompt: |
-            You are the ADLC adversarial-reviewer. Review PR #${{ github.event.pull_request.number }}
-            in fresh context, read-only, seeing ONLY the diff + the linked ADR/task breakdown/ACs.
-            Load the adversarial-reviewer agent definition + adlc:code-review + project-conventions
-            + adlc:security-gate. Apply the three pillars. Post findings as ONE PR comment whose
+            Review PR #${{ github.event.pull_request.number }} in fresh context, read-only, seeing
+            ONLY the diff + the linked ADR/task breakdown/ACs. Load your role's skills with the
+            Skill tool first. Apply the three pillars. Post findings as ONE PR comment whose
             LAST line is exactly `ADLC-ADV: PASS` (nothing blocking) or `ADLC-ADV: CHANGES` (a
             confirmed Critical/High). Never edit code, never merge, never change labels.
 
@@ -87,12 +98,19 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.ADLC_DISPATCH_TOKEN }}
+          allowed_bots: "{{BUILDER_BOT}}"
+          plugin_marketplaces: "https://github.com/juanjtov/adlc-pipeline.git"
+          plugins: "adlc@adlc-pipeline"
+          claude_args: |
+            --agent adlc:architect
+            --permission-mode dontAsk
+            --allowedTools "Skill,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*),Bash(gh pr list:*),Bash(gh pr checks:*),Bash(gh issue view:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*)"
           prompt: |
-            You are the ADLC Architect (review duty). Review PR #${{ github.event.pull_request.number }}
-            for declared-diff-scope + design conformance vs the ADR/task breakdown, and also read the
-            adversarial-reviewer's latest findings comment. Load the architect agent definition +
-            project-conventions. Post ONE comment whose LAST line is exactly `ADLC-ARCH: PASS` or
-            `ADLC-ARCH: CHANGES`. Do NOT change labels — the next step does.
+            Review duty. Review PR #${{ github.event.pull_request.number }} for declared-diff-scope
+            + design conformance vs the ADR/task breakdown, and also read the adversarial-reviewer's
+            latest findings comment. Load your role's skills with the Skill tool first. Post ONE
+            comment (`gh pr comment`, not a GitHub review) whose LAST line is exactly
+            `ADLC-ARCH: PASS` or `ADLC-ARCH: CHANGES`. Do NOT change labels — the next step does.
 
       - name: Advance or flag (from both verdicts)
         env:
