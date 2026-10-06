@@ -105,7 +105,8 @@ detection, the fix-loop cap, the verdict parse, setup validation — are small s
 hook**, so your machine and Actions run the same code. The Builder declares each change's scope
 in `.adlc/scope/<issue>.txt`; the diff-scope check fails a lane PR that strays outside it or
 declares none. `adlc-doctor.sh` validates a host repo's setup (deny rules, unfilled
-placeholders, lanes that can't run their agent, skills, labels). Judgment guardrails
+placeholders, lanes that can't run their agent, skills, labels, and whether the default branch
+has a merge gate). Judgment guardrails
 (design conformance, security severity) stay as skills + the adversarial review — those can't
 be made deterministic without losing the point.
 
@@ -312,8 +313,13 @@ there limits nothing). It is sturdier than the prefix deny rules in `settings.js
   And in text it can't read it finds only the forbidden calls written out plainly — not ones
   that text assembles itself.
 
-Treat it as a guardrail; the gate that cannot be talked around is branch protection (or the
-tripwire) plus your own Gate 2.
+Treat it as a guardrail. It stops an agent that *types* a merge or a push to main. It does not
+stop a *workflow* that later runs code an agent wrote: the review and fast lanes run the
+`.adlc/scripts/` — and the workflow files — of the pull request they are judging, with the
+dispatch token. What stops a merge there is GitHub's own rule on the default branch: a pull
+request needs an approving review, and the pipeline's bot cannot approve its own PR. So the gate
+that cannot be talked around is that rule plus your own Gate 2 — the tripwire only reports a
+direct push after the fact. `adlc-doctor.sh` tells you which of them a repo has.
 
 **Auto-start (optional, on top of full automation).** Add `adlc-intake.yml` + `adlc-design.yml`
 + the `Requirement (ADLC autopilot)` issue template, and **filing a requirement starts the
