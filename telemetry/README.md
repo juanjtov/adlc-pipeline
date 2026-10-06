@@ -3,6 +3,14 @@
 Captures **token count, cost, and latency per agent / per pipeline run** by receiving what
 Claude Code exports over OpenTelemetry. One collector serves all your repos.
 
+**Two destinations — pick one per repo.** This collector keeps a durable file
+(`data/telemetry.jsonl`), the source you build `adlc-cache.sh`'s input from. The alternative is
+**Mission Control** (`/adlc-mission-control`, see `mission-control/README.md`): it receives Claude
+Code's telemetry itself, with no Docker, and shows tokens, cost and latency live per agent, on
+this machine only. `templates/settings.telemetry.json` and
+`templates/settings.mission-control.json` both set the OTLP endpoint and protocol, so a repo
+sends to one or the other.
+
 ## 1. Start the collector
 ```bash
 cd telemetry && mkdir -p data && docker compose up -d
