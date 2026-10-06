@@ -38,7 +38,11 @@ flowchart LR
 
 ```
 .claude-plugin/plugin.json     # manifest (plugin name: "adlc")
+.claude-plugin/marketplace.json  # marketplace "adlc-pipeline" — how the lanes install it
 agents/                        # the 4 role agents + adversarial-reviewer (stack-agnostic)
+hooks/
+  hooks.json                   # wires both hooks below into every session that enables the plugin
+  adlc-guard.sh · adlc_guard.py  # the guard, on every Bash command: no merge / push-to-main / force-push
 skills/
   charter/                     # portable process rules: principles, roles, state machine, gates
   triage/                      # size an issue → fast lane (trivial) vs full pipeline
@@ -55,7 +59,7 @@ commands/adlc-init.md          # friendly alias that launches the wizard
 commands/adlc-mission-control.md   # opens Mission Control, the live view of the line
 mission-control/               # ← MISSION CONTROL: local live view (Python stdlib server + static page)
 bin/adlc-mission-control       # its launcher (on the Bash PATH when the plugin is enabled)
-hooks/hooks.json               # reports pipeline-agent activity to Mission Control when it is running
+mission-control/hook.sh        # reports pipeline-agent activity to Mission Control when it is running
 templates/                     # what the wizard fills into the host repo
   host-CLAUDE.md.tmpl          # minimalist CLAUDE.md (commands + gotchas + pointers)
   skills/project-conventions.SKILL.md.tmpl   # lean: only what the code doesn't reveal
@@ -77,7 +81,7 @@ templates/                     # what the wizard fills into the host repo
             #   adlc-pr-stage.sh     = which diff-scope stage a PR is in (from its linked issue)
             #   adlc-branch-issue.sh = which issue a lane branch names (feat/<issue>-<slug>)
   hooks/pre-commit             # local diff-scope guard (reuses adlc-diff-scope.sh)
-tests/run.sh                   # unit tests for the guardrail scripts (bash, no deps)
+tests/run.sh                   # unit tests: guardrail scripts, guard hook, lane wiring
 telemetry/                     # ready-to-run local OTel collector (docker compose) for token/cost
 ```
 
@@ -91,9 +95,9 @@ persistent context is a tax**, so the plugin generates the *minimum* per project
 `project-conventions` holds only what the code can't reveal (commands, roles/tenancy, seams,
 gotchas); agents state an outcome + guardrails + a runnable **exit criterion** (`verify`
 skill) rather than enumerating steps; hard prohibitions are reserved for genuinely dangerous
-areas (merge/deploy/push/cross-gate) and otherwise enforced structurally by `tools:` grants
-and deny rules; and the `ablation` skill + `CONTEXT-LOG.md` exist so the setup gets pruned,
-not just appended to.
+areas (merge/deploy/push/cross-gate) and otherwise enforced structurally — by `tools:` grants,
+the plugin's guard hook, and each lane's tool allowlist; and the `ablation` skill +
+`CONTEXT-LOG.md` exist so the setup gets pruned, not just appended to.
 
 **Deterministic where it matters.** The *mechanical* guardrails — path scope, direct-push
 detection, the fix-loop cap, the verdict parse, setup validation — are small shell scripts in
@@ -101,7 +105,8 @@ detection, the fix-loop cap, the verdict parse, setup validation — are small s
 hook**, so your machine and Actions run the same code. The Builder declares each change's scope
 in `.adlc/scope/<issue>.txt`; the diff-scope check fails a lane PR that strays outside it or
 declares none. `adlc-doctor.sh` validates a host repo's setup (deny rules, unfilled
-placeholders, skills, labels). Judgment guardrails
+placeholders, lanes that can't run their agent, skills, labels, and whether the default branch
+has a merge gate). Judgment guardrails
 (design conformance, security severity) stay as skills + the adversarial review — those can't
 be made deterministic without losing the point.
 
@@ -152,19 +157,24 @@ rises), so the metric is the point.
 ### Two layers, on purpose
 
 - **Portable core** (ships in the plugin, never changes per project): the role agents, the
-  `charter`/`edd-spec`/`security-gate` skills, the deny rules, the Action Card format.
+  `charter`/`edd-spec`/`security-gate` skills, the guard hook, the deny rules, the Action Card
+  format.
 - **Project substrate** (the wizard generates it per repo): `project-conventions` and
   `release-ops` skills, the per-project charter, RUNBOOK, and ADRs — the only place your
   stack, commands, deploy topology, roles, and tenancy live.
 
 ## Install
 
+This repo is its own plugin marketplace (`adlc-pipeline`):
+
 ```bash
-claude --plugin-dir /path/to/adlc-pipeline
+claude plugin marketplace add juanjtov/adlc-pipeline
+claude plugin install adlc@adlc-pipeline
 ```
 
-(Or publish this repo as a plugin marketplace and `claude plugin` add it.) During
-development, `/reload-plugins` picks up edits.
+The Actions lanes install it the same way on the runner. To work on the plugin itself, load a
+checkout instead — `claude --plugin-dir /path/to/adlc-pipeline` — and `/reload-plugins` picks
+up edits.
 
 ## Use
 
@@ -199,8 +209,9 @@ fast:  stage:intake → (triage) → stage:fast ──────────�
 
 Core rules (full text in the `charter` skill): author/verifier separation (no agent
 verifies/merges/deploys its own work), propose-before-write for every irreversible action,
-deterministic permissions (agent `tools:` + deny rules + diff-scope CI), and agents move
-work *up to* a gate but never *through* it. GitHub issues are the execution source of truth.
+deterministic permissions (agent `tools:` + the guard hook + per-lane tool grants +
+diff-scope CI), and agents move work *up to* a gate but never *through* it. GitHub issues
+are the execution source of truth.
 
 ### Fast lane (trivial changes)
 
@@ -234,15 +245,81 @@ Pro was only ever about server-side branch protection on private repos:
 2. **Full automation · public repo** — label transitions auto-trigger the lanes; the merge
    gate is real branch protection (free on public repos); unlimited Actions minutes.
 3. **Full automation · private repo (Free plan)** — lanes still auto-trigger (~2,000 Actions
-   min/month free). Branch protection isn't available, so the merge gate is the `settings.json`
-   deny rules + `adlc-main-tripwire.yml` (fails + files a bug on any direct push to main) +
-   human Gate 2.
+   min/month free). Branch protection isn't available, so the merge gate is the plugin's guard
+   hook (backed by the `settings.json` deny rules) + `adlc-main-tripwire.yml` (fails + files a
+   bug on any direct push to main) + human Gate 2.
 
 Full automation (either kind) needs two repo secrets: `CLAUDE_CODE_OAUTH_TOKEN`
 (`claude setup-token` — subscription, no API key) and `ADLC_DISPATCH_TOKEN` (a PAT or, better,
 a GitHub App token). The dispatch token is required because a workflow's default `GITHUB_TOKEN`
 can't trigger another workflow — without it a lane's handoff wouldn't fire the next lane — and
 it makes the Builder's PRs authored by the bot, keeping author/verifier separation real.
+
+### How a lane runs its agent
+
+`claude-code-action` gives a prompt **no shell, edit or `gh` access** by default, and it knows
+nothing about this plugin. So every agent step in the lane templates does three things:
+
+- **Installs the plugin on the runner** — `plugin_marketplaces` + `plugins: adlc@adlc-pipeline`.
+  That is where the agent definitions, the `adlc:*` skills and the guard hook come from; nothing
+  is vendored into your repo. It installs this repo's default branch at run time, so point both
+  inputs at your own fork if you want to control when the lanes pick up a change.
+- **Runs as its named agent** — `--agent adlc:builder` (and so on), which gives the session that
+  agent's prompt, model and `tools:`.
+- **Grants that lane's tools** — `--permission-mode dontAsk` + `--allowedTools`. The Analyst
+  and the reviewers get named `gh`/`git` commands and no edit tools; the Architect, in the
+  design lane, gets those plus file edits under `docs/` only; the Builder and QA get the shell.
+  Anything else that would need approval is denied; file reads and read-only commands (`ls`,
+  `grep`, read-only `git`) still run. `tests/run.sh` pins every lane's agent and grant, so
+  widening one is a visible change.
+
+**The design lane hands its ADR over on a branch.** The Architect cannot commit or push, so
+after it runs the workflow commits its `docs/` changes to `adlc/design-<issue>` and only then
+moves the issue to `stage:build`. A stage is done only when its artifacts exist: with no ADR
+file, or no task-breakdown comment naming it (`ADLC-BREAKDOWN: <ADR path>`), the issue stays
+at `stage:design` and says why. The Builder lane starts from that branch, so the ADR rides in
+the Builder's PR. The same commit starts `.adlc/scope/<issue>.txt` with the design files it
+carries, so the diff-scope check accepts them on that PR; the Builder adds the task's own
+scope below those lines.
+
+If `ADLC_DISPATCH_TOKEN` is a GitHub App token, the App is the actor on every chained lane, and
+the action refuses bot-triggered runs unless the bot is in `allowed_bots` — the wizard fills it
+from the same `{{BUILDER_BOT}}` handle as the allowlists.
+
+**What blocks a merge or a push to main.** The plugin ships a `PreToolUse` hook
+(`hooks/adlc_guard.py`) that parses every Bash command and blocks `gh pr merge`, a non-GET
+`gh api` call, a GitHub API write through `curl`/`wget`, any force-push, and a push whose
+destination is `main`/`master`/the default branch (add names with `ADLC_PROTECTED_BRANCHES`)
+— for every agent, in every permission mode, in the lanes and in any local session that
+starts in, or moves into, a repo that adopted ADLC. The same hook holds the per-command limits
+of the three narrow roles (an agent's `tools:` field takes tool *names*, so `Bash(gh issue:*)`
+there limits nothing). It is sturdier than the prefix deny rules in `settings.json`, which
+`git push origin HEAD:main` or `bash -c "gh pr merge 5"` walk straight past. How it judges:
+
+- **It follows the shell.** Quotes, heredocs, `$(…)`, `bash -c`, `eval`, `source`, `trap`,
+  wrappers such as `env` and `xargs`, and a `cd`, a `git checkout` or a `NAME=value` earlier
+  in the same command — so a push is judged by the branch it will really leave from.
+- **What it can't read, it doesn't trust.** If the push target, the `git`/`gh` subcommand or
+  an API call's arguments are computed (`$(…)`, a variable set outside the command, input to
+  `xargs`), it blocks. A program named by a variable (`"$GIT" push …`) is judged as the `git`,
+  `gh` or `curl` call its arguments make it look like. If a step may not have run or may have
+  failed (followed by `;`, or sitting behind `||`), the branch before it still counts. After
+  a shell function, a `git config` that reroutes pushes, or text it can't read (a pipe into
+  `bash`), it stops trusting the current branch: a push then has to name its branch —
+  `git push -u origin feat/12-login`, not `git push` or `… HEAD`.
+- **It still reads command *text*.** A script on disk, code handed to another program
+  (`python -c`, `make`, `ssh`), a git or `gh` alias set up earlier, a git hook, or an encoded
+  payload is invisible to it.
+  And in text it can't read it finds only the forbidden calls written out plainly — not ones
+  that text assembles itself.
+
+Treat it as a guardrail. It stops an agent that *types* a merge or a push to main. It does not
+stop a *workflow* that later runs code an agent wrote: the review and fast lanes run the
+`.adlc/scripts/` — and the workflow files — of the pull request they are judging, with the
+dispatch token. What stops a merge there is GitHub's own rule on the default branch: a pull
+request needs an approving review, and the pipeline's bot cannot approve its own PR. So the gate
+that cannot be talked around is that rule plus your own Gate 2 — the tripwire only reports a
+direct push after the fact. `adlc-doctor.sh` tells you which of them a repo has.
 
 **Auto-start (optional, on top of full automation).** Add `adlc-intake.yml` + `adlc-design.yml`
 + the `Requirement (ADLC autopilot)` issue template, and **filing a requirement starts the
