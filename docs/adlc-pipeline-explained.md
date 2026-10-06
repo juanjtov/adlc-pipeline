@@ -20,7 +20,7 @@ The name stands for Agentic Software Development Life Cycle: the usual plan, des
 
 ![ADLC pipeline: a request goes through intake, the Analyst and Gate 1, then the full or the fast lane, to an Action card and a human merge at Gate 2](adlc-pipeline-diagram.png)
 
-Every request passes two gates. At Gate 1 you approve the plan and pick the lane; optional autopilot can approve it for you, but only into the full lane. At Gate 2 you always merge yourself. In either lane, a failed review sends the change back to the Builder, up to 3 rounds. The numbers give the reading order; [adlc-pipeline-diagram.html](adlc-pipeline-diagram.html) is the same picture with hover details for every icon.
+A request normally passes two gates. At Gate 1 you approve the plan and pick the lane; optional autopilot can approve it for you, but only into the full lane. You can also put a small change straight on the fast lane yourself, which skips the Analyst and Gate 1. At Gate 2 you always merge yourself. In either lane, a failed review sends the change back to the Builder, up to 3 rounds. The numbers give the reading order; [adlc-pipeline-diagram.html](adlc-pipeline-diagram.html) is the same picture with hover details for every icon.
 
 ## The team
 
@@ -48,18 +48,18 @@ A request goes through eight steps. Agents do five of them; the first step and t
 5. **The Builder writes the code.** On its own branch it implements the tasks and lists the files it may touch in a scope file, `.adlc/scope/<issue>.txt`. It adds a test for each acceptance criterion, runs the tests and opens a pull request.
 6. **Two independent reviews.** The Adversarial Reviewer tries to break the change, and the Architect checks it matches the design. If either finds a real problem, the Builder fixes it and both run again, up to 3 rounds before a human is called in.
 7. **QA proves it works.** It runs the full test suite, fills missing tests and does a security pass. If all is clean, it moves the issue to `gate:deploy` and posts a Proposed Action Card: the action, its risk, the evidence and how to undo it.
-8. **Gate 2: you merge.** You read the card and the pull request, then merge and deploy yourself. Agents may not: the guard blocks any merge command an agent types.
+8. **Gate 2: you merge.** You read the card and the pull request, then merge and deploy yourself. Agents may not: the guard blocks a merge an agent types as a command.
 
 The safety nets, and when each one is on:
 
 | Safety net | What it does | When it is on |
 | --- | --- | --- |
-| Guard hook | Blocks merges, pushes to the main branch, force-pushes and direct writes to GitHub's API that an agent types, in every permission mode | Always, in a repo set up with the pipeline, including your own Claude Code sessions there |
-| Deny rules | A second, simpler block on the same commands | Always; the wizard writes them |
+| Guard hook | Blocks merges, pushes to the main branch, force-pushes and direct writes to GitHub's API that an agent types, in every permission mode | In sessions with the plugin enabled, in a repo set up with the pipeline; your own sessions included |
+| Deny rules | A simpler block on the plain spellings of merge, push to main and force-push, for a session that runs without the plugin | Always; the wizard writes them |
 | Scope check | Holds a change to the files its scope file declares | On your machine, for commits on a Builder branch; on pull requests once the automated lanes are installed |
 | Branch protection | GitHub's own rule that a pull request needs an approving review. The pipeline's bot cannot approve its own pull request | When you turn it on; it is free on public repos |
-| Main-branch tripwire | Files an alert when a commit reaches main without a pull request | Private repos on the free plan, where branch protection is not available |
-| Weekly retro | Reads past review findings and proposes tests and checks for repeat mistakes, as a pull request you approve | If you switch on the improvement loop |
+| Main-branch tripwire | Files an alert when a commit reaches main without a pull request | With the automated lanes, on private repos where branch protection is not available |
+| Retro | Reads past review findings and proposes tests and checks for repeat mistakes, as a pull request you approve | If you switch on the improvement loop: weekly with the automated lanes, otherwise on demand with `/adlc:retro` |
 
 The guard reads the text of a command, so treat it as a strong guardrail, not a lock. Branch protection is the part that cannot be talked around. On pull requests the scope check runs from the main branch's copy, so a pull request cannot edit the check that judges it. With the automated lanes installed, the setup check, `adlc-doctor.sh`, tells you whether your main branch has such a gate.
 
@@ -76,10 +76,10 @@ Small, low-risk changes can skip the design steps, but only with your approval a
 | Adversarial and security review | Yes | Yes |
 | Architect design review | Yes | Skipped, as there is no design to match |
 | QA agent | Yes | Skipped; CI tests still run |
-| Automatic size check | Not needed | Yes, on the real change |
+| Size check | Not needed | Yes, on the real change |
 | Gate 2: you merge | Yes | Yes |
 
-A change qualifies when it touches one small area and its design is obvious: a text fix, a config value, a log line, a small bug with a clear cause. An automatic check then looks at the real change. It allows 5 files and 40 changed lines by default, and rejects paths that look sensitive: folders named for migrations, auth, security or infrastructure, CI and pipeline files, dependency files and secrets. A change that fails goes back to the full lane. The check goes by size and file paths only, so sensitive code under an ordinary name still depends on triage and the review. Like the scope check, it also runs from the main branch's copy.
+A change qualifies when it touches one small area and its design is obvious: a text fix, a config value, a log line, a small bug with a clear cause. In the automated lane, a check then looks at the real change. In the local recipe you run the same script by hand on your list of files, which checks their number and paths but not the line total. It allows 5 files and 40 changed lines by default, and rejects paths that look sensitive: folders named for migrations, auth, security or infrastructure, CI and pipeline files, dependency files and secrets. A change that fails goes back to the full lane. The check goes by size and file paths only, so sensitive code under an ordinary name still depends on triage and the review. Like the scope check, it also runs from the main branch's copy.
 
 Two rules keep the shortcut honest:
 
@@ -102,7 +102,7 @@ You also choose how much runs on its own:
 | --- | --- | --- |
 | Local recipe (start here) | You run each agent by hand, following the runbook | Each step, plus both gates |
 | Full automation | GitHub Actions runs the Builder, the reviews and QA as labels and pull requests move. You still run the Analyst and the Architect by hand | Those two steps, plus both gates |
-| Auto-start | Filing a requirement starts the Analyst, and approving Gate 1 starts the Architect | Gate 1 and Gate 2 |
+| Auto-start | Filing the Requirement form, or adding `adlc:auto` to an intake issue, starts the Analyst. Approving Gate 1 starts the Architect | Gate 1 and Gate 2 |
 | Full autopilot | Gate 1 is approved for you, full lane only | Gate 2: review and merge |
 
 In the automated modes each step installs the plugin on GitHub's runner and runs as its named agent with a fixed list of tools. The agents, their skills and the guard come from that install and are not copied into your repo; the workflow files and the small check scripts are.

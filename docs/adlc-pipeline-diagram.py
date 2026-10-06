@@ -60,23 +60,23 @@ CX, CY, CW, CH = 290, 168, 850, 134
 rect(CX, CY, CW, CH, "cluster", r=16)
 icon("hex", 345, 226, 58, "ic-w", title="GitHub Actions running anthropics/claude-code-action: one workflow per lane, fired by label changes and pull-request events. Each lane installs the plugin on the runner, runs as its named agent (--agent adlc:builder and so on) and is granted that lane's tools only. templates/github/")
 text(390, 206, "GITHUB ACTIONS", "clu-t", size=15, weight=800)
-text(390, 224, "starts each agent when an issue's label changes", "clu-s", size=10)
+text(390, 224, "starts each agent when a label or a pull request changes", "clu-s", size=10)
 text(390, 246, "ONE WORKFLOW PER LANE", "clu-e", size=8.5, weight=700)
 lanes = [("intake", "adlc-intake.yml: runs the Analyst when a requirement is filed (auto-start, optional)"),
          ("design", "adlc-design.yml: runs the Architect on stage:design (comes with auto-start, optional; otherwise you run the Architect by hand)"),
          ("build", "adlc-builder.yml: runs the Builder on stage:build"),
          ("review", "adlc-review.yml: adversarial + architect review on every Builder PR; advances to stage:qa on two PASS verdicts"),
-         ("fix", "adlc-fix.yml: sends a PR with changes requested back to the Builder; stops after 3 rounds and tags needs:human"),
+         ("fix", "adlc-fix.yml: sends a PR with changes requested back to the Builder; stops once the branch's history holds 3 adlc-fix: commits, and tags needs:human"),
          ("qa", "adlc-qa.yml: runs QA & Release-Ops on stage:qa"),
          ("fast", "adlc-fast.yml: fast lane: Builder, size cap on the real diff, adversarial + security review"),
          ("ci", "adlc-ci.yml: the project's tests, type-check and build on every PR"),
          ("scope", "adlc-diff-scope.yml: fails a lane PR that touches files outside its scope file, and re-runs the fast-lane cap; both run from the default branch (pull_request_target), so a PR cannot edit them"),
-         ("tripwire", "adlc-main-tripwire.yml: alerts on any push to main that skipped a PR"),
+         ("tripwire", "adlc-main-tripwire.yml: alerts on any push to main that skipped a PR; installed for private repos without branch protection (optional)"),
          ("retro", "adlc-retro.yml: weekly retro, opens a proposal PR (optional)")]
 for i, (n, tip) in enumerate(lanes):
     cx = 404 + i * 50
     sched = n == "retro"
-    icon("clock" if sched else "bolt", cx, 268, 18, "ic-a" if sched else "ic-w", dashed=sched or n in ("intake", "design"), title=tip)
+    icon("clock" if sched else "bolt", cx, 268, 18, "ic-a" if sched else "ic-w", dashed=sched or n in ("intake", "design", "tripwire"), title=tip)
     text(cx, 291, n, "clu-y lab-m", anchor="middle", size=8)
 a(f'<line x1="955" y1="{CY+18}" x2="955" y2="{CY+CH-18}" stroke="#3A4A78" stroke-width="1"/>')
 text(980, 200, "OR BY HAND", "clu-e", size=8.5, weight=700)
@@ -190,7 +190,7 @@ text(600, 676, "FAST LANE · SMALL FIXES", "eyebrow", size=9.5, weight=700)
 node("api", 620, BY, "Builder", "small change + test", size=50, cls="ic-l", tile="tile-l",
      title="Builder on the fast lane (adlc-fast.yml): works from the change brief, no ADR; writes the scope to .adlc/scope/<issue>.txt, adds a test for S1-AC1, opens a PR labelled lane:fast.")
 node("gauge", 790, BY, "Size check", "small, nothing sensitive", size=50, cls="ic-l2", tile="plate",
-     title="adlc-triage.sh re-checks the real diff: default max 5 files and 40 changed lines, and no paths named for migrations, auth, security or infra, no CI or pipeline files, dependency manifests or secrets. It matches file paths, not what the code does. A change that fails goes to the full lane.")
+     title="adlc-triage.sh re-checks the real diff (in the Actions fast lane; by hand in the local recipe, where a plain file list checks count and paths but skips the line limit): default max 5 files and 40 changed lines, and no paths named for migrations, auth, security or infra, no CI or pipeline files, dependency manifests or secrets. It matches file paths, not what the code does. A change that fails goes to the full lane.")
 node("eye", 960, BY, "Reviewer", "break it + security", size=50, cls="ic-l", tile="tile-l",
      title="Adversarial Reviewer on the fast lane: diff + change brief only, walks every security-gate attack class, ends with ADLC-ADV: PASS or CHANGES.")
 flow("M656,730 C690,730 720,730 752,730", "fl-ind", "arrow-ind")
@@ -218,7 +218,7 @@ label(1041, 704, "pass · skips QA", "lbl-i", size=9)
 
 # ---------------------------------------------------------------- crossing the membrane
 node("branch", 1340, RY, "main", "merged code", size=50, cls="ic-n", tile="tile-n",
-     title="The main branch. Agents cannot merge or push here: the plugin's guard hook blocks gh pr merge, pushes to main and force-pushes on every Bash command, with the deny rules in .claude/settings.json behind it. The lock that cannot be talked around is GitHub branch protection: a pull request needs an approving review.")
+     title="The main branch. Agents may not merge or push here: the plugin's guard hook blocks gh pr merge, pushes to main and force-pushes on every Bash command, with the deny rules in .claude/settings.json behind it. The lock that cannot be talked around is GitHub branch protection: a pull request needs an approving review.")
 flow("M1171,610 C1210,610 1260,610 1302,610", "fl-slate fl-thick", "arrow-slate")
 label(1231, 590, "Gate 2 · you merge", "lbl-s", size=9.5)
 step(1231, 632, 8)
@@ -239,7 +239,7 @@ label(1392, 704, "watches pushes", "lbl-g", size=9)
 SY = 870
 rect(250, SY, 560, 128, "legacy-strip", r=12)
 text(266, SY + 20, "SAFETY NETS · PLAIN SCRIPTS, UNIT-TESTED, SAME IN CI AND ON YOUR MACHINE", "eyebrow", size=9, weight=700)
-nets = [("lock", "Guard hook", "no merge, no push", "hooks/adlc_guard.py, a PreToolUse hook on every Bash command: blocks gh pr merge, pushes to main, force-pushes and GitHub API writes, for every agent in every permission mode. It reads command text, so it is a guardrail; the deny rules in templates/settings.deny.json stay as a second layer."),
+nets = [("lock", "Guard hook", "no merge, no push", "hooks/adlc_guard.py, a PreToolUse hook on every Bash command: blocks gh pr merge, pushes to main, force-pushes and GitHub API writes, for every agent in every permission mode, in sessions with the plugin enabled. It reads command text, so it is a guardrail; the deny rules in templates/settings.deny.json stay as a second layer."),
         ("folder", "Scope check", "allowed files only", "adlc-diff-scope.sh: holds a lane PR to the files its own scope file, .adlc/scope/<issue>.txt, declares (test folders count too once QA adds tests), and fails a lane PR that declares no scope. The Builder writes that file; the Architect's review checks it against the design. In CI (automated lanes only) it runs from the default branch's copy, so a PR cannot edit the check that judges it."),
         ("json", "Verdict reader", "reads PASS/CHANGES", "adlc-verdict.sh: parses the reviewers' ADLC-ADV / ADLC-ARCH lines; control never trusts GitHub review state."),
         ("sync", "Fix cap", "then a person", "adlc-fix-cap.sh: counts the adlc-fix: commits in the branch's history; at 3 the PR is tagged needs:human."),
