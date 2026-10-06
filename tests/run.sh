@@ -129,6 +129,9 @@ printf 'src/a.py\ndb/migrations/003.sql\n'    | bash "$S/adlc-triage.sh" >/dev/n
 printf '.github/workflows/x.yml\n'            | bash "$S/adlc-triage.sh" >/dev/null 2>&1; check 1 "CI config forces full" $?
 printf '.adlc/scripts/adlc-triage.sh\n'       | bash "$S/adlc-triage.sh" >/dev/null 2>&1; check 1 "the guard scripts themselves force full" $?
 printf 'package.json\n'                       | bash "$S/adlc-triage.sh" >/dev/null 2>&1; check 1 "dependency manifest forces full" $?
+printf '.gitmodules\n'                        | bash "$S/adlc-triage.sh" >/dev/null 2>&1; check 1 ".gitmodules is a dependency manifest: forces full (it names where submodules come from)" $?
+printf '2\t1\t.gitmodules\n'                  | bash "$S/adlc-triage.sh" >/dev/null 2>&1; check 1 "…in numstat form too (a url or branch change leaves the pointer alone)" $?
+printf 'docs/gitmodules.md\n'                 | bash "$S/adlc-triage.sh" >/dev/null 2>&1; check 0 "a file merely named like it is not" $?
 printf 'src/author/model.py\n'                | bash "$S/adlc-triage.sh" >/dev/null 2>&1; check 0 "author/ dir not mistaken for auth/" $?
 printf 'a\nb\nc\nd\ne\nf\n'                    | bash "$S/adlc-triage.sh" >/dev/null 2>&1; check 1 "over file cap forces full" $?
 printf '30\t20\tsrc/a.py\n'                   | bash "$S/adlc-triage.sh" >/dev/null 2>&1; check 1 "over line cap (numstat) forces full" $?
@@ -155,7 +158,27 @@ printf '3\t0\t"auth/\\303\\251.py"\n'              | bash "$S/adlc-triage.sh" >/
 printf '1\t0\t"src/d\\303\\251/package.json"\n'    | bash "$S/adlc-triage.sh" >/dev/null 2>&1; check 1 "a quoted dependency manifest is still sensitive" $?
 printf '"auth/a\\"b.py"\n'                            | bash "$S/adlc-triage.sh" >/dev/null 2>&1; check 1 "…also as a bare path" $?
 printf '2\t0\t"src/caf\\303\\251.py"\n'            | bash "$S/adlc-triage.sh" >/dev/null 2>&1; check 0 "a quoted innocent path is still fast" $?
+# A submodule is a gitlink (mode 160000): numstat shows it as a one-line file however much code
+# the commit it points to brings in. The workflows take `git diff --numstat --raw` in one call, so
+# the script also gets each entry's mode line, and a gitlink on either side is never fast-eligible.
+raw() { printf ':%s %s 0960115 5c62b5a %s\t%s\n' "$@"; }   # a raw line: <old mode> <new mode> <status> <path>
+{ raw 160000 160000 M vendor/lib; printf '1\t1\tvendor/lib\n'; } | bash "$S/adlc-triage.sh" >/dev/null 2>&1; check 1 "a submodule bump forces full (numstat alone: a one-line change)" $?
+case "$({ raw 160000 160000 M vendor/lib; printf '1\t1\tvendor/lib\n'; } | bash "$S/adlc-triage.sh" 2>&1 >/dev/null)" in *"submodule change: vendor/lib"*) ok "…and the reason names the submodule" ;; *) bad "the reason must name the submodule" ;; esac
+{ raw 000000 160000 A vendor/lib; printf '1\t0\tvendor/lib\n'; } | bash "$S/adlc-triage.sh" >/dev/null 2>&1; check 1 "a new submodule forces full" $?
+{ raw 160000 000000 D vendor/lib; printf '0\t1\tvendor/lib\n'; } | bash "$S/adlc-triage.sh" >/dev/null 2>&1; check 1 "a removed submodule forces full" $?
+{ raw 100644 160000 T src/a.py; printf '1\t1\tsrc/a.py\n'; }     | bash "$S/adlc-triage.sh" >/dev/null 2>&1; check 1 "a file turned into a submodule forces full" $?
+{ raw 160000 160000 M '"vendor/caf\303\251"'; printf '1\t1\t"vendor/caf\\303\\251"\n'; } | bash "$S/adlc-triage.sh" >/dev/null 2>&1; check 1 "…a quoted submodule path too" $?
+{ raw 000000 160000 A .adlc/scope/12.txt; printf '1\t0\t.adlc/scope/12.txt\n'; } | bash "$S/adlc-triage.sh" >/dev/null 2>&1; check 1 "a submodule at the scope file's path is not exempt" $?
+{ raw 100644 100644 M src/a.py; raw 000000 100755 A bin/run; printf '2\t1\tsrc/a.py\n3\t0\tbin/run\n'; } | bash "$S/adlc-triage.sh" >/dev/null 2>&1; check 0 "ordinary files with their mode lines stay fast" $?
+six=$(for f in a b c d e f; do raw 100644 100644 M "src/$f.py"; done; for f in a b c d e f; do printf '1\t0\tsrc/%s.py\n' "$f"; done)
+case "$(printf '%s\n' "$six" | bash "$S/adlc-triage.sh" 2>&1 >/dev/null)" in *"too many files: 6 > 5"*) ok "a mode line is not a second file (6 files with their modes count as 6)" ;; *) bad "a mode line must not count as a file" ;; esac
+raw 100644 100644 M src/a.py | bash "$S/adlc-triage.sh" >/dev/null 2>&1; check 1 "mode lines alone measure nothing: not fast" $?
 grep -q -- 'diff --numstat --no-renames' "$ROOT/templates/github/adlc-fast.yml" && ok "adlc-fast.yml takes the cap's diff with --no-renames" || bad "adlc-fast.yml: the cap's diff must use --no-renames"
+# Both workflows take that diff with the modes (--raw) and with every submodule entry in it
+# (--ignore-submodules=none: a `.gitmodules` saying `ignore = all` in the checkout — the PR's in
+# adlc-fast.yml, the default branch's in adlc-diff-scope.yml — would otherwise leave it out).
+grep -qF -- 'diff --numstat --no-renames --raw --ignore-submodules=none "$base"' "$ROOT/templates/github/adlc-fast.yml" && ok "…with the modes, and every submodule entry" || bad "adlc-fast.yml: the cap's diff must take --raw --ignore-submodules=none"
+grep -qF -- 'diff --numstat --no-renames --raw --ignore-submodules=none "$base" refs/remotes/pr/head' "$ROOT/templates/github/adlc-diff-scope.yml" && ok "adlc-diff-scope.yml: its copy of the cap's diff takes the same flags" || bad "adlc-diff-scope.yml: the cap's diff must take --no-renames --raw --ignore-submodules=none"
 
 echo "verdict:"
 eq PASS    "last marker wins"        "$(printf 'ADLC-ADV: CHANGES\nblah\nADLC-ADV: PASS\n' | bash "$S/adlc-verdict.sh" ADLC-ADV)"
@@ -477,8 +500,10 @@ SH
     flpr 5 main ':'                                 # a PR that changes nothing
     flpr 6 "$odd" 'echo "y = 2" >> src/a.py'
     flpr 8 main 'mkdir -p auth; echo "k = 1" > auth/café.py'
-    # a new submodule under infra/, and a .gitmodules that tells git never to show it as changed
-    flpr 7 main 'mkdir -p infra/modules/net; lgit update-index --add --cacheinfo "160000,$(lgit rev-parse HEAD),infra/modules/net"; printf "[submodule \"net\"]\n\tpath = infra/modules/net\n\turl = ./net\n\tignore = all\n" > .gitmodules'
+    # a new submodule under vendor/ — no denylisted path, so only the entry's mode can refuse it —
+    # and a .gitmodules that tells git never to show it as changed (the empty directory is what
+    # keeps the gitlink through `git add -A`)
+    flpr 7 main 'mkdir -p vendor/net; lgit update-index --add --cacheinfo "160000,$(lgit rev-parse HEAD),vendor/net"; printf "[submodule \"net\"]\n\tpath = vendor/net\n\turl = ./net\n\tignore = all\n" > .gitmodules'
     lgit -C "$FL/seed" checkout -q main             # …and main moves on after the PRs were cut
     for f in m1 m2 m3 m4 m5 m6; do echo x > "$FL/seed/src/$f.py"; done
     lgit -C "$FL/seed" add -A; lgit -C "$FL/seed" commit -q -m 'main moves on'
@@ -521,8 +546,11 @@ SH
   # quotes would hide it from the denylist's anchors
   flrun 8 main; eq "eligible=false " "a sensitive path with a non-ASCII name → not eligible (the diff is taken unquoted)" "$(flout)"
   # A submodule change is part of the diff even when the PR's own .gitmodules says `ignore = all`,
-  # which makes a plain `git diff` leave it out. PR 7 adds one under infra/.
-  flrun 7 main; eq "eligible=false " "a submodule change the PR tells git to ignore still reaches the cap" "$(flout)"
+  # which makes a plain `git diff` leave it out. PR 7 adds one under vendor/: numstat alone would
+  # show a one-line file at an innocent path. Its .gitmodules is a denied manifest, so the verdict
+  # alone would not prove the mode rule; the reason the cap gives does.
+  flrun 7 main; eq "eligible=false " "a submodule change the PR tells git to ignore still reaches the cap, and its mode refuses it" "$(flout)"
+  case "$(flwhy)" in *"submodule change: vendor/net"*) ok "…for that reason" ;; *) bad "the cap must name the submodule (got '$(flwhy)')" ;; esac
   # A tag named like the base branch must not stand in for it. PR 4's first commit adds
   # auth/login.py and its second an innocent line: measured from a tag `origin/main` put on
   # the first commit, only the second would be seen.
@@ -748,6 +776,29 @@ fastfx '' 'auth/login.py\nsrc/a.py\n';     dsrun; check 1 "fast lane: a tag name
 prhead 'echo "y = 2" >> src/a.py'
 ( cd "$DS/repo" && for f in m1 m2 m3 m4 m5 m6; do echo x > "src/$f.py"; done && dg add -A && dg commit -q -m "main moves on" && dg push -q origin main && dg fetch -q origin ) >/dev/null 2>&1
 fastfx '' 'src/a.py\n';                    dsrun; check 0 "fast lane: the cap is measured from the merge base, not from main's tip" $?
+# A submodule is a gitlink (mode 160000): a one-line entry in numstat however much code the
+# commit it points to brings in. This PR adds one under src/ — no sensitive path is involved — so
+# only the entry's mode can tell the cap what it is. (The empty directory is what keeps a gitlink
+# through `git add -A`; without it the entry is staged as deleted.)
+prhead 'mkdir -p src/lib; git update-index --add --cacheinfo "160000,$(git rev-parse HEAD),src/lib"'
+fastfx '' 'src/lib\n';                     dsrun; check 1 "fast lane: a new submodule fails the cap, at an innocent path" $?
+case "$(dsout)" in *"submodule change: src/lib"*) ok "…and the cap names it" ;; *) bad "the cap must report the submodule" ;; esac
+# The default branch now carries that submodule, and a .gitmodules that tells git never to show
+# it as changed (`ignore = all`, which a repo may set to quiet `git status`). The diff reads THIS
+# checkout's .gitmodules, so a plain `git diff` here shows a bump as no change at all.
+( cd "$DS/repo" && mkdir -p src/lib && dg update-index --add --cacheinfo "160000,$(dg rev-parse HEAD),src/lib" \
+  && printf '[submodule "lib"]\n\tpath = src/lib\n\turl = ./lib\n\tignore = all\n' > .gitmodules \
+  && dg add -A && dg commit -q -m "add a submodule, ignore = all" && dg push -q origin main && dg fetch -q origin ) >/dev/null 2>&1
+prhead 'git update-index --cacheinfo "160000,$(git rev-parse HEAD),src/lib"'   # a bump: it pointed at HEAD~1
+eq "" "fixture: a plain diff in that checkout shows the bump as nothing at all" \
+   "$(cd "$DS/repo" && dg fetch -q origin refs/pull/7/head && dg diff --numstat --no-renames refs/remotes/origin/main FETCH_HEAD 2>/dev/null || echo GIT-FAILED)"
+case "$(cd "$DS/repo" && dg diff --numstat --no-renames --raw --ignore-submodules=none refs/remotes/origin/main FETCH_HEAD 2>/dev/null)" in
+  *":160000 160000 "*"M"$'\t'"src/lib"*"1"$'\t'"1"$'\t'"src/lib"*) ok "fixture: …and with the cap's flags it is a one-line gitlink entry" ;;
+  *) bad "fixture: with the cap's flags the bump must show as a gitlink entry" ;; esac
+fastfx '' 'src/lib\n';                     dsrun; check 1 "fast lane: a submodule bump fails the cap, though the default branch's .gitmodules says ignore = all" $?
+case "$(dsout)" in *"submodule change: src/lib"*) ok "…and the cap names it" ;; *) bad "the cap must report the hidden submodule bump" ;; esac
+prhead 'echo "z = 3" >> src/a.py'
+fastfx '' 'src/a.py\n';                    dsrun; check 0 "fast lane: an ordinary small change still passes beside an unchanged submodule" $?
 prhead 'echo "y = 2" >> src/a.py'
 dsfx 'lane:fast\n' '' 0 - - 'src/a.py\n'
 dsrun; check 1 "lane:fast with no issue and no scope file fails" $?

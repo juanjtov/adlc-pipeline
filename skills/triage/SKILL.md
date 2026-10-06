@@ -32,8 +32,10 @@ author/verifier separation, never the security gate.
   self-evident from the change itself.
 - **Passes the eligibility pre-screen.** Nothing it touches is on the sensitive list the cap
   enforces: migrations, auth/authz, infra/deploy, CI, the ADLC harness (`.github/`, `.claude/`,
-  `.adlc/scripts/`), dependency manifests, or secrets. Estimated size within the cap (default
-  ≤ 5 files, ≤ 40 lines).
+  `.adlc/scripts/`), dependency manifests (`.gitmodules` among them), or secrets — and no
+  submodule pointer change: a submodule bump is one line in the diff however much code it brings
+  in, so the cap always sends it FULL. Estimated size within the cap (default ≤ 5 files, ≤ 40
+  lines).
 - **One runnable acceptance check is enough** to prove it — you don't need a story set.
 
 Anything else — new behavior, ambiguity, a security-relevant surface, a change you'd want an ADR
