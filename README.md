@@ -31,6 +31,9 @@ flowchart LR
 - **Cost is measured, not guessed.** Per-lane latency from Actions run data; per-agent tokens, cost and prompt-cache hit rate via opt-in OpenTelemetry.
 - **Works on any repo.** A bootstrap wizard adapts the pipeline to a greenfield PRD or a mature codebase in minutes.
 
+**New here?** Read [ADLC Pipeline, Explained](docs/adlc-pipeline-explained.md) — a
+plain-language tour with a [one-page diagram](docs/adlc-pipeline-diagram.png).
+
 ## What's inside
 
 <details>
@@ -55,11 +58,14 @@ skills/
   efficient-runs/              # keep long runs cheap (cost ∝ #steps); shared by Builder/QA
   ablation/                    # periodic context reset so the setup doesn't rot append-only
   bootstrap/                   # ← the dual-mode adoption WIZARD
+  intake/                      # start a request: idea / PRD / issue / Notion-Linear ticket → sharpened stage:intake issue
 commands/adlc-init.md          # friendly alias that launches the wizard
+commands/adlc-intake.md        # friendly alias that starts a request (the intake interview)
 commands/adlc-mission-control.md   # opens Mission Control, the live view of the line
 mission-control/               # ← MISSION CONTROL: local live view (Python stdlib server + static page)
 bin/adlc-mission-control       # its launcher (on the Bash PATH when the plugin is enabled)
 mission-control/hook.sh        # reports pipeline-agent activity to Mission Control when it is running
+docs/                          # the plain-language explainer + the one-page pipeline diagram
 templates/                     # what the wizard fills into the host repo
   host-CLAUDE.md.tmpl          # minimalist CLAUDE.md (commands + gotchas + pointers)
   skills/project-conventions.SKILL.md.tmpl   # lean: only what the code doesn't reveal
@@ -174,6 +180,11 @@ claude plugin marketplace add juanjtov/adlc-pipeline
 claude plugin install adlc@adlc-pipeline
 ```
 
+Inside a session the same two steps are `/plugin marketplace add juanjtov/adlc-pipeline` and
+`/plugin install adlc@adlc-pipeline`. Updates are manual by default
+(`claude plugin update adlc@adlc-pipeline`), unless you enable auto-update for the marketplace
+in `/plugin`.
+
 The Actions lanes install it the same way on the runner. To work on the plugin itself, load a
 checkout instead — `claude --plugin-dir /path/to/adlc-pipeline` — and `/reload-plugins` picks
 up edits.
@@ -199,6 +210,27 @@ In the target repository:
    mode drop the Actions lanes and print the one-time infra checklist.
 5. **First run**: offer to turn your PRD into the first `stage:intake` issue (greenfield) or
    pick a small starter item (brownfield), then hand it to the Product Analyst.
+
+### Start a request
+
+Every request enters as one GitHub issue labeled `stage:intake`. `/adlc-intake` (the `intake`
+skill) gets you there from wherever you are, and **interviews you first** — it asks only for
+what's missing (problem, outcome, roles, scope edge, one to three acceptance examples), shows
+the exact issue, and files it once you confirm:
+
+| You have | What intake does |
+|---|---|
+| a rough idea | interviews you, then drafts the issue |
+| a PRD-lite (one page) | reads it, asks only about the gaps |
+| a full PRD | proposes shippable slices, files the first (one issue = one slice) |
+| an existing GitHub issue | sharpens it in place and labels it |
+| a ticket in Notion / Linear / another tracker | fetches it through that tool's MCP connector (or you paste it) and files an issue that links back |
+| a bug | same flow, plus the `bug` label |
+| the Analyst's open questions | answers them with you and updates the issue |
+
+Already sharp? Skip the interview: file the **Requirement** issue form (auto-start lane) or
+label your own issue `stage:intake`. Intake never writes stories or ACs (the Analyst does),
+never picks a lane, and treats PRD / ticket text as untrusted input.
 
 ## The pipeline
 
