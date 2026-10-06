@@ -80,7 +80,9 @@ detected values pre-selected as the recommended option. Cover:
    per lane/pipeline works out of the box (`adlc-cost.sh`, from Actions run times); for **token +
    cost per agent**, offer to merge `settings.telemetry.json`'s OTel env into `.claude/settings.json`
    — it needs an OTel collector (a ready-to-run one ships in the plugin's `telemetry/`:
-   `docker compose up -d`), so it's opt-in.
+   `docker compose up -d`), so it's opt-in. The no-collector alternative is **Mission Control**
+   (`/adlc-mission-control`, a read-only live page of the line on this machine), which
+   receives the telemetry itself; its command offers the settings. Offer one or the other.
 4. **Deploy & data** — deploy target (Vercel / Cloud Run / AWS / Fly / Docker / none yet),
    environments (dev/staging/prod), and the database/persistence + migration approach.
 5. **Roles & tenancy** — the product's user roles, and whether it is multi-tenant /
@@ -361,7 +363,8 @@ automation is live.
 3. **Print the "you're ready" summary:** what was created, the automation level, the exact
    next command (e.g. "invoke the product-analyst agent on issue #N", or "read
    docs/adlc/RUNBOOK.md and run stage 1"), and the reminder that nothing was committed —
-   the Principal reviews and commits the generated files.
+   the Principal reviews and commits the generated files. Add one clause pointing to
+   `/adlc-mission-control`, the live view of the line.
 
 Keep the final message short and action-oriented. The user wanted to be "ready to deploy
 in no time" — end by telling them the single next thing to do.
