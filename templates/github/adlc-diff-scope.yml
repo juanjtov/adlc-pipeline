@@ -7,7 +7,8 @@
 #   .adlc/scripts/adlc-diff-scope.sh  the scope check — build|fast → .adlc/scope/<issue>.txt,
 #                                     which the Builder writes · build+qa (issue at stage:qa) →
 #                                     that scope + $ADLC_TEST_DIRS · no lane stage → skipped.
-#   .adlc/scripts/adlc-triage.sh      the fast-lane cap (size + sensitive paths), fast PRs only.
+#   .adlc/scripts/adlc-triage.sh      the fast-lane cap (size, sensitive paths, submodules),
+#                                     fast PRs only.
 # A PR is tied to its issue by a closing reference (`Closes #N`), by its branch name
 # (feat/<issue>-<slug>), or — when the Builder opened it — by the same rule the lanes use to
 # link it. Tied to an open lane issue and declaring no scope, it FAILS.
@@ -118,10 +119,14 @@ jobs:
           # pipeline, but from the PR's own checkout; this copy is the one a PR cannot edit.
           # Full ref names: a tag called `origin/<base>` must not stand in for the base branch.
           # The base is fetched by name: it need not be the default branch this job checked out.
+          # --raw: the mode of each entry, so the script can tell a submodule (a gitlink, mode
+          # 160000) from a one-line file. --ignore-submodules=none: the diff reads THIS checkout's
+          # .gitmodules — the default branch's — and a repo whose own file says `ignore = all`
+          # would otherwise have every submodule change left out of what the cap sees.
           if [ "$stage" = fast ]; then
             git fetch -q --no-tags origin "+refs/heads/$BASE_REF:refs/remotes/origin/$BASE_REF" "+refs/pull/$PR/head:refs/remotes/pr/head"
             base=$(git merge-base "refs/remotes/origin/$BASE_REF" refs/remotes/pr/head)
-            numstat=$(git -c core.quotePath=false diff --numstat --no-renames "$base" refs/remotes/pr/head)
-            printf '%s\n' "$numstat" | .adlc/scripts/adlc-triage.sh || rc=1
+            entries=$(git -c core.quotePath=false diff --numstat --no-renames --raw --ignore-submodules=none "$base" refs/remotes/pr/head)
+            printf '%s\n' "$entries" | .adlc/scripts/adlc-triage.sh || rc=1
           fi
           exit "$rc"

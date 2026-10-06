@@ -84,7 +84,7 @@ templates/                     # what the wizard fills into the host repo
             adlc-log-findings.sh · adlc-doctor.sh · adlc-metrics.sh · adlc-cost.sh
             adlc-cache.sh · adlc-triage.sh · adlc-pr-stage.sh · adlc-branch-issue.sh   # deterministic logic
             #   adlc-cache.sh        = prompt-cache hit-rate rollup
-            #   adlc-triage.sh       = fast-lane eligibility cap (size + sensitive-path)
+            #   adlc-triage.sh       = fast-lane eligibility cap (size + sensitive-path + submodules)
             #   adlc-pr-stage.sh     = which diff-scope stage a PR is in (from its linked issue)
             #   adlc-branch-issue.sh = which issue a lane branch names (feat/<issue>-<slug>)
   hooks/pre-commit             # local diff-scope guard (reuses adlc-diff-scope.sh)
@@ -279,9 +279,11 @@ Everything that makes a change safe is kept:
   approval — autopilot auto-approves Gate 1 into the *full* pipeline only.
 - **Author/verifier separation** — an independent adversarial + security review still runs.
 - **A deterministic cap** — `adlc-triage.sh` re-checks the *real* diff (≤ 5 files / ≤ 40 lines by
-  default, and nothing touching migrations, auth, infra, CI, deps, or secrets). Over-cap or
-  sensitive ⇒ the change is **bounced back to the full pipeline** (`stage:design`). So a
-  mis-triage — or a crafted issue arguing it's "trivial" — can't smuggle a big change through.
+  default, nothing touching migrations, auth, infra, CI, deps (`.gitmodules` included) or secrets,
+  and no change to a submodule's pointer, which is one line in a diff however much code it
+  brings in). Over-cap or sensitive ⇒ the change is **bounced back to the full pipeline**
+  (`stage:design`). So a mis-triage — or a crafted issue arguing it's "trivial" — can't smuggle a
+  big change through.
   The same cap also runs from the default branch (in `adlc-diff-scope.yml`), so a PR that edits the
   cap is still judged by the copy on `main`.
 - **Gate 2 (human merge)** — never skipped, on any lane.
