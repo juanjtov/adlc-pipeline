@@ -3,8 +3,9 @@
 # Run: bash tests/run.sh   (exit 0 = all pass). These verify the deterministic guardrails
 # themselves — the same scripts CI and the local pre-commit hook call — plus the plugin's guard
 # hook. The static checks cover what can't be run here for real: the workflow templates (their
-# triggers, their agent wiring, and the intake, diff-scope and design-handoff steps against a
-# stub gh), the pre-commit hook, and labels.sh.
+# triggers, their agent wiring, the intake, diff-scope and design-handoff steps against a stub
+# gh, and the fast lane's and the fix loop's cap steps on a real git history), the pre-commit
+# hook, and labels.sh.
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 S="$ROOT/templates/scripts"
@@ -14,6 +15,10 @@ bad()  { fail=$((fail+1)); printf '  ✗ %s\n' "$1"; }
 # expect_exit <expected-code> <name> -- <cmd...>  (cmd reads stdin already piped)
 check() { local want="$1" name="$2" got="$3"; [ "$got" = "$want" ] && ok "$name" || bad "$name (want exit $want, got $got)"; }
 eq()    { local want="$1" name="$2" got="$3"; [ "$got" = "$want" ] && ok "$name" || bad "$name (want '$want', got '$got')"; }
+# Run from a git hook, a `!` alias or `git rebase -x`, this script inherits GIT_DIR and its kin,
+# and every `git -C <scratch repo>` below would then act on the caller's repository instead of
+# the scratch one. Drop them: the fixtures may only ever touch what they create.
+unset $(git rev-parse --local-env-vars 2>/dev/null)
 
 echo "diff-scope:"
 # Run from a checkout-shaped directory: the scope file and the changed paths are both
@@ -165,11 +170,11 @@ case "$({ raw 160000 160000 M vendor/lib; printf '1\t1\tvendor/lib\n'; } | bash 
 six=$(for f in a b c d e f; do raw 100644 100644 M "src/$f.py"; done; for f in a b c d e f; do printf '1\t0\tsrc/%s.py\n' "$f"; done)
 case "$(printf '%s\n' "$six" | bash "$S/adlc-triage.sh" 2>&1 >/dev/null)" in *"too many files: 6 > 5"*) ok "a mode line is not a second file (6 files with their modes count as 6)" ;; *) bad "a mode line must not count as a file" ;; esac
 raw 100644 100644 M src/a.py | bash "$S/adlc-triage.sh" >/dev/null 2>&1; check 1 "mode lines alone measure nothing: not fast" $?
-grep -q -- 'git diff --numstat --no-renames' "$ROOT/templates/github/adlc-fast.yml" && ok "adlc-fast.yml takes the cap's diff with --no-renames" || bad "adlc-fast.yml: the cap's diff must use --no-renames"
+grep -q -- 'diff --numstat --no-renames' "$ROOT/templates/github/adlc-fast.yml" && ok "adlc-fast.yml takes the cap's diff with --no-renames" || bad "adlc-fast.yml: the cap's diff must use --no-renames"
 # Both workflows take that diff with the modes (--raw) and with every submodule entry in it
 # (--ignore-submodules=none: a `.gitmodules` saying `ignore = all` in the checkout — the PR's in
 # adlc-fast.yml, the default branch's in adlc-diff-scope.yml — would otherwise leave it out).
-grep -qF -- 'git diff --numstat --no-renames --raw --ignore-submodules=none "$base"' "$ROOT/templates/github/adlc-fast.yml" && ok "…with the modes, and every submodule entry" || bad "adlc-fast.yml: the cap's diff must take --raw --ignore-submodules=none"
+grep -qF -- 'diff --numstat --no-renames --raw --ignore-submodules=none "$base"' "$ROOT/templates/github/adlc-fast.yml" && ok "…with the modes, and every submodule entry" || bad "adlc-fast.yml: the cap's diff must take --raw --ignore-submodules=none"
 grep -qF -- 'diff --numstat --no-renames --raw --ignore-submodules=none "$base" refs/remotes/pr/head' "$ROOT/templates/github/adlc-diff-scope.yml" && ok "adlc-diff-scope.yml: its copy of the cap's diff takes the same flags" || bad "adlc-diff-scope.yml: the cap's diff must take --no-renames --raw --ignore-submodules=none"
 
 echo "verdict:"
@@ -432,6 +437,152 @@ intake gate.sh "adlc:auto stage:design" "ADLC-TRIAGE: FULL | x" AUTOPILOT=true
 eq "" "gate: neither stage:intake nor gate:stories → labels left alone" "$(calls)"
 rm -rf "$IT"
 
+echo "isolation (launched by git itself, the suite still works only in its scratch repos):"
+# The `unset` at the top of this file is what keeps every scratch-repo test below off the
+# caller's repository. Take that line as the file has it, and run it in a child that inherits
+# another repository's GIT_DIR, as a hook or `git rebase -x` would hand it over.
+if command -v git >/dev/null 2>&1; then
+  IS="$(mktemp -d)"; git init -q "$IS/real" >/dev/null 2>&1; git init -q "$IS/scratch" >/dev/null 2>&1
+  reset=$(grep -E '^unset \$\(git rev-parse --local-env-vars' "$0" || true)
+  eq "$(cd "$IS/scratch/.git" 2>/dev/null && pwd -P)" "an inherited GIT_DIR does not steer \`git -C <scratch repo>\` to the real one" \
+     "$(GIT_DIR="$IS/real/.git" bash -c "$reset"$'\n''git -C "$1" rev-parse --absolute-git-dir' _ "$IS/scratch" 2>/dev/null)"
+  rm -rf "$IS"
+else
+  bad "isolation test needs git"
+fi
+
+echo "fast-lane cap step (the workflow's own run: script, on a real git history):"
+# The cap is what makes skipping design safe, so its step must never report a small change for
+# a diff it did not read. It once piped `git diff` into the script in a shell with no pipefail:
+# when git failed (a base ref the checkout does not have) the script was given nothing, said
+# FAST, and a change under auth/ went on to review as eligible. Run the step as shipped: a
+# scratch repository holding the PRs, and a checkout shaped like the runner's. Nothing here has
+# a remote, and nothing is pushed.
+if command -v git >/dev/null 2>&1; then
+  FL="$(mktemp -d)"; FLW="$ROOT/templates/github/adlc-fast.yml"
+  # The step keeps the script's verdict and reasons, and its own stop reason, in /tmp/cap.*,
+  # where the later steps read them. Here those files go to the scratch dir — the one edit made
+  # to the scripts — so a run writes nothing outside it and two runs at once cannot cross.
+  step_run "$FLW" '- name: Fast-lane cap' | sed "s|/tmp/cap\.|$FL/cap.|g" > "$FL/cap.sh"
+  step_run "$FLW" '- name: Say that the cap could not run' | sed "s|/tmp/cap\.|$FL/cap.|g" > "$FL/tell.sh"
+  mkdir -p "$FL/bin"
+  cat > "$FL/bin/gh" <<'SH'
+#!/usr/bin/env bash
+# stub gh: the one call the step after a failed cap makes, logged to $GH_LOG
+[ "$1 $2" = "pr comment" ] || exit 2
+shift; printf '%s\n' "$*" >> "$GH_LOG"
+SH
+  chmod +x "$FL/bin/gh"
+  lgit() { env GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 git -c user.name=t -c user.email=t@example.com -c commit.gpgsign=false -c core.hooksPath=/dev/null "$@"; }
+  # flpr <n> <base branch> <commands that make the change> — PR <n>: branch feat/<n> cut from
+  # the base, the change committed, and refs/pull/<n>/merge as GitHub keeps it (the base's tip
+  # merged with the PR's head) — the commit a pull_request run checks out.
+  flpr() {
+    lgit -C "$FL/seed" checkout -q -b "feat/$1" "$2"
+    ( cd "$FL/seed" && eval "$3" && lgit add -A && lgit commit -q --allow-empty -m "feat: change $1" )
+    lgit -C "$FL/seed" checkout -q --detach "$2"
+    lgit -C "$FL/seed" merge -q --no-ff -m "Merge feat/$1 into $2" "feat/$1"
+    lgit -C "$FL/seed" update-ref "refs/pull/$1/merge" HEAD
+  }
+  odd='rel/$(touch${IFS}INJECTED)'   # a legal branch name
+  {
+    lgit init -q "$FL/seed"; lgit -C "$FL/seed" symbolic-ref HEAD refs/heads/main
+    mkdir -p "$FL/seed/.adlc/scripts" "$FL/seed/src"; cp "$S/adlc-triage.sh" "$FL/seed/.adlc/scripts/"; echo 'x = 1' > "$FL/seed/src/a.py"
+    lgit -C "$FL/seed" add -A; lgit -C "$FL/seed" commit -q -m init
+    lgit -C "$FL/seed" branch "$odd" main
+    flpr 1 main 'echo "y = 2" >> src/a.py; mkdir -p tests .adlc/scope; echo "def test_y(): assert True" > tests/test_a.py; printf "src/\ntests/\n" > .adlc/scope/1.txt'
+    flpr 2 main 'i=0; while [ $i -lt 41 ]; do echo "v$i = $i"; i=$((i+1)); done > src/big.py'
+    flpr 3 main 'mkdir -p auth; echo "k = 1" > auth/login.py'
+    flpr 4 main 'mkdir -p auth; echo "k = 1" > auth/login.py; lgit add -A; lgit commit -q -m "feat: first"; echo "y = 2" >> src/a.py'
+    flpr 5 main ':'                                 # a PR that changes nothing
+    flpr 6 "$odd" 'echo "y = 2" >> src/a.py'
+    flpr 8 main 'mkdir -p auth; echo "k = 1" > auth/café.py'
+    # a new submodule under vendor/ — no denylisted path, so only the entry's mode can refuse it —
+    # and a .gitmodules that tells git never to show it as changed (the empty directory is what
+    # keeps the gitlink through `git add -A`)
+    flpr 7 main 'mkdir -p vendor/net; lgit update-index --add --cacheinfo "160000,$(lgit rev-parse HEAD),vendor/net"; printf "[submodule \"net\"]\n\tpath = vendor/net\n\turl = ./net\n\tignore = all\n" > .gitmodules'
+    lgit -C "$FL/seed" checkout -q main             # …and main moves on after the PRs were cut
+    for f in m1 m2 m3 m4 m5 m6; do echo x > "$FL/seed/src/$f.py"; done
+    lgit -C "$FL/seed" add -A; lgit -C "$FL/seed" commit -q -m 'main moves on'
+  } >/dev/null 2>&1
+  # flrun <PR number> <base ref> — the step, run as Actions does (bash -e), in a checkout as
+  # actions/checkout leaves it on a pull_request event with fetch-depth: 0: every branch a
+  # remote-tracking ref, every tag, and a detached HEAD on the PR's merge commit. There is no
+  # local branch at all. The cap's thresholds are the script's defaults: an ADLC_FAST_* variable
+  # in the developer's shell must not change a verdict here.
+  flrun() {
+    rm -rf "$FL/run" "$FL/cap.out" "$FL/cap.err"; : > "$FL/out"; : > "$FL/said"
+    printf 'a reason left by an earlier job\n' > "$FL/cap.fail"   # must never be posted as this PR's
+    { lgit init -q "$FL/run" \
+        && lgit -C "$FL/run" fetch -q "$FL/seed" '+refs/heads/*:refs/remotes/origin/*' '+refs/tags/*:refs/tags/*' "+refs/pull/$1/merge:refs/remotes/pull/$1/merge" \
+        && lgit -C "$FL/run" checkout -q --detach "refs/remotes/pull/$1/merge"; } >/dev/null 2>&1 || return 99
+    ( cd "$FL/run" && env -u ADLC_FAST_MAX_FILES -u ADLC_FAST_MAX_LINES -u ADLC_FAST_DENY BASE_REF="$2" GITHUB_OUTPUT="$FL/out" GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 bash -e "$FL/cap.sh" ) > "$FL/said" 2>/dev/null
+  }
+  fltell() { # the step after a failed cap, run as Actions does (bash -e), against the stub gh
+    : > "$FL/gh.log"
+    ( cd "$FL/run" && env PATH="$FL/bin:$PATH" GH_LOG="$FL/gh.log" PR=7 GITHUB_SERVER_URL=https://example.test GITHUB_REPOSITORY=o/r GITHUB_RUN_ID=42 bash -e "$FL/tell.sh" ) >/dev/null 2>&1
+  }
+  flout()  { tr '\n' ' ' < "$FL/out"; }                 # the output the cap step set
+  flwhy()  { cat "$FL/cap.err" 2>/dev/null || true; }   # the reasons it kept for the bounce step
+  flsaid() { tr '\n' ' ' < "$FL/gh.log"; }              # what the step after a failed cap posted
+  [ -s "$FL/cap.sh" ] && ok "run: script extracted from the template" || bad "could not extract the run: script"
+  [ -s "$FL/tell.sh" ] && ok "…and the step that tells the PR about a failed cap" || bad "could not extract the step that tells the PR about a failed cap"
+  # its if: must name a status function (with none, `success()` is implied and it never runs) and
+  # the cap step's own outcome (an earlier step's failure must not fire it)
+  eq 1 "…whose if: is a status function plus the cap step's own outcome" \
+     "$(awk '/^      - / { s = ($0 ~ /- name: Say that the cap could not run/) } s' "$FLW" | grep -cE "^ +if: (failure|always)\(\) && steps\.cap\.outcome == 'failure'[[:space:]]*$" || true)"
+  # the first case means little unless main really has moved past the PRs' merge base
+  eq 6 "fixture: after the PRs were cut, main moved on by 6 files (more than the file cap)" \
+     "$(lgit -C "$FL/seed" diff --name-only 'refs/pull/1/merge^1' refs/heads/main 2>/dev/null | grep -c . || true)"
+  flrun 1 main; eq "eligible=true "  "a small change is eligible — measured from the merge base, not from main's tip" "$(flout)"
+  [ ! -e "$FL/cap.fail" ] && ok "…and a stop reason an earlier job left is cleared first (a self-hosted runner keeps /tmp)" || bad "a stop reason an earlier job left must be cleared: the comment step would post it"
+  flrun 2 main; eq "eligible=false " "over the line cap → not eligible (the diff reaches the script with its line counts)" "$(flout)"
+  case "$(flwhy)" in *"too many lines: 41 > 40"*) ok "…and the reason is kept for the bounce step" ;; *) bad "the reason is kept for the bounce step (got '$(flwhy)')" ;; esac
+  flrun 3 main; eq "eligible=false " "a sensitive path → not eligible" "$(flout)"
+  # git quotes a path with a non-ASCII byte ("auth/caf\303\251.py") unless told not to, and the
+  # quotes would hide it from the denylist's anchors
+  flrun 8 main; eq "eligible=false " "a sensitive path with a non-ASCII name → not eligible (the diff is taken unquoted)" "$(flout)"
+  # A submodule change is part of the diff even when the PR's own .gitmodules says `ignore = all`,
+  # which makes a plain `git diff` leave it out. PR 7 adds one under vendor/: numstat alone would
+  # show a one-line file at an innocent path, so the refusal can only come from its mode (--raw).
+  flrun 7 main; eq "eligible=false " "a submodule change the PR tells git to ignore still reaches the cap, and its mode refuses it" "$(flout)"
+  case "$(flwhy)" in *"submodule change: vendor/net"*) ok "…for that reason" ;; *) bad "the cap must name the submodule (got '$(flwhy)')" ;; esac
+  # A tag named like the base branch must not stand in for it. PR 4's first commit adds
+  # auth/login.py and its second an innocent line: measured from a tag `origin/main` put on
+  # the first commit, only the second would be seen.
+  lgit -C "$FL/seed" tag origin/main 'refs/heads/feat/4~1' >/dev/null 2>&1
+  flrun 4 main
+  [ "$(lgit -C "$FL/run" rev-parse origin/main 2>/dev/null)" != "$(lgit -C "$FL/run" rev-parse refs/remotes/origin/main 2>/dev/null)" ] \
+    && ok "fixture: in that checkout the short name origin/main is the tag, not the branch" || bad "fixture: the tag origin/main does not shadow the branch"
+  eq "eligible=false " "a tag named origin/main does not shorten the diff (the base is read by its full ref name)" "$(flout)"
+  lgit -C "$FL/seed" tag -d origin/main >/dev/null 2>&1
+  # A branch name may hold shell syntax, and a PR's base is whichever branch its author targets.
+  flrun 6 "$odd"; eq "eligible=true " "a base branch named $odd is read as a name" "$(flout)"
+  [ ! -e "$FL/run/INJECTED" ] && ok "…and nothing in it runs" || bad "the base branch's name ran as a command"
+  # the base branch reaches the script through env:, never written into it by ${{ }}
+  case "$(cat "$FL/cap.sh")" in *'${{'*) bad "the script has no \${{ }} expression written into it" ;; *) ok "the script has no \${{ }} expression written into it" ;; esac
+  eq 1 "the step's env: hands it the PR's base branch as BASE_REF" \
+     "$(awk '/^      - / { s = ($0 ~ /- name: Fast-lane cap/) } s' "$FLW" | tr -d "\"'" | grep -cE '^ +BASE_REF: \$\{\{ github\.(event\.pull_request\.base\.ref|base_ref) \}\}[[:space:]]*$' || true)"
+  # A diff that cannot be taken must stop the step: given nothing, the script said FAST. PR 3 is
+  # the sensitive one, so an output here is the old bug.
+  flrun 3 gone; rc=$?   # (99 = the fixture checkout itself failed)
+  case "$rc" in 0|99) bad "a base branch the checkout does not have fails the step (exit $rc)" ;; *) ok "a base branch the checkout does not have fails the step" ;; esac
+  eq "" "…and sets no output (was: eligible=true)" "$(flout)"
+  fltell; case "$(flsaid)" in "comment 7 --body ⚠️ The fast-lane cap could not measure this PR: could not find where this PR branches from gone."*"https://example.test/o/r/actions/runs/42 ") ok "…and the next step tells the PR why, with a link to the run" ;; *) bad "…and the next step tells the PR why, with a link to the run (got '$(flsaid)')" ;; esac
+  # Nor is an empty diff a small change: the PR changes nothing (PR 5, here), or the step is not
+  # looking at the PR at all. Either way there is nothing for the cap to vouch for.
+  flrun 5 main; rc=$?
+  case "$rc" in 0|99) bad "an empty diff fails the step (exit $rc)" ;; *) ok "an empty diff fails the step: nothing measured is not FAST" ;; esac
+  eq "" "…and sets no output" "$(flout)"
+  case "$(cat "$FL/said")" in '::error::Fast-lane cap:'*) ok "…and says so" ;; *) bad "an empty diff is reported as that" ;; esac
+  fltell; case "$(flsaid)" in *"could not measure this PR: the diff against main is empty"*) ok "…on the PR too" ;; *) bad "…on the PR too (got '$(flsaid)')" ;; esac
+  eq 1 "adlc-fast.yml: the review job checks out the full history (the cap needs the base branch)" \
+     "$(awk '/^  review_gate:/ { j=1 } j' "$FLW" | grep -cE '^ +fetch-depth: 0([[:space:]]|$)' || true)"
+  rm -rf "$FL"
+else
+  bad "fast-lane cap step tests need git"
+fi
+
 echo "diff-scope step (the workflow's own run: script against a stub gh):"
 # This step decides which issue and stage a PR is checked under — the part that once resolved
 # every lane PR to "no stage" and skipped. Run it as shipped, in what the job really works in: a
@@ -667,6 +818,78 @@ else
   echo "  · skipped the --jq filter checks (no jq here)"
 fi
 rm -rf "$DS"
+
+echo "fix-loop cap step (the workflow's own run: script, on a real git history):"
+# The cap bounds the fix rounds of ONE pull request. The step once counted `adlc-fix:` subjects
+# over the whole history of the PR head — which holds every earlier PR's fix commits once they
+# are merged — so after a single PR that took 3 rounds, each new PR stopped before its first
+# fix. Run the step as shipped: a scratch repository holding that history, and a checkout shaped
+# like the runner's. Nothing here has a remote, and nothing is pushed.
+if command -v git >/dev/null 2>&1; then
+  FC="$(mktemp -d)"; FW="$ROOT/templates/github/adlc-fix.yml"
+  step_run "$FW" '- name: Loop cap' > "$FC/cap.sh"
+  fgit() { env GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 git -c user.name=t -c user.email=t@example.com -c commit.gpgsign=false -c core.hooksPath=/dev/null "$@"; }
+  fbranch() { # <new branch> <from> <commit subject>… — cut the branch, one commit per subject
+    local b="$1" from="$2" s; shift 2
+    fgit -C "$FC/seed" checkout -q -b "$b" "$from"
+    for s in "$@"; do fgit -C "$FC/seed" commit -q --allow-empty -m "$s"; done
+  }
+  {
+    fgit init -q "$FC/seed"; fgit -C "$FC/seed" symbolic-ref HEAD refs/heads/main
+    mkdir -p "$FC/seed/.adlc/scripts"; cp "$S/adlc-fix-cap.sh" "$FC/seed/.adlc/scripts/"
+    fgit -C "$FC/seed" add -A; fgit -C "$FC/seed" commit -q -m init
+    fbranch feat/1-old     main 'feat: old' 'adlc-fix: a' 'adlc-fix: b' 'adlc-fix: c'   # an earlier PR: 3 rounds…
+    fbranch feat/2-behind  main 'feat: behind'                                          # (two PRs opened before
+    fbranch feat/3-synced  main 'feat: synced'                                          #  that one merged)
+    fgit -C "$FC/seed" checkout -q main
+    fgit -C "$FC/seed" merge -q --no-ff -m 'Merge pull request #1 from o/feat/1-old' feat/1-old   # …merged with a merge commit
+    fbranch feat/4-new     main 'feat: new'
+    # 2 rounds, among subjects that only look like one: the prefix mid-subject and in a body
+    # line, in capitals, and as the start of a longer word
+    fbranch feat/5-two     main 'feat: two' 'adlc-fix: a' 'adlc-fix: b' \
+      $'docs: adlc-fix: is the prefix\n\nadlc-fix: a body line' 'ADLC-FIX: shouted' 'adlc-fixture: x'
+    fbranch feat/6-three   main 'feat: three' 'adlc-fix: a' 'adlc-fix: b' 'adlc-fix: c'
+    fbranch feat/7-stacked feat/6-three 'feat: stacked'
+    fgit -C "$FC/seed" checkout -q feat/3-synced
+    fgit -C "$FC/seed" merge -q --no-ff -m "Merge branch 'main' into feat/3-synced" main
+    fgit -C "$FC/seed" commit -q --allow-empty -m 'adlc-fix: a'; fgit -C "$FC/seed" commit -q --allow-empty -m 'adlc-fix: b'
+  } >/dev/null 2>&1
+  # caprun <PR head> <base ref> — the step, run as Actions does (bash -e), in a checkout as
+  # actions/checkout leaves it with fetch-depth: 0: every branch a remote-tracking ref, the PR
+  # head the only local branch (there is no local `main` to read).
+  caprun() {
+    rm -rf "$FC/run"; : > "$FC/out"; : > "$FC/said"
+    { fgit init -q "$FC/run" && fgit -C "$FC/run" fetch -q "$FC/seed" '+refs/heads/*:refs/remotes/origin/*' \
+        && fgit -C "$FC/run" checkout -q -B "$1" "refs/remotes/origin/$1"; } >/dev/null 2>&1 || return 99
+    ( cd "$FC/run" && env BASE_REF="$2" GITHUB_OUTPUT="$FC/out" GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 bash -e "$FC/cap.sh" ) > "$FC/said" 2>/dev/null
+  }
+  capsaid() { cat "$FC/said" "$FC/out" | tr '\n' ' '; }   # its decision + the output it set
+  fixes()   { fgit -C "$FC/seed" log --format='%s' "$1" 2>/dev/null | grep -c '^adlc-fix:' || true; }   # <branch> → adlc-fix: commits in its whole history
+  [ -s "$FC/cap.sh" ] && ok "run: script extracted from the template" || bad "could not extract the run: script"
+  # the cases mean nothing unless the history really holds another PR's fix commits
+  eq 3 "fixture: main holds an earlier PR's 3 adlc-fix: commits, merged"  "$(fixes main)"
+  eq 3 "fixture: …so they are in the history of a branch cut from it"     "$(fixes feat/4-new)"
+  caprun feat/4-new main;    eq "decision=GO stop=false "  "a new PR with 0 fix rounds → GO (was: STOP, on the merged PR's 3)" "$(capsaid)"
+  caprun feat/5-two main;    eq "decision=GO stop=false "  "2 fix rounds on the PR → GO (only a subject that starts with adlc-fix: is a round)" "$(capsaid)"
+  caprun feat/6-three main;  eq "decision=STOP stop=true " "3 fix rounds on the PR → STOP" "$(capsaid)"
+  caprun feat/2-behind main; eq "decision=GO stop=false "  "a PR cut before the other one merged: fix commits only main has are not its rounds" "$(capsaid)"
+  caprun feat/3-synced main; eq "decision=GO stop=false "  "…nor once it has merged main into itself (2 rounds of its own → GO)" "$(capsaid)"
+  caprun feat/7-stacked feat/6-three
+  eq "decision=GO stop=false " "a PR stacked on another PR's branch is not charged that branch's 3 rounds, while it is its base" "$(capsaid)"
+  # the base branch reaches the script through env:, never written into it by ${{ }}
+  case "$(cat "$FC/cap.sh")" in *'${{'*) bad "the script has no \${{ }} expression written into it" ;; *) ok "the script has no \${{ }} expression written into it" ;; esac
+  eq 1 "the step's env: hands it the PR's base branch as BASE_REF" \
+     "$(awk '/^      - / { s = ($0 ~ /- name: Loop cap/) } s' "$FW" | tr -d "\"'" | grep -cE '^ +BASE_REF: \$\{\{ github\.(event\.pull_request\.base\.ref|base_ref) \}\}[[:space:]]*$' || true)"
+  # a count that cannot be taken must stop the step: read as "0 rounds" it would never cap
+  caprun feat/4-new gone; rc=$?   # (99 = the fixture checkout itself failed)
+  case "$rc" in 0|99) bad "a base branch the checkout does not have fails the step (exit $rc)" ;; *) ok "a base branch the checkout does not have fails the step" ;; esac
+  eq "" "…with no decision and no output (not a GO)" "$(capsaid)"
+  grep -qE '^ +fetch-depth: 0([[:space:]]|$)' "$FW" && ok "adlc-fix.yml checks out the full history (the base branch + every commit of the PR)" \
+    || bad "adlc-fix.yml must check out with fetch-depth: 0 — the cap reads the base branch and every commit of the PR"
+  rm -rf "$FC"
+else
+  bad "fix-loop cap step tests need git"
+fi
 
 echo "pre-commit hook (run directly in a scratch repo):"
 HK="$(mktemp -d)"; git init -q "$HK" >/dev/null 2>&1
