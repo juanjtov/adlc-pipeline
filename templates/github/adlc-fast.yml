@@ -94,7 +94,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 0   # the cap needs the base branch and this PR's merge base
 
       - name: Resolve the linked issue
         id: link
@@ -103,19 +103,47 @@ jobs:
           [ -z "$issue" ] && issue=$(gh pr view "$PR" --json body --jq '.body' | grep -oiE '#[0-9]+' | head -1 | tr -d '#')
           echo "issue=$issue" >> "$GITHUB_OUTPUT"
 
-      # THE deterministic backstop: re-check the real diff. Over-cap or sensitive ⇒ full pipeline.
+      # Re-check the real diff. Over-cap or sensitive ⇒ full pipeline. A diff it cannot measure ⇒
+      # the step fails, nothing moves, and the next step says so. This step ROUTES; it runs from
+      # the PR's own checkout, so the verdict a PR cannot edit is the same cap in
+      # adlc-diff-scope.yml, which runs from the default branch.
       - name: Fast-lane cap (real diff)
         id: cap
+        env:
+          BASE_REF: ${{ github.base_ref }}
         run: |
+          # A self-hosted runner keeps /tmp between jobs: a stop reason an earlier job left must
+          # not be posted as this PR's if this step dies before it writes its own.
+          rm -f /tmp/cap.fail
           chmod +x .adlc/scripts/adlc-triage.sh
-          base=$(git merge-base origin/${{ github.base_ref }} HEAD 2>/dev/null || echo "origin/${{ github.base_ref }}")
+          # Plain assignments, never a pipe from git: this shell has no pipefail, and the script
+          # answers FAST when it is given nothing — a diff that cannot be taken must fail the
+          # step, not pass as a small change. The full ref name: a tag called `origin/<base>`
+          # must not stand in for the base branch.
+          stop() { echo "::error::Fast-lane cap: $1"; echo "$1" > /tmp/cap.fail; exit 1; }
+          base=$(git merge-base "refs/remotes/origin/$BASE_REF" HEAD) || stop "could not find where this PR branches from $BASE_REF"
           # --no-renames: a rename would show as `old => new` with 0 lines, hiding both the
-          # sensitive path it moved to and its size.
-          if git diff --numstat --no-renames "$base"...HEAD | .adlc/scripts/adlc-triage.sh > /tmp/cap.out 2> /tmp/cap.err; then
+          # sensitive path it moved to and its size. --ignore-submodules=none: the PR's own
+          # .gitmodules (`ignore = all`) must not hide a submodule change. core.quotePath=false:
+          # git would otherwise quote a path with a non-ASCII byte ("auth/caf\303\251.py"), and
+          # the quotes hide it from the denylist.
+          numstat=$(git -c core.quotePath=false diff --numstat --no-renames --ignore-submodules=none "$base" HEAD) || stop "could not read the diff against $BASE_REF"
+          # Nor is an empty diff a small change: either the PR changes nothing, or this step is
+          # not looking at the PR (a checkout of the base branch, say). Stop, as for a failed read.
+          [ -n "$numstat" ] || stop "the diff against $BASE_REF is empty — nothing to measure"
+          if printf '%s\n' "$numstat" | .adlc/scripts/adlc-triage.sh > /tmp/cap.out 2> /tmp/cap.err; then
             echo "eligible=true" >> "$GITHUB_OUTPUT"
           else
             echo "eligible=false" >> "$GITHUB_OUTPUT"
           fi
+
+      # Only when the cap step itself failed (not when an earlier step did): a red run in the
+      # Actions tab is easy to miss, and the PR would otherwise wait at lane:fast with no word.
+      - name: Say that the cap could not run
+        if: failure() && steps.cap.outcome == 'failure'
+        run: |
+          reason=$(cat /tmp/cap.fail 2>/dev/null || true)
+          gh pr comment "$PR" --body "⚠️ The fast-lane cap could not measure this PR${reason:+: $reason}. Nothing changed: the PR keeps \`lane:fast\`, the issue's labels are as they were, and no review ran. Fix the cause and push again, or re-run the failed job: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
 
       - name: Bounce to the full pipeline (cap exceeded)
         if: steps.cap.outputs.eligible == 'false'
@@ -160,7 +188,7 @@ jobs:
             if [ -n "${{ steps.link.outputs.issue }}" ]; then
               gh issue edit "${{ steps.link.outputs.issue }}" --remove-label stage:fast --add-label gate:deploy || true
             fi
-            gh pr comment "$PR" --body $'## Proposed Action Card — Gate 2 (fast lane)\nAction:     merge PR #'"$PR"$' to main\nRisk:       low — trivial change, within the deterministic fast-lane cap, adversarial + security review PASS\nEvidence:   see the review comment (PASS) and the CI checks on this PR\nMigrations: none (a migration would have forced the full pipeline)\nRollback:   revert the merge commit\nAwaiting:   Principal approval'
+            gh pr comment "$PR" --body $'## Proposed Action Card — Gate 2 (fast lane)\nAction:     merge PR #'"$PR"$' to main\nRisk:       low — trivial change, within the fast-lane cap (the ADLC diff-scope check on this PR confirms it from the default branch), adversarial + security review PASS\nEvidence:   see the review comment (PASS) and the CI checks on this PR\nMigrations: none (a migration would have forced the full pipeline)\nRollback:   revert the merge commit\nAwaiting:   Principal approval'
           else
             gh pr edit "$PR" --add-label "adlc:changes-requested" || true
             echo "Adversarial review requested changes → fix loop runs (adlc-fix.yml)."

@@ -226,7 +226,9 @@ labels the PR `adlc:changes-requested` for the fix loop. Because control doesn't
 GitHub's review state, you may enable branch protection's **"require a human approval"** — it
 then gates only the final MERGE, and the pipeline still flows to a finished, QA'd PR. Also copy
 **`adlc-diff-scope.yml`** (fails a lane PR that touches files outside the scope its issue declares
-in `.adlc/scope/<issue>.txt`; fill `{{TEST_DIR_REGEX}}` with the repo's test dirs — the
+in `.adlc/scope/<issue>.txt`, and a fast-lane PR over the cap; fill `{{TEST_DIR_REGEX}}` with
+the repo's test dirs. It runs on `pull_request_target`, from the default branch, so it takes effect
+once it is on the default branch — never add a checkout of the PR head to it. This is the
 path-level half of author/verifier separation). For the test battery, follow the Phase 1 choice: if the user picked **propose it**,
 run the `test-strategy` skill, then copy **`adlc-ci.yml`** filled with the chosen setup +
 commands (these are the required checks); if they picked **keep ours**, skip `adlc-ci.yml` and
@@ -243,7 +245,8 @@ For the **fast lane** (trivial changes skip design + Gate 1): copy `adlc-fast.ym
 recommends `stage:fast` for a small, local, non-sensitive change; `adlc-fast.yml` runs a scoped
 build + an adversarial/security review, re-checks the **real diff** against the deterministic cap
 (`adlc-triage.sh` — tune `ADLC_FAST_MAX_FILES` / `ADLC_FAST_MAX_LINES` / `ADLC_FAST_DENY` to the
-repo), and bounces an over-cap or sensitive change back to `stage:design`. It ends at the human
+repo, with the same values in `adlc-fast.yml` and `adlc-diff-scope.yml`), and bounces an over-cap
+or sensitive change back to `stage:design`. It ends at the human
 Gate 2 like everything else. **The lane is always human-approved**: the Analyst only *recommends*,
 and a human applies `stage:fast` to approve it — the fast lane never auto-starts, not even under
 `adlc:autopilot` (which pauses a FAST recommendation at `gate:stories` and auto-approves Gate 1
