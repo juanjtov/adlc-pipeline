@@ -340,7 +340,9 @@ automation is live.
 1. **Self-check.** Run `.adlc/scripts/adlc-doctor.sh` and report its output — it deterministically
    checks the deny rules, unfilled `{{...}}` placeholders, that every lane installs the plugin and
    grants its agent tools, that the scripts the lanes call are installed, the project skills, and
-   (with gh) the state-machine labels. Also
+   (with gh) the state-machine labels and the **merge gate**: whether the default branch requires
+   an approving review on a pull request, or at least has the tripwire. If it reports no gate,
+   say plainly that nothing outside the agents' own guard stops a merge there. Also
    confirm the charter + RUNBOOK + ADR, CLAUDE.md (with the
    ablation-date comment), CONTEXT-LOG.md, and (if chosen) the workflows exist. Report a short
    ✅/⬜ checklist.

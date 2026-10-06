@@ -222,6 +222,56 @@ mkdir -p "$FIX/.adlc/scripts"; : > "$FIX/.adlc/scripts/adlc-verdict.sh"
 doctor; check 0 "…and passes once it is" $?
 lane 'jobs:\n  t:\n    steps:\n      # .adlc/scripts/adlc-gone.sh used to run here\n      - run: echo hi\n'
 doctor; check 0 "a script named only in a comment is not required" $?
+# the merge gate — asked of a stub gh that answers each lookup from a file (no file = that call fails)
+mkdir -p "$FIX/bin"
+cat > "$FIX/bin/gh" <<'SH'
+#!/usr/bin/env bash
+echo "$*" >> "$DFX/calls"
+case "$*" in
+  "auth status"*) exit 0 ;;
+  "label list"*)  printf '%s\n' stage:intake gate:stories stage:design stage:build stage:qa gate:deploy; exit 0 ;;
+  "repo view"*)                 k=default ;;
+  "api "*"/protection"*)        k=classic ;;
+  "api "*"/rules/branches/"*)   k=ruleset ;;
+  "api "*"/branches/"*)         k=protected ;;
+  *) exit 2 ;;
+esac
+[ -e "$DFX/$k" ] || { echo '{"message":"Not Found"}'; exit 1; }
+cat "$DFX/$k"
+SH
+chmod +x "$FIX/bin/gh"
+gate() { # <protected flag | -> <approvals in classic protection | -> <approvals in a ruleset, or none | -> [tripwire]
+  rm -rf "$FIX/fx"; mkdir -p "$FIX/fx"; echo main > "$FIX/fx/default"
+  [ "$1" = - ] || echo "$1" > "$FIX/fx/protected"
+  [ "$2" = - ] || echo "$2" > "$FIX/fx/classic"
+  [ "$3" = - ] || echo "$3" > "$FIX/fx/ruleset"
+  rm -f "$FIX/.github/workflows/adlc-main-tripwire.yml"
+  if [ "${4:-}" = tripwire ]; then echo 'name: tripwire' > "$FIX/.github/workflows/adlc-main-tripwire.yml"; fi
+  GATE=$(DFX="$FIX/fx" PATH="$FIX/bin:$PATH" bash "$S/adlc-doctor.sh" "$FIX" 2>&1)
+}
+says_gate() { case "$GATE" in *"$1"*) echo yes ;; *) echo no ;; esac; }
+lane "${J}${WIRED}"   # a lane runs an agent here: the gate matters
+gate true 1 none;            check 0 "gate: protected + 1 required approval passes" $?
+eq yes "…and says so" "$(says_gate "needs 1 approving review")"
+gate true 0 none;            check 1 "gate: protected but no approval required is flagged (a lane's token could merge its own PR)" $?
+eq yes "…with the reason" "$(says_gate "needs no approving review")"
+gate true - none;            check 0 "gate: protected, approvals unreadable (not an admin) passes with a reminder" $?
+eq yes "…the reminder" "$(says_gate "could not read whether a pull request needs")"
+gate false - 2;              check 0 "gate: a ruleset that requires approvals counts as protection" $?
+eq yes "…with its count" "$(says_gate "needs 2 approving review")"
+gate false - none tripwire;  check 0 "gate: not protected, tripwire installed passes" $?
+eq yes "…and says what the tripwire cannot do" "$(says_gate "cannot stop a merge")"
+gate false - none;           check 1 "gate: not protected and no tripwire is flagged" $?
+eq yes "…as no merge gate" "$(says_gate "no merge gate")"
+gate - - -;                  check 1 "gate: a failed lookup is flagged, not passed" $?
+gate true 1 none; rm "$FIX/fx/default"
+DFX="$FIX/fx" PATH="$FIX/bin:$PATH" bash "$S/adlc-doctor.sh" "$FIX" >/dev/null 2>&1; check 1 "gate: an unreadable default branch is flagged" $?
+lane 'jobs:\n  t:\n    steps:\n      - run: echo hi\n'   # no lane runs an agent: nothing to gate
+gate false - none;           check 0 "gate: not checked when no lane runs an agent" $?
+eq 0 "…no lookup is made" "$(grep -c '^api ' "$FIX/fx/calls" 2>/dev/null || true)"
+lane "${J}${WIRED}"; rm -rf "$FIX/fx"; mkdir -p "$FIX/fx"
+DFX="$FIX/fx" PATH="$FIX/bin:$PATH" ADLC_DOCTOR_SKIP_LABELS=1 bash "$S/adlc-doctor.sh" "$FIX" >/dev/null 2>&1
+eq "" "ADLC_DOCTOR_SKIP_LABELS=1 keeps the doctor off gh entirely" "$(cat "$FIX/fx/calls" 2>/dev/null)"
 rm -rf "$FIX"
 
 echo "cache (hit-rate rollup):"

@@ -4,7 +4,8 @@
 # Checks: harness deny rules present · no leftover {{...}} placeholders in copied workflows ·
 #         every lane installs the plugin and grants its agent tools · the scripts the lanes
 #         call are installed · the project skills exist ·
-#         the state-machine labels exist (when gh is available).
+#         and, when gh is available: the state-machine labels exist · the default branch has a
+#         merge gate (a required approving review, or at least the tripwire).
 set -uo pipefail
 root="${1:-.}"
 probs=0
@@ -124,6 +125,49 @@ if [ -z "${ADLC_DOCTOR_SKIP_LABELS:-}" ] && command -v gh >/dev/null 2>&1 && gh 
   done
 else
   echo "  · skipped label check (gh not available/authenticated)"
+fi
+
+# 6) The merge gate (only when lanes run agents here, and only when gh can ask; set
+#    ADLC_DOCTOR_SKIP_LABELS=1 to skip every check that needs gh).
+#    The plugin's guard hook stops an agent that TYPES a merge or a push to the default branch.
+#    It cannot stop a WORKFLOW that runs code a pull request changed, with a token that can
+#    merge. What stops that is GitHub's own rule on the default branch: a pull request needs an
+#    approving review, and a lane's bot cannot approve its own PR. Where that rule is not
+#    available (a private repo on the Free plan) the tripwire is the stand-in: it reports a
+#    direct push after the fact, and it cannot stop a merge.
+if [ "$agent_steps" -gt 0 ]; then
+  if [ -z "${ADLC_DOCTOR_SKIP_LABELS:-}" ] && command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+    ask() { ( cd "$root" && gh "$@" 2>/dev/null ); }   # a failed call prints nothing we keep
+    if ! branch=$(ask repo view --json defaultBranchRef --jq .defaultBranchRef.name) || [ -z "$branch" ]; then
+      note "could not read this repository's default branch from gh — the merge gate is unchecked"
+    elif ! protected=$(ask api "repos/{owner}/{repo}/branches/${branch}" --jq .protected); then
+      note "could not read whether '${branch}' is protected (gh api failed) — the merge gate is unchecked"
+    else
+      # How many approving reviews a pull request needs: from classic branch protection (readable
+      # by an admin only) and from rulesets. Empty = neither could be read.
+      classic=""; ruleset=""; need=""
+      c=$(ask api "repos/{owner}/{repo}/branches/${branch}/protection" --jq '.required_pull_request_reviews.required_approving_review_count // 0') && classic="$c"
+      r=$(ask api "repos/{owner}/{repo}/rules/branches/${branch}" --jq '[.[] | select(.type == "pull_request") | .parameters.required_approving_review_count // 0] | if length == 0 then "none" else (max | tostring) end') && ruleset="$r"
+      for n in "$classic" "$ruleset"; do
+        case "$n" in ''|*[!0-9]*) ;; *) if [ -z "$need" ] || [ "$n" -gt "$need" ]; then need="$n"; fi ;; esac
+      done
+      if [ "$protected" = "true" ] || { [ -n "$ruleset" ] && [ "$ruleset" != "none" ]; }; then
+        if [ -z "$need" ]; then
+          ok "merge gate: '${branch}' is protected (could not read whether a pull request needs an approving review — make sure it does)"
+        elif [ "$need" -ge 1 ]; then
+          ok "merge gate: '${branch}' is protected and a pull request needs ${need} approving review(s)"
+        else
+          note "'${branch}' is protected, but a pull request needs no approving review — a lane's token can merge its own PR. Require one approval."
+        fi
+      elif [ -f "${root}/.github/workflows/adlc-main-tripwire.yml" ]; then
+        ok "merge gate: '${branch}' is not protected; the tripwire is installed (it reports a direct push — it cannot stop a merge)"
+      else
+        note "no merge gate: '${branch}' is not protected and adlc-main-tripwire.yml is not installed"
+      fi
+    fi
+  else
+    echo "  · skipped merge-gate check (gh not available/authenticated)"
+  fi
 fi
 
 if [ "$probs" -eq 0 ]; then echo "OK — setup looks intact."; exit 0; else echo "${probs} problem(s) found."; exit 1; fi
