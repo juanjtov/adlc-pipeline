@@ -657,8 +657,20 @@ done
 echo "guard hook (merge / push-to-main / force-push / role limits):"
 if command -v python3 >/dev/null 2>&1 && command -v git >/dev/null 2>&1; then
   H="$ROOT/hooks/adlc-guard.sh"
-  python3 -c 'import json,sys; h=json.load(open(sys.argv[1]))["hooks"]["PreToolUse"][0]; assert h["matcher"]=="Bash" and "hooks/adlc-guard.sh" in h["hooks"][0]["command"]' "$ROOT/hooks/hooks.json" 2>/dev/null \
-    && ok "hooks.json wires the guard to Bash" || bad "hooks.json wires the guard to Bash"
+  # hooks.json is shared with Mission Control's reporter: find the guard by what it is (the
+  # Bash matcher + its command), not by its position, and check neither feature lost its wiring.
+  guard_cmd() { python3 -c 'import json,sys
+found = [h["command"] for e in json.load(open(sys.argv[1]))["hooks"]["PreToolUse"] if e.get("matcher") == "Bash"
+         for h in e["hooks"] if "hooks/adlc-guard.sh" in h["command"]]
+assert len(found) == 1, found
+print(found[0])' "$ROOT/hooks/hooks.json" 2>/dev/null; }
+  [ -n "$(guard_cmd)" ] && ok "hooks.json wires the guard to Bash, once" || bad "hooks.json wires the guard to Bash, once"
+  python3 -c 'import json,sys
+hooks = json.load(open(sys.argv[1]))["hooks"]
+events = ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "PostToolUseFailure", "SubagentStart", "SubagentStop", "Stop", "SessionEnd"]
+for ev in events:
+    assert any("mission-control/hook.sh" in h["command"] and "matcher" not in e for e in hooks[ev] for h in e["hooks"]), ev' "$ROOT/hooks/hooks.json" 2>/dev/null \
+    && ok "…and Mission Control's reporter is still on all nine events" || bad "hooks.json lost Mission Control's reporter on some event"
   GR="$(mktemp -d)"; GIT="git -c user.email=t@t -c user.name=t -c commit.gpgsign=false"
   git init -q --bare -b main "$GR/origin.git"
   git init -q -b main "$GR/feat" && ( cd "$GR/feat" && echo x > f && mkdir src && echo y > src/a && git add -A && $GIT commit -qm init \
@@ -719,7 +731,7 @@ print(json.dumps(d))' "$@"
   # the command hooks.json really registers, run the way the harness runs it — from a plugin
   # directory whose path has a space in it
   cp "$ROOT/hooks/adlc-guard.sh" "$ROOT/hooks/adlc_guard.py" "$GR/plug in/hooks/"
-  HC="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["hooks"]["PreToolUse"][0]["hooks"][0]["command"])' "$ROOT/hooks/hooks.json" 2>/dev/null)"
+  HC="$(guard_cmd)"
   printf '%s' "$M" | GITHUB_ACTIONS=true CLAUDE_PLUGIN_ROOT="$GR/plug in" CLAUDE_PROJECT_DIR="$GR/feat" bash -c "$HC" >/dev/null 2>&1; check 2 "the hooks.json command blocks a merge (plugin path with a space)" $?
   printf '%s' "$(hook_json - "$GR/feat" 'git status')" | GITHUB_ACTIONS=true CLAUDE_PLUGIN_ROOT="$GR/plug in" CLAUDE_PROJECT_DIR="$GR/feat" bash -c "$HC" >/dev/null 2>&1; check 0 "…and lets an ordinary command through" $?
   hook_json - "$GR/feat" 'git push origin release' | GITHUB_ACTIONS=true ADLC_PROTECTED_BRANCHES="release, staging" bash "$H" >/dev/null 2>&1; check 2 "ADLC_PROTECTED_BRANCHES adds protected names" $?
