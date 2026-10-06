@@ -110,21 +110,21 @@ jobs:
           # list above and the cap below describe — with git, as the blob at that path. (The
           # contents API follows a link: a PR could point its scope file at any file on its branch
           # and be held to text its diff never shows.) Only a plain file counts; a link, a
-          # directory or a submodule at that path fails the check. A branch that does not contain
-          # the file declares no scope, even if the default branch has one for that issue. The
-          # directory is made fresh for that reason, and so that a link planted in it on the
-          # default branch cannot turn this write into a write to another file (a guard script).
+          # directory or a submodule at that path fails the check, as does a link at `.adlc` or
+          # `.adlc/scope`, and the message says which. A branch that does not contain the file
+          # declares no scope, even if the default branch has one for that issue. The directory
+          # is made fresh for that reason, and so that a link planted in it on the default
+          # branch cannot turn this write into a write to another file (a guard script).
           rm -rf .adlc/scope; mkdir -p .adlc/scope
           scope="${issue:+.adlc/scope/$issue.txt}"
           if [ -n "$scope" ] && [ "$stage" != other ]; then
-            entry=$(git ls-tree refs/remotes/pr/head -- "$scope")
-            if [ -n "$entry" ]; then
-              read -r mode type object _ <<< "$entry"
-              case "$mode $type" in
-                "100644 blob"|"100755 blob") git cat-file blob "$object" > "$scope" ;;
-                *) echo "$scope on this PR is not a plain file (git mode $mode): the scope file must be the declaration itself, not a link to one" >&2; exit 1 ;;
-              esac
-            fi
+            entry=$(git ls-tree refs/remotes/pr/head -- "$scope")   # <mode> <type> <object>\t<path>, or nothing
+            [ -n "$entry" ] || entry=$(git ls-tree refs/remotes/pr/head -- .adlc .adlc/scope | grep '^120000 ' || true)
+            case "$entry" in
+              "") ;;                                                      # no scope file: the script says so
+              "100644 blob "*|"100755 blob "*) git cat-file blob "refs/remotes/pr/head:$scope" > "$scope" ;;
+              *) echo "$(printf '%s\n' "$entry" | cut -f2) on this PR is not a plain file (git mode ${entry%% *}): the scope file must be the declaration itself, not a link to one" >&2; exit 1 ;;
+            esac
           fi
           printf '%s\n' "$files" | .adlc/scripts/adlc-diff-scope.sh "$stage" "$scope" || rc=1
 
