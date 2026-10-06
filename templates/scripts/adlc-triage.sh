@@ -32,9 +32,11 @@ set -uo pipefail
 max_files="${ADLC_FAST_MAX_FILES:-5}"
 max_lines="${ADLC_FAST_MAX_LINES:-40}"
 # Default sensitive-path denylist: migrations, auth/authz, infra/deploy, CI, the ADLC harness
-# config and its guard scripts (.adlc/scripts/), dependency manifests, and secrets. A change to
-# any of these needs real design — no matter how few lines — because its blast radius isn't local.
-deny="${ADLC_FAST_DENY:-(^|/)(migrations?|auth|authz|security|infra|terraform|deploy|helm|k8s|kubernetes)/|(^|/)\.github/|(^|/)\.claude/|(^|/)\.adlc/scripts/|(^|/)(Dockerfile|docker-compose\.ya?ml)$|(^|/)(package\.json|package-lock\.json|yarn\.lock|pnpm-lock\.yaml|requirements[^/]*\.txt|Pipfile|Pipfile\.lock|poetry\.lock|pyproject\.toml|go\.mod|go\.sum|Gemfile|Gemfile\.lock|Cargo\.toml|Cargo\.lock|composer\.json|composer\.lock|pom\.xml|build\.gradle|build\.gradle\.kts)$|(^|/)\.?env(\.|$)|(^|/)secrets?(\.|/)}"
+# config and its guard scripts (.adlc/scripts/), dependency manifests (.gitmodules among them: it
+# names where each submodule comes from, and the branch `submodule update --remote` follows), and
+# secrets. A change to any of these needs real design — no matter how few lines — because its
+# blast radius isn't local.
+deny="${ADLC_FAST_DENY:-(^|/)(migrations?|auth|authz|security|infra|terraform|deploy|helm|k8s|kubernetes)/|(^|/)\.github/|(^|/)\.claude/|(^|/)\.adlc/scripts/|(^|/)(Dockerfile|docker-compose\.ya?ml)$|(^|/)(\.gitmodules|package\.json|package-lock\.json|yarn\.lock|pnpm-lock\.yaml|requirements[^/]*\.txt|Pipfile|Pipfile\.lock|poetry\.lock|pyproject\.toml|go\.mod|go\.sum|Gemfile|Gemfile\.lock|Cargo\.toml|Cargo\.lock|composer\.json|composer\.lock|pom\.xml|build\.gradle|build\.gradle\.kts)$|(^|/)\.?env(\.|$)|(^|/)secrets?(\.|/)}"
 
 tab=$(printf '\t')
 files=0; lines=0; reasons=(); raw=0; numstat=0

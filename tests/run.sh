@@ -129,6 +129,9 @@ printf 'src/a.py\ndb/migrations/003.sql\n'    | bash "$S/adlc-triage.sh" >/dev/n
 printf '.github/workflows/x.yml\n'            | bash "$S/adlc-triage.sh" >/dev/null 2>&1; check 1 "CI config forces full" $?
 printf '.adlc/scripts/adlc-triage.sh\n'       | bash "$S/adlc-triage.sh" >/dev/null 2>&1; check 1 "the guard scripts themselves force full" $?
 printf 'package.json\n'                       | bash "$S/adlc-triage.sh" >/dev/null 2>&1; check 1 "dependency manifest forces full" $?
+printf '.gitmodules\n'                        | bash "$S/adlc-triage.sh" >/dev/null 2>&1; check 1 ".gitmodules is a dependency manifest: forces full (it names where submodules come from)" $?
+printf '2\t1\t.gitmodules\n'                  | bash "$S/adlc-triage.sh" >/dev/null 2>&1; check 1 "…in numstat form too (a url or branch change leaves the pointer alone)" $?
+printf 'docs/gitmodules.md\n'                 | bash "$S/adlc-triage.sh" >/dev/null 2>&1; check 0 "a file merely named like it is not" $?
 printf 'src/author/model.py\n'                | bash "$S/adlc-triage.sh" >/dev/null 2>&1; check 0 "author/ dir not mistaken for auth/" $?
 printf 'a\nb\nc\nd\ne\nf\n'                    | bash "$S/adlc-triage.sh" >/dev/null 2>&1; check 1 "over file cap forces full" $?
 printf '30\t20\tsrc/a.py\n'                   | bash "$S/adlc-triage.sh" >/dev/null 2>&1; check 1 "over line cap (numstat) forces full" $?
@@ -544,7 +547,8 @@ SH
   flrun 8 main; eq "eligible=false " "a sensitive path with a non-ASCII name → not eligible (the diff is taken unquoted)" "$(flout)"
   # A submodule change is part of the diff even when the PR's own .gitmodules says `ignore = all`,
   # which makes a plain `git diff` leave it out. PR 7 adds one under vendor/: numstat alone would
-  # show a one-line file at an innocent path, so the refusal can only come from its mode (--raw).
+  # show a one-line file at an innocent path. Its .gitmodules is a denied manifest, so the verdict
+  # alone would not prove the mode rule; the reason the cap gives does.
   flrun 7 main; eq "eligible=false " "a submodule change the PR tells git to ignore still reaches the cap, and its mode refuses it" "$(flout)"
   case "$(flwhy)" in *"submodule change: vendor/net"*) ok "…for that reason" ;; *) bad "the cap must name the submodule (got '$(flwhy)')" ;; esac
   # A tag named like the base branch must not stand in for it. PR 4's first commit adds
