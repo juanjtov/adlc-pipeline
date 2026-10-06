@@ -14,6 +14,10 @@ bad()  { fail=$((fail+1)); printf '  ✗ %s\n' "$1"; }
 # expect_exit <expected-code> <name> -- <cmd...>  (cmd reads stdin already piped)
 check() { local want="$1" name="$2" got="$3"; [ "$got" = "$want" ] && ok "$name" || bad "$name (want exit $want, got $got)"; }
 eq()    { local want="$1" name="$2" got="$3"; [ "$got" = "$want" ] && ok "$name" || bad "$name (want '$want', got '$got')"; }
+# Run from a git hook, a `!` alias or `git rebase -x`, this script inherits GIT_DIR and its kin,
+# and every `git -C <scratch repo>` below would then act on the caller's repository instead of
+# the scratch one. Drop them: the fixtures may only ever touch what they create.
+unset $(git rev-parse --local-env-vars 2>/dev/null)
 
 echo "diff-scope:"
 # Run from a checkout-shaped directory: the scope file and the changed paths are both
@@ -382,8 +386,8 @@ echo "fix-loop cap step (the workflow's own run: script, on a real git history):
 # The cap bounds the fix rounds of ONE pull request. The step once counted `adlc-fix:` subjects
 # over the whole history of the PR head — which holds every earlier PR's fix commits once they
 # are merged — so after a single PR that took 3 rounds, each new PR stopped before its first
-# fix. Run the step as shipped: a bare origin holding that history, and a checkout shaped like
-# the runner's.
+# fix. Run the step as shipped: a scratch repository holding that history, and a checkout shaped
+# like the runner's. Nothing here has a remote, and nothing is pushed.
 if command -v git >/dev/null 2>&1; then
   FC="$(mktemp -d)"; FW="$ROOT/templates/github/adlc-fix.yml"
   step_run "$FW" '- name: Loop cap' > "$FC/cap.sh"
@@ -394,51 +398,51 @@ if command -v git >/dev/null 2>&1; then
     for s in "$@"; do fgit -C "$FC/seed" commit -q --allow-empty -m "$s"; done
   }
   {
-    fgit init -q --bare "$FC/origin.git"; fgit -C "$FC/origin.git" symbolic-ref HEAD refs/heads/main
     fgit init -q "$FC/seed"; fgit -C "$FC/seed" symbolic-ref HEAD refs/heads/main
     mkdir -p "$FC/seed/.adlc/scripts"; cp "$S/adlc-fix-cap.sh" "$FC/seed/.adlc/scripts/"
     fgit -C "$FC/seed" add -A; fgit -C "$FC/seed" commit -q -m init
-    fbranch feat/1-old     main 'feat: build' 'adlc-fix: a' 'adlc-fix: b' 'adlc-fix: c'   # an earlier PR: 3 rounds…
-    fbranch feat/2-behind  main 'feat: build'                                             # (two PRs opened before
-    fbranch feat/3-synced  main 'feat: build'                                             #  that one merged)
+    fbranch feat/1-old     main 'feat: old' 'adlc-fix: a' 'adlc-fix: b' 'adlc-fix: c'   # an earlier PR: 3 rounds…
+    fbranch feat/2-behind  main 'feat: behind'                                          # (two PRs opened before
+    fbranch feat/3-synced  main 'feat: synced'                                          #  that one merged)
     fgit -C "$FC/seed" checkout -q main
     fgit -C "$FC/seed" merge -q --no-ff -m 'Merge pull request #1 from o/feat/1-old' feat/1-old   # …merged with a merge commit
-    fbranch feat/4-new     main 'feat: build'
-    fbranch feat/5-two     main 'feat: build' 'adlc-fix: a' 'adlc-fix: b'
-    fbranch feat/6-three   main 'feat: build' 'adlc-fix: a' 'adlc-fix: b' 'adlc-fix: c'
-    fbranch feat/7-stacked feat/6-three 'feat: more'
+    fbranch feat/4-new     main 'feat: new'
+    # 2 rounds, among subjects that only look like one: the prefix mid-subject and in a body
+    # line, in capitals, and as the start of a longer word
+    fbranch feat/5-two     main 'feat: two' 'adlc-fix: a' 'adlc-fix: b' \
+      $'docs: adlc-fix: is the prefix\n\nadlc-fix: a body line' 'ADLC-FIX: shouted' 'adlc-fixture: x'
+    fbranch feat/6-three   main 'feat: three' 'adlc-fix: a' 'adlc-fix: b' 'adlc-fix: c'
+    fbranch feat/7-stacked feat/6-three 'feat: stacked'
     fgit -C "$FC/seed" checkout -q feat/3-synced
     fgit -C "$FC/seed" merge -q --no-ff -m "Merge branch 'main' into feat/3-synced" main
     fgit -C "$FC/seed" commit -q --allow-empty -m 'adlc-fix: a'; fgit -C "$FC/seed" commit -q --allow-empty -m 'adlc-fix: b'
-    fgit -C "$FC/seed" remote add origin "$FC/origin.git"; fgit -C "$FC/seed" push -q origin --all
   } >/dev/null 2>&1
   # caprun <PR head> <base ref> — the step, run as Actions does (bash -e), in a checkout as
   # actions/checkout leaves it with fetch-depth: 0: every branch a remote-tracking ref, the PR
   # head the only local branch (there is no local `main` to read).
   caprun() {
     rm -rf "$FC/run"; : > "$FC/out"; : > "$FC/said"
-    { fgit init -q "$FC/run" && fgit -C "$FC/run" remote add origin "$FC/origin.git" \
-        && fgit -C "$FC/run" fetch -q origin '+refs/heads/*:refs/remotes/origin/*' \
+    { fgit init -q "$FC/run" && fgit -C "$FC/run" fetch -q "$FC/seed" '+refs/heads/*:refs/remotes/origin/*' \
         && fgit -C "$FC/run" checkout -q -B "$1" "refs/remotes/origin/$1"; } >/dev/null 2>&1 || return 99
     ( cd "$FC/run" && env BASE_REF="$2" GITHUB_OUTPUT="$FC/out" GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 bash -e "$FC/cap.sh" ) > "$FC/said" 2>/dev/null
   }
   capsaid() { cat "$FC/said" "$FC/out" | tr '\n' ' '; }   # its decision + the output it set
-  fixes()   { fgit -C "$FC/origin.git" log --format='%s' "$1" 2>/dev/null | grep -c '^adlc-fix:' || true; }   # <branch> → adlc-fix: commits in its whole history
+  fixes()   { fgit -C "$FC/seed" log --format='%s' "$1" 2>/dev/null | grep -c '^adlc-fix:' || true; }   # <branch> → adlc-fix: commits in its whole history
   [ -s "$FC/cap.sh" ] && ok "run: script extracted from the template" || bad "could not extract the run: script"
   # the cases mean nothing unless the history really holds another PR's fix commits
   eq 3 "fixture: main holds an earlier PR's 3 adlc-fix: commits, merged"  "$(fixes main)"
   eq 3 "fixture: …so they are in the history of a branch cut from it"     "$(fixes feat/4-new)"
   caprun feat/4-new main;    eq "decision=GO stop=false "  "a new PR with 0 fix rounds → GO (was: STOP, on the merged PR's 3)" "$(capsaid)"
-  caprun feat/5-two main;    eq "decision=GO stop=false "  "2 fix rounds on the PR → GO"   "$(capsaid)"
+  caprun feat/5-two main;    eq "decision=GO stop=false "  "2 fix rounds on the PR → GO (only a subject that starts with adlc-fix: is a round)" "$(capsaid)"
   caprun feat/6-three main;  eq "decision=STOP stop=true " "3 fix rounds on the PR → STOP" "$(capsaid)"
   caprun feat/2-behind main; eq "decision=GO stop=false "  "a PR cut before the other one merged: fix commits only main has are not its rounds" "$(capsaid)"
   caprun feat/3-synced main; eq "decision=GO stop=false "  "…nor once it has merged main into itself (2 rounds of its own → GO)" "$(capsaid)"
   caprun feat/7-stacked feat/6-three
-  eq "decision=GO stop=false " "a PR stacked on another PR's branch is not charged that branch's 3 rounds" "$(capsaid)"
+  eq "decision=GO stop=false " "a PR stacked on another PR's branch is not charged that branch's 3 rounds, while it is its base" "$(capsaid)"
   # the base branch reaches the script through env:, never written into it by ${{ }}
   case "$(cat "$FC/cap.sh")" in *'${{'*) bad "the script has no \${{ }} expression written into it" ;; *) ok "the script has no \${{ }} expression written into it" ;; esac
   eq 1 "the step's env: hands it the PR's base branch as BASE_REF" \
-     "$(awk '/^      - / { s = ($0 ~ /- name: Loop cap/) } s' "$FW" | grep -cE '^ +BASE_REF: \$\{\{ github\.(event\.pull_request\.base\.ref|base_ref) \}\}[[:space:]]*$' || true)"
+     "$(awk '/^      - / { s = ($0 ~ /- name: Loop cap/) } s' "$FW" | tr -d "\"'" | grep -cE '^ +BASE_REF: \$\{\{ github\.(event\.pull_request\.base\.ref|base_ref) \}\}[[:space:]]*$' || true)"
   # a count that cannot be taken must stop the step: read as "0 rounds" it would never cap
   caprun feat/4-new gone; rc=$?   # (99 = the fixture checkout itself failed)
   case "$rc" in 0|99) bad "a base branch the checkout does not have fails the step (exit $rc)" ;; *) ok "a base branch the checkout does not have fails the step" ;; esac
