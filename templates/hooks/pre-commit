@@ -16,10 +16,13 @@ branch="$(git symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
 issue="$("$SCRIPTS/adlc-branch-issue.sh" "$branch")"
 scope=".adlc/scope/$issue.txt"
 [ -n "$issue" ] || exit 0                        # the branch names no issue → skip
-if [ -L "$scope" ]; then                         # CI refuses a link here: it reads the file as a blob
-  echo "✗ commit blocked: $scope is a link; the scope file must be the declaration itself." >&2
+# CI reads the scope file as a git blob and refuses a link at the file, at .adlc/scope or at .adlc.
+# Checked in the working tree and in the index: what is staged is what the commit will carry.
+for p in .adlc .adlc/scope "$scope"; do
+  [ -L "$p" ] || [ "$(git ls-files -s -- "$p" | awk -v p="$p" '$4 == p { print $1 }')" = 120000 ] || continue
+  echo "✗ commit blocked: $p is a link; the scope file must be the declaration itself." >&2
   exit 1
-fi
+done
 [ -f "$scope" ] || exit 0                        # no declared scope for this issue → skip
 
 # Test dirs QA may write (regex alternation). The wizard sets this default to the repo's own.
