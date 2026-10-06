@@ -5,8 +5,10 @@
 # THIS script enforces it against the real change, so a mis-triage — or a prompt-injected issue
 # — can't smuggle a large or sensitive change through the shortened path.
 #
-# Single source of truth: run at intake on the estimated file list (advisory) AND in
-# adlc-fast.yml on the real PR diff (blocking). Human Gate 2 (merge) is unaffected either way.
+# Single source of truth: run at intake on the estimated file list (advisory), in adlc-fast.yml
+# on the real PR diff (it routes an over-cap PR to the full pipeline), and in adlc-diff-scope.yml
+# on the same diff from the DEFAULT branch — the verdict a PR cannot edit. Human Gate 2 (merge) is
+# unaffected either way.
 #
 # Usage:  adlc-triage.sh < changed-files
 #   STDIN: one changed file per line. Optionally `git diff --numstat` form
@@ -23,10 +25,8 @@ set -uo pipefail
 max_files="${ADLC_FAST_MAX_FILES:-5}"
 max_lines="${ADLC_FAST_MAX_LINES:-40}"
 # Default sensitive-path denylist: migrations, auth/authz, infra/deploy, CI, the ADLC harness
-# config and its guard scripts (.adlc/scripts/ — this script included: the cap runs from the PR's
-# own checkout, so a PR that edits it would be judged by its edited copy), dependency manifests,
-# and secrets. A change to any of these needs real design — no matter how few lines — because
-# its blast radius isn't local.
+# config and its guard scripts (.adlc/scripts/), dependency manifests, and secrets. A change to
+# any of these needs real design — no matter how few lines — because its blast radius isn't local.
 deny="${ADLC_FAST_DENY:-(^|/)(migrations?|auth|authz|security|infra|terraform|deploy|helm|k8s|kubernetes)/|(^|/)\.github/|(^|/)\.claude/|(^|/)\.adlc/scripts/|(^|/)(Dockerfile|docker-compose\.ya?ml)$|(^|/)(package\.json|package-lock\.json|yarn\.lock|pnpm-lock\.yaml|requirements[^/]*\.txt|Pipfile|Pipfile\.lock|poetry\.lock|pyproject\.toml|go\.mod|go\.sum|Gemfile|Gemfile\.lock|Cargo\.toml|Cargo\.lock|composer\.json|composer\.lock|pom\.xml|build\.gradle|build\.gradle\.kts)$|(^|/)\.?env(\.|$)|(^|/)secrets?(\.|/)}"
 
 tab=$(printf '\t')
@@ -39,23 +39,26 @@ while IFS= read -r line; do
   # numstat form?  <added>\t<deleted>\t<path> — detect on the literal TABs numstat always uses,
   # and split on tab (cut's default) so a path with SPACES stays intact. Splitting on whitespace
   # (awk default) truncated "my dir/.env" to "my" and let sensitive paths past the cap.
+  a=0; d=0
   if printf '%s' "$line" | grep -qE "^[0-9-]+${tab}[0-9-]+${tab}"; then
     a=$(printf '%s' "$line" | cut -f1)
     d=$(printf '%s' "$line" | cut -f2)
     f=$(printf '%s' "$line" | cut -f3-)
-    # `old => new` is git's rename notation: not a path, and its counts are 0 however big the
-    # file. Feed this script `git diff --numstat --no-renames`.
-    case "$f" in *" => "*) reasons+=("rename notation (use --no-renames): $f") ;; esac
-    is_scope_file "$f" && continue
-    # binary files show as '-' in numstat — size is unknowable, so never fast-eligible
-    if [ "$a" = "-" ] || [ "$d" = "-" ]; then reasons+=("binary change: $f"); fi
-    [ "$a" = "-" ] && a=0
-    [ "$d" = "-" ] && d=0
-    lines=$((lines + a + d))
   else
     f="$line"
-    is_scope_file "$f" && continue
   fi
+  # git C-quotes a path that holds a non-ASCII byte, a quote or a backslash ("auth/\303\251.py").
+  # Judge the path inside the quotes: the leading quote would hide it from every anchor below.
+  case "$f" in \"*\") f="${f#\"}"; f="${f%\"}" ;; esac
+  # `old => new` is git's rename notation: not a path, and its counts are 0 however big the
+  # file. Feed this script `git diff --numstat --no-renames`.
+  case "$f" in *" => "*) reasons+=("rename notation (use --no-renames): $f") ;; esac
+  is_scope_file "$f" && continue
+  # binary files show as '-' in numstat — size is unknowable, so never fast-eligible
+  if [ "$a" = "-" ] || [ "$d" = "-" ]; then reasons+=("binary change: $f"); fi
+  [ "$a" = "-" ] && a=0
+  [ "$d" = "-" ] && d=0
+  lines=$((lines + a + d))
   files=$((files + 1))
   printf '%s\n' "$f" | grep -qE "$deny" && reasons+=("sensitive path: $f")
 done

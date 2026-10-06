@@ -104,7 +104,9 @@ detection, the fix-loop cap, the verdict parse, setup validation — are small s
 `scripts/`, **unit-tested** (`tests/run.sh`), and called by both CI and a **local pre-commit
 hook**, so your machine and Actions run the same code. The Builder declares each change's scope
 in `.adlc/scope/<issue>.txt`; the diff-scope check fails a lane PR that strays outside it or
-declares none. `adlc-doctor.sh` validates a host repo's setup (deny rules, unfilled
+declares none. That check and the fast-lane cap run on `pull_request_target` — the workflow and
+scripts come from the default branch and the PR is only read as data — so a PR cannot edit the
+guards that judge it. `adlc-doctor.sh` validates a host repo's setup (deny rules, unfilled
 placeholders, lanes that can't run their agent, skills, labels, and whether the default branch
 has a merge gate). Judgment guardrails
 (design conformance, security severity) stay as skills + the adversarial review — those can't
@@ -230,6 +232,8 @@ Everything that makes a change safe is kept:
   default, and nothing touching migrations, auth, infra, CI, deps, or secrets). Over-cap or
   sensitive ⇒ the change is **bounced back to the full pipeline** (`stage:design`). So a
   mis-triage — or a crafted issue arguing it's "trivial" — can't smuggle a big change through.
+  The same cap also runs from the default branch (in `adlc-diff-scope.yml`), so a PR that edits the
+  cap is still judged by the copy on `main`.
 - **Gate 2 (human merge)** — never skipped, on any lane.
 
 So an issue reaches `stage:fast` only when a human applies the label — either as their own triage
