@@ -99,27 +99,38 @@ jobs:
             [ "$nfiles" -le 3000 ] || { echo "this PR changes $nfiles files; GitHub lists at most 3000 of them, so it cannot be held to a scope — split it" >&2; exit 1; }
           fi
 
-          # Scope. The scope file is read, as data, from the PR's current head — the same commit
-          # the file list above and the cap below describe. A branch that does not contain it
-          # declares no scope, even if the default branch has one for that issue. The directory
-          # is made fresh for that reason, and so that a link planted in it on the default
-          # branch cannot turn this write into a write to another file (a guard script, say).
+          # The PR's head and its base branch, fetched by name, as DATA: nothing from them is
+          # checked out or run. Full ref names: a tag called `origin/<base>` must not stand in
+          # for the base branch, which need not be the default branch this job checked out.
+          if [ "$stage" != other ]; then
+            git fetch -q --no-tags origin "+refs/heads/$BASE_REF:refs/remotes/origin/$BASE_REF" "+refs/pull/$PR/head:refs/remotes/pr/head"
+          fi
+
+          # Scope. The scope file is read from the PR's current head — the same commit the file
+          # list above and the cap below describe — with git, as the blob at that path. (The
+          # contents API follows a link: a PR could point its scope file at any file on its branch
+          # and be held to text its diff never shows.) Only a plain file counts; a link, a
+          # directory or a submodule at that path fails the check. A branch that does not contain
+          # the file declares no scope, even if the default branch has one for that issue. The
+          # directory is made fresh for that reason, and so that a link planted in it on the
+          # default branch cannot turn this write into a write to another file (a guard script).
           rm -rf .adlc/scope; mkdir -p .adlc/scope
           scope="${issue:+.adlc/scope/$issue.txt}"
           if [ -n "$scope" ] && [ "$stage" != other ]; then
-            if ! gh api "repos/{owner}/{repo}/contents/$scope?ref=refs/pull/$PR/head" -H "Accept: application/vnd.github.raw" > "$scope" 2>"$err"; then
-              rm -f "$scope"
-              grep -q 'HTTP 404' "$err" || { cat "$err" >&2; exit 1; }
+            entry=$(git ls-tree refs/remotes/pr/head -- "$scope")
+            if [ -n "$entry" ]; then
+              read -r mode type object _ <<< "$entry"
+              case "$mode $type" in
+                "100644 blob"|"100755 blob") git cat-file blob "$object" > "$scope" ;;
+                *) echo "$scope on this PR is not a plain file (git mode $mode): the scope file must be the declaration itself, not a link to one" >&2; exit 1 ;;
+              esac
             fi
           fi
           printf '%s\n' "$files" | .adlc/scripts/adlc-diff-scope.sh "$stage" "$scope" || rc=1
 
           # Fast-lane cap. adlc-fast.yml runs the same cap to route an over-cap PR to the full
           # pipeline, but from the PR's own checkout; this copy is the one a PR cannot edit.
-          # Full ref names: a tag called `origin/<base>` must not stand in for the base branch.
-          # The base is fetched by name: it need not be the default branch this job checked out.
           if [ "$stage" = fast ]; then
-            git fetch -q --no-tags origin "+refs/heads/$BASE_REF:refs/remotes/origin/$BASE_REF" "+refs/pull/$PR/head:refs/remotes/pr/head"
             base=$(git merge-base "refs/remotes/origin/$BASE_REF" refs/remotes/pr/head)
             numstat=$(git -c core.quotePath=false diff --numstat --no-renames "$base" refs/remotes/pr/head)
             printf '%s\n' "$numstat" | .adlc/scripts/adlc-triage.sh || rc=1
