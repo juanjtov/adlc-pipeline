@@ -9,8 +9,10 @@
 #          tests onto) · other (or none) → skip (exit 0) · anything else → error (exit 2).
 #   scope-file: the issue's declared scope, `.adlc/scope/<issue>.txt` — one path prefix per
 #          line, matched literally (end a directory with `/`); blank lines and `#` comments are
-#          ignored. The scope file itself is always in scope. A build/fast/build+qa stage with
-#          no scope file FAILS: a lane PR must declare its scope.
+#          ignored. The scope file itself is always in scope; ANOTHER issue's scope file never
+#          is, whatever the prefixes say — left on the default branch it would be the scope a
+#          later PR is held to, without that PR's diff showing it. A build/fast/build+qa stage
+#          with no scope file FAILS: a lane PR must declare its scope.
 #   ADLC_TEST_DIRS (env): regex alternation for the test dirs, e.g. "tests|backend/tests".
 set -euo pipefail
 stage="${1:-}"; scope_file="${2:-}"
@@ -48,6 +50,10 @@ in_scope() { # <path>: the scope file itself, under a declared prefix, or matchi
 
 while IFS= read -r f; do
   [ -z "$f" ] && continue
-  in_scope "$f" || deny "$f"
+  if [ -n "$self" ] && [ "$f" != "$self" ] && printf '%s\n' "$f" | grep -qE '^\.adlc/scope/[0-9]+\.txt$'; then
+    deny "$f (another issue's scope file — a lane PR may change only its own)"
+  else
+    in_scope "$f" || deny "$f"
+  fi
 done <<< "$changed"
 exit "$fail"
