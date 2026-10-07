@@ -118,8 +118,9 @@ fi
 
 # Every gh call below runs inside the host repo: gh picks the repository from the current
 # directory, so run from another checkout with the root as $1 it would otherwise read THAT
-# checkout's labels and default branch. A failed call prints nothing we keep.
-ask() { ( cd "$root" && gh "$@" 2>/dev/null ); }
+# checkout's labels and default branch. CDPATH is dropped first: with it set, `cd app` can land
+# in some other directory named app and print where it went. A failed call prints nothing we keep.
+ask() { ( unset CDPATH; cd -- "$root" && gh "$@" ) 2>/dev/null; }
 
 # 5) State-machine labels (only if gh is available and authenticated; set
 #    ADLC_DOCTOR_SKIP_LABELS=1 to skip — used by the unit tests)
