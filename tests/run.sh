@@ -5,7 +5,7 @@
 # hook. The static checks cover what can't be run here for real: the workflow templates (their
 # triggers, their agent wiring, the intake, diff-scope and design-handoff steps against a stub
 # gh, and the fast lane's and the fix loop's cap steps on a real git history), the pre-commit
-# hook, and labels.sh.
+# hook, labels.sh, and adlc-metrics.sh (against a stub gh).
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 S="$ROOT/templates/scripts"
@@ -981,6 +981,52 @@ hook; check 1 "…and a link at the scope folder, though its target holds a file
 rm -f "$HK/.adlc/scope"; mkdir -p "$HK/.adlc/scope"; ln -s ../../src "$HK/.adlc/scope/12.txt"; hg add .adlc/scope; rm -f "$HK/.adlc/scope/12.txt"; printf 'src/api/\n' > "$HK/.adlc/scope/12.txt"
 hook; check 1 "a link that is staged blocks the commit even when the working tree now holds a plain file" $?
 rm -rf "$HK"
+
+echo "adlc-metrics.sh (against a stub gh):"
+# first_pass_approved once counted merged PRs whose reviewDecision was APPROVED — which the
+# pipeline's PRs never carry: the review lane advances build → qa on the agents' verdict comments
+# (`ADLC-ADV: PASS|CHANGES`, `ADLC-ARCH: PASS|CHANGES`), and a bot cannot approve its own PR, so
+# the count read 0 everywhere. Now a merged PR is first-pass when no comment of its holds a CHANGES
+# verdict. Run the script as shipped against a stub gh that serves the PR list from a fixture and
+# runs the script's own --jq filter over it (the window check lives in that filter).
+if command -v jq >/dev/null 2>&1; then
+  MX="$(mktemp -d)"; mkdir -p "$MX/bin" "$MX/repo"
+  cat > "$MX/bin/gh" <<'SH'
+#!/usr/bin/env bash
+# stub gh: `pr list` serves $MX_PRS, `issue list` an empty list; both through the call's own --jq
+echo "$1 $2" >> "$MX_CALLS"
+case "$1 $2" in "pr list") src="$MX_PRS" ;; "issue list") src=/dev/null ;; *) exit 2 ;; esac
+f=.; while [ $# -gt 0 ]; do [ "$1" = "--jq" ] && f="$2"; shift; done
+[ "$src" = /dev/null ] && echo '[]' | jq "$f" || jq "$f" "$src"
+SH
+  chmod +x "$MX/bin/gh"
+  now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  # <number> <mergedAt> <comment bodies…> → one PR object
+  mxpr() { local n="$1" at="$2"; shift 2; jq -cn --argjson n "$n" --arg at "$at" '$ARGS.positional | map({body: .}) | {number: $n, mergedAt: $at, changedFiles: 1, comments: .}' --args "$@"; }
+  {
+    mxpr 1 "$now" 'Findings: none.
+ADLC-ADV: PASS' 'Conforms.
+ADLC-ARCH: PASS'
+    mxpr 2 "$now" 'Critical: …
+ADLC-ADV: CHANGES' 'ADLC-ARCH: PASS' 'Fixed now.
+ADLC-ADV: PASS'
+    mxpr 3 "$now" 'ADLC-ADV: PASS' 'Out of scope.
+ADLC-ARCH:  CHANGES' 'ADLC-ARCH: PASS'
+    mxpr 4 "$now"
+    mxpr 5 "2000-01-01T00:00:00Z" 'ADLC-ADV: CHANGES'
+  } | jq -s . > "$MX/prs.json"
+  : > "$MX/calls"
+  OUT=$( cd "$MX/repo" && env PATH="$MX/bin:$PATH" MX_PRS="$MX/prs.json" MX_CALLS="$MX/calls" bash "$S/adlc-metrics.sh" 30 2>&1 ); check 0 "the script runs to the end" $?
+  eq "merged_prs: 4"             "merged PRs: those in the window"                                   "$(printf '%s\n' "$OUT" | grep '^merged_prs:')"
+  eq "first_pass_approved: 2 / 4" "first pass: no CHANGES verdict comment (a later PASS does not undo one; a PR with no verdict counts)" "$(printf '%s\n' "$OUT" | grep '^first_pass_approved:')"
+  eq 1 "…from one gh pr list call, whatever the number of PRs" "$(grep -c '^pr list$' "$MX/calls")"
+  echo '[]' > "$MX/prs.json"
+  OUT=$( cd "$MX/repo" && env PATH="$MX/bin:$PATH" MX_PRS="$MX/prs.json" MX_CALLS="$MX/calls" bash "$S/adlc-metrics.sh" 30 2>&1 )
+  eq "first_pass_approved: 0 / 0" "no merged PRs: 0 / 0" "$(printf '%s\n' "$OUT" | grep '^first_pass_approved:')"
+  rm -rf "$MX"
+else
+  echo "  · skipped the metrics checks (no jq here)"
+fi
 
 echo "labels.sh (against a stub gh):"
 # GitHub rejects a label description over 100 characters (HTTP 422); under labels.sh's `set -e`
