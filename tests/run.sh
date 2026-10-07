@@ -1014,11 +1014,13 @@ ADLC-ADV: PASS'
 ADLC-ARCH:  CHANGES' 'ADLC-ARCH: PASS'
     mxpr 4 "$now"
     mxpr 5 "2000-01-01T00:00:00Z" 'ADLC-ADV: CHANGES'
+    mxpr 6 "$now" 'The lane reads `ADLC-ADV: CHANGES` to start the fix loop; nothing to fix here.
+ADLC-ADV: PASS' 'ADLC-ARCH: PASS'
   } | jq -s . > "$MX/prs.json"
   : > "$MX/calls"
   OUT=$( cd "$MX/repo" && env PATH="$MX/bin:$PATH" MX_PRS="$MX/prs.json" MX_CALLS="$MX/calls" bash "$S/adlc-metrics.sh" 30 2>&1 ); check 0 "the script runs to the end" $?
-  eq "merged_prs: 4"             "merged PRs: those in the window"                                   "$(printf '%s\n' "$OUT" | grep '^merged_prs:')"
-  eq "first_pass_approved: 2 / 4" "first pass: no CHANGES verdict comment (a later PASS does not undo one; a PR with no verdict counts)" "$(printf '%s\n' "$OUT" | grep '^first_pass_approved:')"
+  eq "merged_prs: 5"             "merged PRs: those in the window"                                   "$(printf '%s\n' "$OUT" | grep '^merged_prs:')"
+  eq "first_pass_approved: 3 / 5" "first pass: no comment whose last verdict is CHANGES (a later PASS comment does not undo one; a PR with no verdict counts; a CHANGES quoted in the prose of a PASS comment is not one)" "$(printf '%s\n' "$OUT" | grep '^first_pass_approved:')"
   eq 1 "…from one gh pr list call, whatever the number of PRs" "$(grep -c '^pr list$' "$MX/calls")"
   echo '[]' > "$MX/prs.json"
   OUT=$( cd "$MX/repo" && env PATH="$MX/bin:$PATH" MX_PRS="$MX/prs.json" MX_CALLS="$MX/calls" bash "$S/adlc-metrics.sh" 30 2>&1 )

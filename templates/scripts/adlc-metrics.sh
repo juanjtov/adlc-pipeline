@@ -20,8 +20,11 @@ echo "merged_prs: $merged"
 # adlc-verdict.sh), not on GitHub's review decision — a bot cannot formally approve its own PR,
 # so reviewDecision reads APPROVED on none of the pipeline's PRs. One `gh pr list` call brings
 # every PR's comments; a PR with no verdict comment at all (fast lane, a human's PR) counts as
-# first-pass, exactly as a PR whose reviewers never asked for changes.
-firstpass=$(echo "$prs" | jq '[.[] | select([.comments[].body] | join("\n") | test("ADLC-(ADV|ARCH):\\s*CHANGES") | not)] | length')
+# first-pass, exactly as a PR whose reviewers never asked for changes. A comment's verdict is its
+# LAST marker, as adlc-verdict.sh reads it, so a comment that merely quotes "ADLC-ADV: CHANGES"
+# in its prose and ends in PASS is a PASS.
+firstpass=$(echo "$prs" | jq '[.[] | select(any(.comments[].body;
+  [match("ADLC-(ADV|ARCH):\\s*(PASS|CHANGES)"; "g").captures[1].string] | last == "CHANGES") | not)] | length')
 echo "first_pass_approved: $firstpass / $merged"
 
 # --- Iterations-to-green (CI runs per merged PR head) ---
