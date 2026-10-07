@@ -116,10 +116,15 @@ if [ "${#ctx[@]}" -gt 0 ]; then
   fi
 fi
 
+# Every gh call below runs inside the host repo: gh picks the repository from the current
+# directory, so run from another checkout with the root as $1 it would otherwise read THAT
+# checkout's labels and default branch. A failed call prints nothing we keep.
+ask() { ( cd "$root" && gh "$@" 2>/dev/null ); }
+
 # 5) State-machine labels (only if gh is available and authenticated; set
 #    ADLC_DOCTOR_SKIP_LABELS=1 to skip — used by the unit tests)
 if [ -z "${ADLC_DOCTOR_SKIP_LABELS:-}" ] && command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
-  existing=$(gh label list --limit 200 2>/dev/null | awk '{print $1}')
+  existing=$(ask label list --limit 200 | awk '{print $1}')
   for l in stage:intake gate:stories stage:design stage:build stage:qa gate:deploy; do
     printf '%s\n' "$existing" | grep -qx "$l" || note "missing GitHub label: $l"
   done
@@ -137,7 +142,6 @@ fi
 #    direct push after the fact, and it cannot stop a merge.
 if [ "$agent_steps" -gt 0 ]; then
   if [ -z "${ADLC_DOCTOR_SKIP_LABELS:-}" ] && command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
-    ask() { ( cd "$root" && gh "$@" 2>/dev/null ); }   # a failed call prints nothing we keep
     if ! branch=$(ask repo view --json defaultBranchRef --jq .defaultBranchRef.name) || [ -z "$branch" ]; then
       note "could not read this repository's default branch from gh — the merge gate is unchecked"
     elif ! protected=$(ask api "repos/{owner}/{repo}/branches/${branch}" --jq .protected); then
