@@ -269,7 +269,8 @@ cat > "$FIX/bin/gh" <<'SH'
 echo "$*" >> "$DFX/calls"
 # The real gh picks the repository from the current directory. Mimic that: the labels exist
 # only when asked from inside the fixture root (DFX_ROOT), so a doctor that runs gh from the
-# caller's cwd sees none of them.
+# caller's cwd sees none of them. An unset DFX_ROOT would make `here` always true, so refuse it.
+: "${DFX_ROOT:?fake gh needs DFX_ROOT}"
 here() { [ "$(pwd -P)" = "$(cd "$DFX_ROOT" && pwd -P)" ]; }
 case "$*" in
   "auth status"*) exit 0 ;;
@@ -319,12 +320,19 @@ eq 0 "…no lookup is made" "$(grep -c '^api ' "$FIX/fx/calls" 2>/dev/null || tr
 lane "${J}${WIRED}"; rm -rf "$FIX/fx"; mkdir -p "$FIX/fx"
 DFX="$FIX/fx" DFX_ROOT="$FIX" PATH="$FIX/bin:$PATH" ADLC_DOCTOR_SKIP_LABELS=1 bash "$S/adlc-doctor.sh" "$FIX" >/dev/null 2>&1
 eq "" "ADLC_DOCTOR_SKIP_LABELS=1 keeps the doctor off gh entirely" "$(cat "$FIX/fx/calls" 2>/dev/null)"
-# Run with the root as $1 from a different directory (another checkout, say): the labels and
-# the merge gate must be read from the host repo named by $1, not from the caller's cwd.
-gate true 1 none   # a sound setup from the root itself…
+# Where the doctor is run from must not matter. Every gate case above already runs it from the
+# test runner's cwd with the fixture as $1; these name the modes the header promises, and the CDPATH trap.
+gate true 1 none   # seeds a sound fixture (fx/ was emptied just above)
 ELSEWHERE="$(mktemp -d)"
 ( cd "$ELSEWHERE" && DFX="$FIX/fx" DFX_ROOT="$FIX" PATH="$FIX/bin:$PATH" bash "$S/adlc-doctor.sh" "$FIX" ) >/dev/null 2>&1
-check 0 "gh checks run against the host repo when the doctor is run from another cwd" $?
+check 0 "gh checks run against the host repo when the doctor is run from another cwd with the root as \$1" $?
+( cd "$FIX" && DFX="$FIX/fx" DFX_ROOT="$FIX" PATH="$FIX/bin:$PATH" bash "$S/adlc-doctor.sh" ) >/dev/null 2>&1
+check 0 "…and from the repo root with the default root ." $?
+# A relative root with CDPATH exported: `cd name` would search CDPATH before the cwd and land in
+# the decoy, so the gh calls must drop CDPATH first.
+mkdir -p "$ELSEWHERE/${FIX##*/}"
+( cd "${FIX%/*}" && DFX="$FIX/fx" DFX_ROOT="$FIX" PATH="$FIX/bin:$PATH" CDPATH="$ELSEWHERE" bash "$S/adlc-doctor.sh" "${FIX##*/}" ) >/dev/null 2>&1
+check 0 "…and with a relative root, an exported CDPATH does not redirect the gh calls to a same-named decoy" $?
 rm -rf "$ELSEWHERE" "$FIX"
 
 echo "cache (hit-rate rollup):"
