@@ -598,6 +598,7 @@ grep -qE '^[[:space:]]+ref:' "$WF" && bad "adlc-diff-scope.yml must never check 
 grep -q '^    timeout-minutes:' "$WF" && ok "…with a time limit (the scope file and the diff are the PR's to size)" || bad "adlc-diff-scope.yml: the job needs timeout-minutes"
 grep -q 'types: \[opened, synchronize, reopened, labeled, unlabeled, edited\]' "$WF" && ok "…on every event that can change the verdict" || bad "adlc-diff-scope.yml: types must be opened, synchronize, reopened, labeled, unlabeled, edited"
 grep -qE '^    if:' "$WF" && bad "adlc-diff-scope.yml: the job must have no if: — a skipped job would replace a failed verdict with a pass" || ok "…with no job condition (a skipped job would replace a failed verdict with a pass)"
+grep -q '/contents/' "$WF" && bad "adlc-diff-scope.yml: the scope file must not be read through the contents API (it follows a link)" || ok "…and reads the scope file as a git blob, not through the contents API (which follows a link)"
 # For the Builder's PRs the step copies the lanes' link rule. If a lane changes how it links a PR, the copy must change too.
 # Pinned as the pair of lines, in order: the same two expressions the other way round would link a different issue.
 lanes_pair=$(cat <<'EOF'
@@ -632,8 +633,6 @@ case "$*" in
   "pr view"*labels*)                  k=pr-labels ;;
   "pr view"*changedFiles*)            k=nfiles ;;
   "api "*"/pulls/"*"/files"*)         k=files ;;
-  "api "*"/contents/.adlc/scope/"*"?ref=refs/pull/7/head"*"application/vnd.github.raw"*)
-                                      k="scope-$(printf '%s\n' "$*" | sed -n 's|.*/scope/\([0-9][0-9]*\)\.txt.*|\1|p')" ;;
   "api "*"/issues/"*)                 k="issue-$(printf '%s\n' "$*" | sed -n 's|.*/issues/\([0-9][0-9]*\).*|\1|p')" ;;
   *) echo "stub gh: unexpected call: $*" >&2; exit 2 ;;
 esac
@@ -643,12 +642,26 @@ cat "$FX/$k"
 SH
 chmod +x "$DS/bin/gh"
 # dsfx <PR labels> <closing reference> <issue> <its labels | - (no such issue)> <the PR's scope file | -> <changed files>
+#   The scope file goes into the PR head itself (refs/pull/7/head), on top of what prhead built there (else
+#   the base): its text, `-` for none, `@exec:<text>` for an executable file, `@link:<target>` for a link,
+#   `@dir` for a directory at that path; `@parentlink:<text>` makes .adlc/scope a link to a directory holding it.
+#   alsoscope <issue> <text> adds another issue's scope file to the same head (a decoy for the issue-picking tests).
 dsfx() {
   rm -rf "$DS/fx" "$DS/repo/.adlc/scope"; mkdir -p "$DS/fx"
   printf '%b' "$1" > "$DS/fx/pr-labels"; printf '%b' "$2" > "$DS/fx/closing"; printf '%b' "$6" > "$DS/fx/files"; echo 3 > "$DS/fx/nfiles"
   [ "$4" = - ] || printf '%b' "$4" > "$DS/fx/issue-$3"
-  [ "$5" = - ] || printf '%b' "$5" > "$DS/fx/scope-$3"
+  [ -d "$DS/pr" ] || git clone -q "$DS/remote.git" "$DS/pr" >/dev/null 2>&1
+  ( cd "$DS/pr" && rm -rf .adlc/scope && mkdir -p .adlc/scope && case "$5" in
+      -)        rmdir .adlc/scope ;;
+      @exec:*)  printf '%b' "${5#@exec:}" > ".adlc/scope/$3.txt"; chmod +x ".adlc/scope/$3.txt" ;;
+      @link:*)  ln -s "${5#@link:}" ".adlc/scope/$3.txt" ;;
+      @dir)     mkdir ".adlc/scope/$3.txt"; : > ".adlc/scope/$3.txt/x" ;;
+      @parentlink:*) rmdir .adlc/scope; rm -rf elsewhere; mkdir elsewhere; printf '%b' "${5#@parentlink:}" > "elsewhere/$3.txt"; ln -s ../elsewhere .adlc/scope ;;
+      *)        printf '%b' "$5" > ".adlc/scope/$3.txt" ;;
+    esac && dg add -A && { dg commit -q -m scope || true; } && dg push -q -f origin HEAD:refs/pull/7/head ) >/dev/null 2>&1
 }
+alsoscope() { ( cd "$DS/pr" && mkdir -p .adlc/scope && printf '%b' "$2" > ".adlc/scope/$1.txt" && dg add -A && dg commit -q -m scope2 && dg push -q -f origin HEAD:refs/pull/7/head ) >/dev/null 2>&1; }
+nohead()    { git -C "$DS/remote.git" update-ref -d refs/pull/7/head; }
 dsrun() { # [head branch] [PR author] [base branch] — runs the step as Actions does (bash -e), in the default-branch checkout
   ( cd "$DS/repo" && env PATH="$DS/bin:$PATH" FX="$DS/fx" PR=7 HEAD_REF="${1:-claude/work}" BASE_REF="${3:-main}" AUTHOR="${2:-someone}" BUILDER_BOT=adlc-bot ADLC_TEST_DIRS=tests bash ${DSOPTS:--e} "$DS/step.sh" ) >/dev/null 2>&1
 }
@@ -686,7 +699,7 @@ dsrun x/999-decoy adlc-bot; check 1 "a branch that names a number that is no iss
 printf 'bug\n' > "$DS/fx/issue-999"
 dsrun x/999-decoy adlc-bot; check 1 "…nor does a branch that names an issue in no lane" $?
 dsfx '' '' 12 'stage:build\n' 'src/api/\n' 'src/billing/y.py\n'; printf 'Implements #12\n' > "$DS/fx/body"
-printf 'stage:build\n' > "$DS/fx/issue-13"; printf 'src/billing/\n' > "$DS/fx/scope-13"
+printf 'stage:build\n' > "$DS/fx/issue-13"; alsoscope 13 'src/billing/\n'   # the decoy's scope would allow the file
 dsrun feat/13-other adlc-bot; check 1 "the body's issue outranks the branch's, as in the lanes (the PR is held to #12's scope, not #13's)" $?
 dsfx '' '5\n' 12 'stage:build\n' 'src/api/\n' 'src/billing/y.py\n'; printf 'bug\n' > "$DS/fx/issue-5"
 dsrun feat/12-add-login; check 1 "a closing reference to an issue in no lane does not hide the branch's lane issue" $?
@@ -698,7 +711,7 @@ dsfx '' '' 12 'stage:build\n' 'src/api/\n' 'src/billing/y.py\n'; printf 'See #5\
 dsrun claude/work adlc-bot; check 1 "…and a closing reference to another repo's #12, which the lanes read as this repo's" $?
 dsrun claude/work someone; check 0 "…but only for the Builder: anyone else's cross-repo reference ties the PR to nothing here" $?
 dsfx '' '20\n' 12 'stage:build\n' 'src/api/\n' 'src/api/x.py\ntests/t.py\n'; printf 'Closes o/other#12, closes #20\n' > "$DS/fx/body"; printf '12\n' > "$DS/fx/closing-any"
-printf 'stage:qa\n' > "$DS/fx/issue-20"; printf 'src/api/\n' > "$DS/fx/scope-20"
+printf 'stage:qa\n' > "$DS/fx/issue-20"; alsoscope 20 'src/api/\n'          # under #20 (qa) the test file would pass
 dsrun claude/work adlc-bot; check 1 "two lane issues named: the Builder's PR is judged under the one the lanes advance (#12 at build, not #20 at qa)" $?
 dsfx '' '' 0 - - 'README.md\n'; printf 'A tidy-up, tied to nothing.\n' > "$DS/fx/body"
 # `shell: bash` in a workflow means `bash -eo pipefail`: a body with no #N must still read as "no link", not as a failure
@@ -713,7 +726,7 @@ dsfx 'stage:qa\n' '' 0 - - 'tests/t.py\nsrc/app.py\n'
 dsrun; check 1 "PR-label fallback: stage:qa is tests-only" $?
 dsfx 'stage:build\n' '12\n' 12 'bug\n' 'src/api/\n' 'src/api/x.py\n.adlc/scope/12.txt\n'
 dsrun; check 0 "PR-label fallback: stage:build is held to the linked issue's scope file, though that issue carries no stage" $?
-for k in pr-labels files closing issue-12 nfiles scope-12; do   # an API error must never read as "nothing to check"
+for k in pr-labels files closing issue-12 nfiles; do   # an API error must never read as "nothing to check"
   dsfx '' '12\n' 12 'stage:build\n' 'src/api/\n' 'src/api/x.py\n'; : > "$DS/fx/fail-$k"
   dsrun; check 1 "a failed gh call ($k) fails the check" $?
 done
@@ -726,11 +739,26 @@ dsfx 'dependencies\n' '' 0 - - 'package.json\n'; echo 8161 > "$DS/fx/nfiles"
 dsrun dependabot/npm_and_yarn/left-pad-1.3.0; check 0 "…while a PR in no lane is skipped however large it is" $?
 dsfx '' '12\n' 12 'stage:build\n' - 'src/api/x.py\n'
 case "$(dsout)" in *"no scope file"*) ok "a PR whose branch has no scope file is told so" ;; *) bad "a missing scope file must be reported as that" ;; esac
-dsfx '' '12\n' 12 'stage:build\n' 'src/api/\n' 'src/api/x.py\n'; : > "$DS/fx/fail-scope-12"
-out=$(dsout)
-case "$out" in *"HTTP 502"*) case "$out" in *"no scope file"*) bad "an API error must not be reported as a missing scope file" ;; *) ok "an API error on the scope file is reported as that, not as a missing scope file" ;; esac ;; *) bad "an API error on the scope file must be reported" ;; esac
-dsfx '' '12\n' 12 'stage:design\n' - 'src/api/x.py\n'; : > "$DS/fx/fail-scope-12"
-dsrun; check 0 "a PR with no lane stage never asks for a scope file" $?
+# The scope file is read as the blob at that path on the PR head. GitHub's contents API follows a
+# link, so a PR could point its scope file at any file on its branch and be held to text its diff
+# never shows (seen live: a link to a file listing the stray file's directory passed).
+dsfx '' '12\n' 12 'stage:build\n' '@link:src/' 'src/billing/y.py\n.adlc/scope/12.txt\n'
+dsrun; check 1 "a scope file that is a link is refused, even one whose target would allow the files" $?
+case "$(dsout)" in *"not a plain file"*) ok "…and the refusal says why" ;; *) bad "a link at the scope path must be refused as 'not a plain file'" ;; esac
+dsfx '' '12\n' 12 'stage:build\n' '@dir' 'src/billing/y.py\n'
+dsrun; check 1 "a directory at the scope path is refused" $?
+case "$(dsout)" in *"not a plain file (git mode 040000)"*) ok "…and named as a directory" ;; *) bad "a directory at the scope path must be refused as 'not a plain file'" ;; esac
+dsfx '' '12\n' 12 'stage:build\n' '@parentlink:src/\n' 'src/billing/y.py\n'
+dsrun; check 1 "a link at the scope folder is refused, even one whose target holds a file that would allow the change" $?
+case "$(dsout)" in *".adlc/scope on this PR is not a plain file (git mode 120000)"*) ok "…and the refusal names the folder, not a missing file" ;; *) bad "a link at .adlc/scope must be refused as 'not a plain file', naming .adlc/scope" ;; esac
+dsfx '' '12\n' 12 'stage:build\n' '@exec:src/api/\n' 'src/api/x.py\n.adlc/scope/12.txt\n'
+dsrun; check 0 "an executable scope file is still a plain file" $?
+dsfx '' '12\n' 12 'stage:build\n' 'src/api/\n' 'src/api/x.py\n.adlc/scope/12.txt\n'
+nohead
+dsrun; [ $? -ne 0 ] && ok "full lane: a PR head that cannot be fetched fails the check" || bad "full lane: an unfetchable PR head must fail the check"
+dsfx '' '12\n' 12 'stage:design\n' - 'src/api/x.py\n'
+nohead
+dsrun; check 0 "a PR with no lane stage never fetches, nor asks for a scope file" $?
 # The fast lane: the same step also applies the cap, to the PR's real diff (refs/pull/7/head
 # against its merge base), with the BASE branch's adlc-triage.sh.
 prhead() { # <commands run in a clone of the base> — the result becomes refs/pull/7/head
@@ -802,8 +830,8 @@ fastfx '' 'src/a.py\n';                    dsrun; check 0 "fast lane: an ordinar
 prhead 'echo "y = 2" >> src/a.py'
 dsfx 'lane:fast\n' '' 0 - - 'src/a.py\n'
 dsrun; check 1 "lane:fast with no issue and no scope file fails" $?
-git -C "$DS/remote.git" update-ref -d refs/pull/7/head
-fastfx '' 'src/a.py\n';                    dsrun; [ $? -ne 0 ] && ok "fast lane: a PR head that cannot be fetched fails the check" || bad "fast lane: an unfetchable PR head must fail the check"
+fastfx '' 'src/a.py\n'; nohead
+dsrun; [ $? -ne 0 ] && ok "fast lane: a PR head that cannot be fetched fails the check" || bad "fast lane: an unfetchable PR head must fail the check"
 # The stub does not run --jq. Where a real jq exists, run the two non-trivial filters as shipped.
 if command -v jq >/dev/null 2>&1; then
   cf=$(sed -n "s/.*closingIssuesReferences --jq '\(.*\)')\$/\1/p" "$DS/step.sh")
@@ -923,6 +951,14 @@ hook; check 0 "a non-ASCII path in scope passes (git does not quote it)" $?
 printf 'one\ntwo\nthree\n' > "$HK/src/db/old.py"; hg add src/db/old.py; hg commit -q -m base >/dev/null 2>&1
 hg mv src/db/old.py src/api/moved.py
 hook; check 1 "moving a file out of an undeclared directory is caught" $?
+hg reset -q; rm -f "$HK/.adlc/scope/12.txt"; ln -s ../../src "$HK/.adlc/scope/12.txt"; : > "$HK/src/api/z.py"; hg add src/api/z.py
+hook; check 1 "a scope file that is a link blocks the commit, whatever it points at (CI refuses it too)" $?
+rm -f "$HK/.adlc/scope/12.txt"; ln -s nowhere "$HK/.adlc/scope/12.txt"
+hook; check 1 "…a dangling link too" $?
+rm -rf "$HK/.adlc/scope"; mkdir -p "$HK/elsewhere"; printf 'src/api/\n' > "$HK/elsewhere/12.txt"; ln -s ../elsewhere "$HK/.adlc/scope"
+hook; check 1 "…and a link at the scope folder, though its target holds a file that would allow the change (CI reads nothing through it)" $?
+rm -f "$HK/.adlc/scope"; mkdir -p "$HK/.adlc/scope"; ln -s ../../src "$HK/.adlc/scope/12.txt"; hg add .adlc/scope; rm -f "$HK/.adlc/scope/12.txt"; printf 'src/api/\n' > "$HK/.adlc/scope/12.txt"
+hook; check 1 "a link that is staged blocks the commit even when the working tree now holds a plain file" $?
 rm -rf "$HK"
 
 echo "labels.sh (against a stub gh):"
