@@ -267,9 +267,16 @@ mkdir -p "$FIX/bin"
 cat > "$FIX/bin/gh" <<'SH'
 #!/usr/bin/env bash
 echo "$*" >> "$DFX/calls"
+# The real gh picks the repository from the current directory. Mimic that: the labels exist
+# only when asked from inside the fixture root (DFX_ROOT), so a doctor that runs gh from the
+# caller's cwd sees none of them.
+here() { [ "$(pwd -P)" = "$(cd "$DFX_ROOT" && pwd -P)" ]; }
 case "$*" in
   "auth status"*) exit 0 ;;
-  "label list"*)  printf '%s\n' stage:intake gate:stories stage:design stage:build stage:qa gate:deploy; exit 0 ;;
+  "label list"*)  here && printf '%s\n' stage:intake gate:stories stage:design stage:build stage:qa gate:deploy; exit 0 ;;
+  "repo view"*|"api "*) here || { echo "fake gh: asked from $PWD, not the fixture root" >&2; exit 1; } ;;
+esac
+case "$*" in
   "repo view"*)                 k=default ;;
   "api "*"/protection"*)        k=classic ;;
   "api "*"/rules/branches/"*)   k=ruleset ;;
@@ -287,7 +294,7 @@ gate() { # <protected flag | -> <approvals in classic protection | -> <approvals
   [ "$3" = - ] || echo "$3" > "$FIX/fx/ruleset"
   rm -f "$FIX/.github/workflows/adlc-main-tripwire.yml"
   if [ "${4:-}" = tripwire ]; then echo 'name: tripwire' > "$FIX/.github/workflows/adlc-main-tripwire.yml"; fi
-  GATE=$(DFX="$FIX/fx" PATH="$FIX/bin:$PATH" bash "$S/adlc-doctor.sh" "$FIX" 2>&1)
+  GATE=$(DFX="$FIX/fx" DFX_ROOT="$FIX" PATH="$FIX/bin:$PATH" bash "$S/adlc-doctor.sh" "$FIX" 2>&1)
 }
 says_gate() { case "$GATE" in *"$1"*) echo yes ;; *) echo no ;; esac; }
 lane "${J}${WIRED}"   # a lane runs an agent here: the gate matters
@@ -305,14 +312,20 @@ gate false - none;           check 1 "gate: not protected and no tripwire is fla
 eq yes "…as no merge gate" "$(says_gate "no merge gate")"
 gate - - -;                  check 1 "gate: a failed lookup is flagged, not passed" $?
 gate true 1 none; rm "$FIX/fx/default"
-DFX="$FIX/fx" PATH="$FIX/bin:$PATH" bash "$S/adlc-doctor.sh" "$FIX" >/dev/null 2>&1; check 1 "gate: an unreadable default branch is flagged" $?
+DFX="$FIX/fx" DFX_ROOT="$FIX" PATH="$FIX/bin:$PATH" bash "$S/adlc-doctor.sh" "$FIX" >/dev/null 2>&1; check 1 "gate: an unreadable default branch is flagged" $?
 lane 'jobs:\n  t:\n    steps:\n      - run: echo hi\n'   # no lane runs an agent: nothing to gate
 gate false - none;           check 0 "gate: not checked when no lane runs an agent" $?
 eq 0 "…no lookup is made" "$(grep -c '^api ' "$FIX/fx/calls" 2>/dev/null || true)"
 lane "${J}${WIRED}"; rm -rf "$FIX/fx"; mkdir -p "$FIX/fx"
-DFX="$FIX/fx" PATH="$FIX/bin:$PATH" ADLC_DOCTOR_SKIP_LABELS=1 bash "$S/adlc-doctor.sh" "$FIX" >/dev/null 2>&1
+DFX="$FIX/fx" DFX_ROOT="$FIX" PATH="$FIX/bin:$PATH" ADLC_DOCTOR_SKIP_LABELS=1 bash "$S/adlc-doctor.sh" "$FIX" >/dev/null 2>&1
 eq "" "ADLC_DOCTOR_SKIP_LABELS=1 keeps the doctor off gh entirely" "$(cat "$FIX/fx/calls" 2>/dev/null)"
-rm -rf "$FIX"
+# Run with the root as $1 from a different directory (another checkout, say): the labels and
+# the merge gate must be read from the host repo named by $1, not from the caller's cwd.
+gate true 1 none   # a sound setup from the root itself…
+ELSEWHERE="$(mktemp -d)"
+( cd "$ELSEWHERE" && DFX="$FIX/fx" DFX_ROOT="$FIX" PATH="$FIX/bin:$PATH" bash "$S/adlc-doctor.sh" "$FIX" ) >/dev/null 2>&1
+check 0 "gh checks run against the host repo when the doctor is run from another cwd" $?
+rm -rf "$ELSEWHERE" "$FIX"
 
 echo "cache (hit-rate rollup):"
 CA=$(printf 'adlc-builder 1000 8000 500\nadlc-qa 2000 0 1000\nadlc-builder 500 4000 200\n' | bash "$S/adlc-cache.sh")
