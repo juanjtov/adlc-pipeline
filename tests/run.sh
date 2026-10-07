@@ -267,9 +267,17 @@ mkdir -p "$FIX/bin"
 cat > "$FIX/bin/gh" <<'SH'
 #!/usr/bin/env bash
 echo "$*" >> "$DFX/calls"
+# The real gh picks the repository from the current directory. Mimic that: the labels exist
+# only when asked from inside the fixture root (DFX_ROOT), so a doctor that runs gh from the
+# caller's cwd sees none of them. An unset DFX_ROOT would make `here` always true, so refuse it.
+: "${DFX_ROOT:?fake gh needs DFX_ROOT}"
+here() { [ "$(pwd -P)" = "$(cd "$DFX_ROOT" && pwd -P)" ]; }
 case "$*" in
   "auth status"*) exit 0 ;;
-  "label list"*)  printf '%s\n' stage:intake gate:stories stage:design stage:build stage:qa gate:deploy; exit 0 ;;
+  "label list"*)  here && printf '%s\n' stage:intake gate:stories stage:design stage:build stage:qa gate:deploy; exit 0 ;;
+  "repo view"*|"api "*) here || { echo "fake gh: asked from $PWD, not the fixture root" >&2; exit 1; } ;;
+esac
+case "$*" in
   "repo view"*)                 k=default ;;
   "api "*"/protection"*)        k=classic ;;
   "api "*"/rules/branches/"*)   k=ruleset ;;
@@ -287,7 +295,7 @@ gate() { # <protected flag | -> <approvals in classic protection | -> <approvals
   [ "$3" = - ] || echo "$3" > "$FIX/fx/ruleset"
   rm -f "$FIX/.github/workflows/adlc-main-tripwire.yml"
   if [ "${4:-}" = tripwire ]; then echo 'name: tripwire' > "$FIX/.github/workflows/adlc-main-tripwire.yml"; fi
-  GATE=$(DFX="$FIX/fx" PATH="$FIX/bin:$PATH" bash "$S/adlc-doctor.sh" "$FIX" 2>&1)
+  GATE=$(DFX="$FIX/fx" DFX_ROOT="$FIX" PATH="$FIX/bin:$PATH" bash "$S/adlc-doctor.sh" "$FIX" 2>&1)
 }
 says_gate() { case "$GATE" in *"$1"*) echo yes ;; *) echo no ;; esac; }
 lane "${J}${WIRED}"   # a lane runs an agent here: the gate matters
@@ -305,14 +313,27 @@ gate false - none;           check 1 "gate: not protected and no tripwire is fla
 eq yes "…as no merge gate" "$(says_gate "no merge gate")"
 gate - - -;                  check 1 "gate: a failed lookup is flagged, not passed" $?
 gate true 1 none; rm "$FIX/fx/default"
-DFX="$FIX/fx" PATH="$FIX/bin:$PATH" bash "$S/adlc-doctor.sh" "$FIX" >/dev/null 2>&1; check 1 "gate: an unreadable default branch is flagged" $?
+DFX="$FIX/fx" DFX_ROOT="$FIX" PATH="$FIX/bin:$PATH" bash "$S/adlc-doctor.sh" "$FIX" >/dev/null 2>&1; check 1 "gate: an unreadable default branch is flagged" $?
 lane 'jobs:\n  t:\n    steps:\n      - run: echo hi\n'   # no lane runs an agent: nothing to gate
 gate false - none;           check 0 "gate: not checked when no lane runs an agent" $?
 eq 0 "…no lookup is made" "$(grep -c '^api ' "$FIX/fx/calls" 2>/dev/null || true)"
 lane "${J}${WIRED}"; rm -rf "$FIX/fx"; mkdir -p "$FIX/fx"
-DFX="$FIX/fx" PATH="$FIX/bin:$PATH" ADLC_DOCTOR_SKIP_LABELS=1 bash "$S/adlc-doctor.sh" "$FIX" >/dev/null 2>&1
+DFX="$FIX/fx" DFX_ROOT="$FIX" PATH="$FIX/bin:$PATH" ADLC_DOCTOR_SKIP_LABELS=1 bash "$S/adlc-doctor.sh" "$FIX" >/dev/null 2>&1
 eq "" "ADLC_DOCTOR_SKIP_LABELS=1 keeps the doctor off gh entirely" "$(cat "$FIX/fx/calls" 2>/dev/null)"
-rm -rf "$FIX"
+# Where the doctor is run from must not matter. Every gate case above already runs it from the
+# test runner's cwd with the fixture as $1; these name the modes the header promises, and the CDPATH trap.
+gate true 1 none   # seeds a sound fixture (fx/ was emptied just above)
+ELSEWHERE="$(mktemp -d)"
+( cd "$ELSEWHERE" && DFX="$FIX/fx" DFX_ROOT="$FIX" PATH="$FIX/bin:$PATH" bash "$S/adlc-doctor.sh" "$FIX" ) >/dev/null 2>&1
+check 0 "gh checks run against the host repo when the doctor is run from another cwd with the root as \$1" $?
+( cd "$FIX" && DFX="$FIX/fx" DFX_ROOT="$FIX" PATH="$FIX/bin:$PATH" bash "$S/adlc-doctor.sh" ) >/dev/null 2>&1
+check 0 "…and from the repo root with the default root ." $?
+# A relative root with CDPATH exported: `cd name` would search CDPATH before the cwd and land in
+# the decoy, so the gh calls must drop CDPATH first.
+mkdir -p "$ELSEWHERE/${FIX##*/}"
+( cd "${FIX%/*}" && DFX="$FIX/fx" DFX_ROOT="$FIX" PATH="$FIX/bin:$PATH" CDPATH="$ELSEWHERE" bash "$S/adlc-doctor.sh" "${FIX##*/}" ) >/dev/null 2>&1
+check 0 "…and with a relative root, an exported CDPATH does not redirect the gh calls to a same-named decoy" $?
+rm -rf "$ELSEWHERE" "$FIX"
 
 echo "cache (hit-rate rollup):"
 CA=$(printf 'adlc-builder 1000 8000 500\nadlc-qa 2000 0 1000\nadlc-builder 500 4000 200\n' | bash "$S/adlc-cache.sh")
