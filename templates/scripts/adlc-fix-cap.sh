@@ -7,8 +7,10 @@
 #
 # Usage:  subjects=$(git log --format='%s' origin/<base>..HEAD)
 #         printf '%s\n' "$subjects" | adlc-fix-cap.sh [max]     (default max=3)
-# Prints STOP (>= max prior 'adlc-fix:' commits) or GO.
+# Prints STOP (>= max prior 'adlc-fix:' or 'adlc-fix(<scope>):' commits) or GO. A max that is
+# not a whole number is an error (exit 2), never a GO.
 set -euo pipefail
 max="${1:-3}"
-n=$(grep -c '^adlc-fix:' || true)
+case "$max" in ''|*[!0-9]*) echo "max must be a whole number, got '$max'" >&2; exit 2 ;; esac
+n=$(grep -cE '^adlc-fix(\([^)]*\))?:' || true)
 if [ "${n:-0}" -ge "$max" ]; then echo STOP; else echo GO; fi
