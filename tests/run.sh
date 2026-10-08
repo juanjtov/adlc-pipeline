@@ -206,7 +206,8 @@ eq GO   "GO when none"   "$(printf 'feat: x\nfix: y\n'                       | b
 eq STOP "a scoped subject adlc-fix(<scope>): counts" "$(printf 'adlc-fix(api): a\nadlc-fix: b\nadlc-fix(db): c\n' | bash "$S/adlc-fix-cap.sh" 3)"
 eq GO   "adlc-fixed: is not a fix round"            "$(printf 'adlc-fixed: a\nadlc-fix-up: b\nadlc-fix: c\n' | bash "$S/adlc-fix-cap.sh" 2)"
 printf 'adlc-fix: a\n' | bash "$S/adlc-fix-cap.sh" abc >/dev/null 2>&1; check 2 "a max that is not a number is an error, not a GO" $?
-eq "" "…and prints no verdict (an empty max still means the default 3)" "$(printf 'adlc-fix: a\n' | bash "$S/adlc-fix-cap.sh" 3x 2>/dev/null)"
+eq "" "…and prints no verdict" "$(printf 'adlc-fix: a\n' | bash "$S/adlc-fix-cap.sh" 3x 2>/dev/null)"
+eq GO "an empty max is the default 3, not an error" "$(printf 'adlc-fix: a\nadlc-fix: b\n' | bash "$S/adlc-fix-cap.sh" '')"
 
 echo "tripwire-check:"
 printf 'sha1 1\nsha2 2\n' | bash "$S/adlc-tripwire-check.sh" >/dev/null 2>&1; check 0 "OK when all have PRs" $?
@@ -383,6 +384,8 @@ eq "" "empty when no findings" "$(printf 'nothing here\n' | bash "$S/adlc-log-fi
 eq "" "the quoted format line is not a finding" "$(printf 'Use: ADLC-FINDING: <severity> | <class> | <file>\n' | bash "$S/adlc-log-findings.sh" 1 review)"
 eq "" "a mid-sentence mention is not a finding"  "$(printf 'see ADLC-FINDING: High | x | y above\n' | bash "$S/adlc-log-findings.sh" 1 review)"
 eq "" "two fields are not a finding"             "$(printf 'ADLC-FINDING: High | x\n' | bash "$S/adlc-log-findings.sh" 1 review)"
+eq 2 "a numbered item and a heading are findings" "$(printf '1. ADLC-FINDING: High | a | x.py\n### ADLC-FINDING: Low | b | y.py\n' | bash "$S/adlc-log-findings.sh" 1 review | grep -c '"class"')"
+printf 'ADLC-FINDING: High | injection | src/db/*.py\n' | bash "$S/adlc-log-findings.sh" 1 review | jq -e '.file == "src/db/*.py"' >/dev/null 2>&1 && ok "a glob in the file field keeps its *" || bad "a glob in the file field keeps its *"
 LB=$(printf -- '- **ADLC-FINDING:** High | `tenant-leak` | src/y.py\n' | bash "$S/adlc-log-findings.sh" 7 qa)
 eq '{"ts":"'"$(printf '%s' "$LB" | jq -r .ts)"'","pr":7,"stage":"qa","severity":"High","class":"tenant-leak","file":"src/y.py"}' "a bullet with bold + backticks parses clean" "$LB"
 printf 'ADLC-FINDING: Low | odd | src/a"b.py\n' | bash "$S/adlc-log-findings.sh" 1 review | jq -e '.file == "src/a\"b.py"' >/dev/null 2>&1 && ok "a quote in a field is valid JSON" || bad "a quote in a field breaks the JSON"
@@ -1053,11 +1056,13 @@ ADLC-ARCH:  CHANGES' 'ADLC-ARCH: PASS'
     mxpr 5 "2000-01-01T00:00:00Z" 'ADLC-ADV: CHANGES'
     mxpr 6 "$now" 'The lane reads `ADLC-ADV: CHANGES` to start the fix loop; nothing to fix here.
 ADLC-ADV: PASS' 'ADLC-ARCH: PASS'
+    mxpr 7 "$now" '**ADLC-ADV:** CHANGES' 'ADLC-ARCH: PASS'
+    mxpr 8 "$now" 'ADLC-ADV: PASSED' 'ADLC-ARCH: CHANGESET pending'
   } | jq -s . > "$MX/prs.json"
   : > "$MX/calls"
   OUT=$( cd "$MX/repo" && env PATH="$MX/bin:$PATH" MX_PRS="$MX/prs.json" MX_CALLS="$MX/calls" bash "$S/adlc-metrics.sh" 30 2>&1 ); check 0 "the script runs to the end" $?
-  eq "merged_prs: 5"             "merged PRs: those in the window"                                   "$(printf '%s\n' "$OUT" | grep '^merged_prs:')"
-  eq "first_pass_approved: 3 / 5" "first pass: no comment whose last verdict is CHANGES (a later PASS comment does not undo one; a PR with no verdict counts; a CHANGES quoted in the prose of a PASS comment is not one)" "$(printf '%s\n' "$OUT" | grep '^first_pass_approved:')"
+  eq "merged_prs: 7"             "merged PRs: those in the window"                                   "$(printf '%s\n' "$OUT" | grep '^merged_prs:')"
+  eq "first_pass_approved: 4 / 7" "first pass: no comment whose last verdict is CHANGES (a later PASS comment does not undo one; a PR with no verdict counts; a CHANGES quoted in the prose of a PASS comment is not one; a bold **ADLC-ADV:** CHANGES is one, as adlc-verdict.sh reads it; PASSED and CHANGESET are no verdict)" "$(printf '%s\n' "$OUT" | grep '^first_pass_approved:')"
   eq 1 "…from one gh pr list call, whatever the number of PRs" "$(grep -c '^pr list$' "$MX/calls")"
   echo '[]' > "$MX/prs.json"
   OUT=$( cd "$MX/repo" && env PATH="$MX/bin:$PATH" MX_PRS="$MX/prs.json" MX_CALLS="$MX/calls" bash "$S/adlc-metrics.sh" 30 2>&1 )

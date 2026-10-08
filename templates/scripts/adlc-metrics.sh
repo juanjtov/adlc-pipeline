@@ -21,10 +21,12 @@ echo "merged_prs: $merged"
 # so reviewDecision reads APPROVED on none of the pipeline's PRs. One `gh pr list` call brings
 # every PR's comments; a PR with no verdict comment at all (fast lane, a human's PR) counts as
 # first-pass, exactly as a PR whose reviewers never asked for changes. A comment's verdict is its
-# LAST marker, as adlc-verdict.sh reads it, so a comment that merely quotes "ADLC-ADV: CHANGES"
-# in its prose and ends in PASS is a PASS.
+# LAST marker, so a comment that merely quotes "ADLC-ADV: CHANGES" in its prose and ends in PASS
+# is a PASS. The marker is read as adlc-verdict.sh reads it: bold/backtick markup after the colon
+# is fine, PASSED is not PASS. (That script takes the last marker LINE and reads an unclear one as
+# empty; the two differ only when a comment's final marker line carries no clear verdict.)
 firstpass=$(echo "$prs" | jq '[.[] | select(any(.comments[].body;
-  [match("ADLC-(ADV|ARCH):\\s*(PASS|CHANGES)"; "g").captures[1].string] | last == "CHANGES") | not)] | length')
+  [match("ADLC-(ADV|ARCH):[*`_\\s]*(PASS|CHANGES)(?![A-Za-z0-9_])"; "g").captures[1].string] | last == "CHANGES") | not)] | length')
 echo "first_pass_approved: $firstpass / $merged"
 
 # --- Iterations-to-green (CI runs per merged PR head) ---
