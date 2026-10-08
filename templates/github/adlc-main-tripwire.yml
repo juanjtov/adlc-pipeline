@@ -16,6 +16,9 @@ on:
 permissions:
   contents: read
   issues: write
+  # The commit→PR lookup below needs this on a private repo. Without it the call is a 403, and
+  # every commit reads as a direct push.
+  pull-requests: read
 
 jobs:
   detect-direct-push:
@@ -36,7 +39,9 @@ jobs:
           if [ -z "${BEFORE//0/}" ]; then range="$AFTER -n 1"; else range="$BEFORE..$AFTER"; fi
 
           # Build "<sha> <pr_count>" lines for each non-merge commit, then let the script decide.
-          lines=$(for sha in $(git rev-list --no-merges $range 2>/dev/null); do
+          # A statement of its own: a rev-list that fails must fail the step, not read as "no commits".
+          commits=$(git rev-list --no-merges $range)
+          lines=$(for sha in $commits; do
                     n=$(gh api "repos/$REPO/commits/$sha/pulls" --jq 'length' 2>/dev/null || echo 0)
                     echo "$sha $n"
                   done)

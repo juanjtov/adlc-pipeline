@@ -15,7 +15,9 @@
 #   other     not a lane PR — the scope check skips. This includes an issue at stage:design: no
 #             lane opens a PR there, and a fast-lane PR bounced to design still holds its code.
 set -euo pipefail
-pr="${1:-}"; issue="${2:-}"
+# one label per line, whatever the caller joined them with (spaces, tabs, CRLF)
+norm() { printf '%s' "$1" | tr -s ' \t\r' '\n'; }
+pr="$(norm "${1:-}")"; issue="$(norm "${2:-}")"
 # exact, whole-label match (a `case`, not a pipe into grep -q: no SIGPIPE under pipefail)
 has() { case $'\n'"$1"$'\n' in *$'\n'"$2"$'\n'*) return 0 ;; esac; return 1; }
 

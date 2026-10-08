@@ -229,7 +229,7 @@ GitHub's review state, you may enable branch protection's **"require a human app
 then gates only the final MERGE, and the pipeline still flows to a finished, QA'd PR. Also copy
 **`adlc-diff-scope.yml`** (fails a lane PR that touches files outside the scope its issue declares
 in `.adlc/scope/<issue>.txt`, and a fast-lane PR over the cap; fill `{{TEST_DIR_REGEX}}` with
-the repo's test dirs. It runs on `pull_request_target`, from the default branch, so it takes effect
+the repo's test dirs, each ending in `/` (`tests/|backend/tests/`). It runs on `pull_request_target`, from the default branch, so it takes effect
 once it is on the default branch — never add a checkout of the PR head to it. This is the
 path-level half of author/verifier separation). For the test battery, follow the Phase 1 choice: if the user picked **propose it**,
 run the `test-strategy` skill, then copy **`adlc-ci.yml`** filled with the chosen setup +

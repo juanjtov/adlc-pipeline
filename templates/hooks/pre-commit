@@ -25,8 +25,9 @@ for p in .adlc .adlc/scope "$scope"; do
 done
 [ -f "$scope" ] || exit 0                        # no declared scope for this issue → skip
 
-# Test dirs QA may write (regex alternation). The wizard sets this default to the repo's own.
-export ADLC_TEST_DIRS="${ADLC_TEST_DIRS:-tests}"
+# Test dirs QA may write (regex alternation, each ending in `/`). The wizard sets this default
+# to the repo's own.
+export ADLC_TEST_DIRS="${ADLC_TEST_DIRS:-tests/}"
 # build+qa, not build: the hook cannot see the issue's stage, and QA commits its tests on this
 # branch too (CI applies the stricter rule while the issue is at stage:build).
 # core.quotePath=false: git would quote non-ASCII paths, and they would match nothing.
