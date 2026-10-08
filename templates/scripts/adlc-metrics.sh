@@ -10,14 +10,21 @@ LEDGER="${CLAUDE_PROJECT_DIR:-.}/.adlc/metrics/findings.jsonl"
 echo "# ADLC metrics — last ${DAYS}d (since ${SINCE})"
 
 # --- Delivery (from merged PRs) ---
-prs=$(gh pr list --state merged --limit 200 --json number,mergedAt,reviewDecision,changedFiles \
+prs=$(gh pr list --state merged --limit 200 --json number,mergedAt,changedFiles,comments \
         --jq "[.[] | select(.mergedAt >= \"$SINCE\")]")
 merged=$(echo "$prs" | jq 'length')
 echo "merged_prs: $merged"
 
-# First-pass acceptance proxy: merged PRs whose only review decision was APPROVED
-# (no CHANGES_REQUESTED round). Refine with per-PR review history if you need it exact.
-firstpass=$(echo "$prs" | jq '[.[] | select(.reviewDecision=="APPROVED")] | length')
+# First-pass acceptance: merged PRs that never drew an `ADLC-ADV: CHANGES` or `ADLC-ARCH: CHANGES`
+# verdict comment. The review lane carries build → qa on those comment markers (see
+# adlc-verdict.sh), not on GitHub's review decision — a bot cannot formally approve its own PR,
+# so reviewDecision reads APPROVED on none of the pipeline's PRs. One `gh pr list` call brings
+# every PR's comments; a PR with no verdict comment at all (fast lane, a human's PR) counts as
+# first-pass, exactly as a PR whose reviewers never asked for changes. A comment's verdict is its
+# LAST marker, as adlc-verdict.sh reads it, so a comment that merely quotes "ADLC-ADV: CHANGES"
+# in its prose and ends in PASS is a PASS.
+firstpass=$(echo "$prs" | jq '[.[] | select(any(.comments[].body;
+  [match("ADLC-(ADV|ARCH):\\s*(PASS|CHANGES)"; "g").captures[1].string] | last == "CHANGES") | not)] | length')
 echo "first_pass_approved: $firstpass / $merged"
 
 # --- Iterations-to-green (CI runs per merged PR head) ---
