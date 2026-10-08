@@ -6,7 +6,8 @@
 # Reviewers emit one machine-readable line per finding in their PR comment:
 #     ADLC-FINDING: <severity> | <class> | <file>
 # This reads such text on STDIN and prints one JSONL object per finding. The marker must start
-# the line (list/quote/bold markup aside) and carry all three fields; anything else is skipped.
+# the line (list, numbered, quote, heading or bold markup aside) and carry all three fields;
+# anything else is skipped.
 #
 # Usage:  <comment text> | adlc-log-findings.sh <pr> <stage>
 #   e.g.  gh pr view 42 --json comments --jq '.comments[].body' \
@@ -15,9 +16,10 @@ set -euo pipefail
 pr="${1:-0}"; stage="${2:-review}"
 case "$pr" in ''|*[!0-9]*) echo "pr must be a number, got '$pr'" >&2; exit 2 ;; esac
 ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-trim() { sed -E 's/[*`]//g; s/^[[:space:]]+//; s/[[:space:]]+$//'; }
+trim() { sed -E 's/^[[:space:]*`]+//; s/[[:space:]*`]+$//'; }   # markup at the ends only: src/db/*.py keeps its *
 
-{ grep -E '^[[:space:]>*_-]*ADLC-FINDING:' || true; } | while IFS= read -r line; do
+# the marker may follow list, numbered, quote, heading or bold markup, nothing else
+{ grep -E '^([[:space:]>*_#-]|[0-9]+[.)])*ADLC-FINDING:' || true; } | while IFS= read -r line; do
   body="${line#*ADLC-FINDING:}"
   sev="$(printf '%s\n' "$body" | cut -s -d'|' -f1 | trim)"
   cls="$(printf '%s\n' "$body" | cut -s -d'|' -f2 | trim)"
