@@ -13,16 +13,18 @@
 #          is, whatever the prefixes say — left on the default branch it would be the scope a
 #          later PR is held to, without that PR's diff showing it. A build/fast/build+qa stage
 #          with no scope file FAILS: a lane PR must declare its scope.
-#   ADLC_TEST_DIRS (env): regex alternation for the test dirs, e.g. "tests|backend/tests".
+#   ADLC_TEST_DIRS (env): regex alternation for the test dirs, anchored at the path start, e.g.
+#          "tests/|backend/tests/". End each directory with `/`: "tests" alone also matches
+#          testsuite/ and tests_x.py.
 set -euo pipefail
-stage="${1:-}"; scope_file="${2:-}"
+stage="${1:-}"; scope_file="${2:-}"; scope_file="${scope_file#./}"
 fail=0; self=""; pat=""; prefixes=()
 deny() { echo "out-of-scope (stage:$stage): $1" >&2; fail=1; }
 changed="$(cat)"
 
 case "$stage" in
   design) pat='^docs/' ;;
-  qa)     pat="^(${ADLC_TEST_DIRS:-tests})" ;;
+  qa)     pat="^(${ADLC_TEST_DIRS:-tests/})" ;;
   build|fast|build+qa)
     if [ ! -f "$scope_file" ]; then
       echo "no scope file (${scope_file:-.adlc/scope/<issue>.txt}) — a $stage-stage PR must declare its scope" >&2
@@ -34,7 +36,7 @@ case "$stage" in
     if [ "${#prefixes[@]}" -gt 500 ]; then   # its size is the PR author's to choose
       echo "scope file $scope_file lists more than 500 prefixes — that is not a declared scope" >&2; exit 1
     fi
-    if [ "$stage" = "build+qa" ]; then pat="^(${ADLC_TEST_DIRS:-tests})"; fi ;;
+    if [ "$stage" = "build+qa" ]; then pat="^(${ADLC_TEST_DIRS:-tests/})"; fi ;;
   ""|other) echo "no ADLC stage — skipped"; exit 0 ;;
   *) echo "unknown stage '$stage'" >&2; exit 2 ;;
 esac

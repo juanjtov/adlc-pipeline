@@ -38,6 +38,10 @@ printf 'src/api/x.py\n'             | ds build "$SC"; check 0 "build allows in-s
 printf 'src/db/y.py\n'              | ds build "$SC"; check 1 "build denies out-of-scope" $?
 printf 'src/api/x.py\n'             | ds fast "$SC";  check 0 "fast allows in-scope" $?
 printf 'src/db/y.py\n'              | ds fast "$SC";  check 1 "fast denies out-of-scope" $?
+printf 'src/api/x.py\n'             | ds build "./$SC"; check 0 "build reads a scope file named with a ./ prefix" $?
+printf 'tests/t.py\n'                | ds qa; check 0 "qa default: tests/ is a test dir" $?
+printf 'testsuite/t.py\n'            | ds qa; check 1 "qa default: testsuite/ is not (the default ends in /)" $?
+printf 'tests_x.py\n'                | ds qa; check 1 "qa default: tests_x.py is not a test dir" $?
 # a lane PR must declare its scope: no scope file is a failure, never a silent skip
 printf 'src/api/x.py\n'             | ds build .adlc/scope/99.txt; check 1 "build with no scope file fails" $?
 printf 'src/api/x.py\n'             | ds fast;                     check 1 "fast with no scope file fails" $?
@@ -100,6 +104,8 @@ eq other     "non-stage labels → other"                           "$(st 'bug
 needs:human' 'adlc:auto
 stage:intake')"
 eq other     "whole-label match, not substring"                   "$(st 'old-stage:build-notes' 'xstage:qa')"
+eq build+qa  "labels joined by spaces resolve the same"          "$(st 'lane:x adlc:auto' 'stage:qa gate:deploy')"
+eq fast      "…and by tabs or CRLF"                                "$(st $'lane:fast\tadlc:changes-requested' $'stage:fast\r\n')"
 # Drift guards: every stage a lane PR can be open at must resolve to a stage, and every stage
 # the resolver can print must be one adlc-diff-scope.sh enforces — a miss either way is a skip.
 for l in $(grep -oE '"stage:[a-z]+"' "$ROOT/templates/github/labels.sh" | tr -d '"'); do
@@ -116,6 +122,8 @@ rm -rf "$T"
 
 echo "branch-issue (which issue a lane branch names):"
 bi() { bash "$S/adlc-branch-issue.sh" "$1"; }
+eq 12 "feat/012-x → 12 (leading zeros dropped, so the scope file is 12.txt)" "$(bi feat/012-x)"
+eq 7  "fix/0007 → 7"                                                      "$(bi fix/0007)"
 eq 12 "feat/12-add-login → 12"                        "$(bi feat/12-add-login)"
 eq 12 "feat/12 (no slug) → 12"                        "$(bi feat/12)"
 eq "" "main names no issue"                           "$(bi main)"
@@ -184,15 +192,33 @@ echo "verdict:"
 eq PASS    "last marker wins"        "$(printf 'ADLC-ADV: CHANGES\nblah\nADLC-ADV: PASS\n' | bash "$S/adlc-verdict.sh" ADLC-ADV)"
 eq CHANGES "reads CHANGES"           "$(printf 'ADLC-ARCH: CHANGES\n'                       | bash "$S/adlc-verdict.sh" ADLC-ARCH)"
 eq ""      "empty when no marker"    "$(printf 'nothing here\n'                            | bash "$S/adlc-verdict.sh" ADLC-ADV)"
+eq ""      "an unclear last marker line is not PASS, whatever came before" "$(printf 'format: ADLC-ADV: PASS\n\nADLC-ADV: Changes needed, see above\n' | bash "$S/adlc-verdict.sh" ADLC-ADV)"
+eq ""      "PASSED is not PASS"       "$(printf 'ADLC-ADV: PASSED\n'                        | bash "$S/adlc-verdict.sh" ADLC-ADV)"
+eq ""      "lowercase is not a verdict" "$(printf 'ADLC-ADV: pass\n'                        | bash "$S/adlc-verdict.sh" ADLC-ADV)"
+eq PASS    "bold markup around the marker is fine" "$(printf '**ADLC-ADV:** PASS\n'         | bash "$S/adlc-verdict.sh" ADLC-ADV)"
+eq CHANGES "a verdict in a list item"  "$(printf -- '- ADLC-ARCH: CHANGES (two findings)\n' | bash "$S/adlc-verdict.sh" ADLC-ARCH)"
+eq CHANGES "ADLC-ADV does not read ADLC-ADV-X" "$(printf 'ADLC-ADV-X: PASS\nADLC-ADV: CHANGES\n' | bash "$S/adlc-verdict.sh" ADLC-ADV)"
 
 echo "fix-cap:"
 eq GO   "GO below cap"   "$(printf 'adlc-fix: a\nadlc-fix: b\n'              | bash "$S/adlc-fix-cap.sh" 3)"
 eq STOP "STOP at cap"    "$(printf 'adlc-fix: a\nadlc-fix: b\nadlc-fix: c\n' | bash "$S/adlc-fix-cap.sh" 3)"
 eq GO   "GO when none"   "$(printf 'feat: x\nfix: y\n'                       | bash "$S/adlc-fix-cap.sh" 3)"
+eq STOP "a scoped subject adlc-fix(<scope>): counts" "$(printf 'adlc-fix(api): a\nadlc-fix: b\nadlc-fix(db): c\n' | bash "$S/adlc-fix-cap.sh" 3)"
+eq GO   "adlc-fixed: is not a fix round"            "$(printf 'adlc-fixed: a\nadlc-fix-up: b\nadlc-fix: c\n' | bash "$S/adlc-fix-cap.sh" 2)"
+printf 'adlc-fix: a\n' | bash "$S/adlc-fix-cap.sh" abc >/dev/null 2>&1; check 2 "a max that is not a number is an error, not a GO" $?
+eq "" "…and prints no verdict" "$(printf 'adlc-fix: a\n' | bash "$S/adlc-fix-cap.sh" 3x 2>/dev/null)"
+eq GO "an empty max is the default 3, not an error" "$(printf 'adlc-fix: a\nadlc-fix: b\n' | bash "$S/adlc-fix-cap.sh" '')"
 
 echo "tripwire-check:"
 printf 'sha1 1\nsha2 2\n' | bash "$S/adlc-tripwire-check.sh" >/dev/null 2>&1; check 0 "OK when all have PRs" $?
 printf 'sha1 1\nsha2 0\n' | bash "$S/adlc-tripwire-check.sh" >/dev/null 2>&1; check 1 "fails on a direct push" $?
+printf 'sha1 1\nsha2\n'   | bash "$S/adlc-tripwire-check.sh" >/dev/null 2>&1; check 1 "a missing count (failed lookup) is a direct push, not a pass" $?
+printf 'sha1 1\nsha2 null\n' | bash "$S/adlc-tripwire-check.sh" >/dev/null 2>&1; check 1 "a non-numeric count (null, an error body) is a direct push" $?
+printf 'sha1 1\r\nsha2 2\r\n' | bash "$S/adlc-tripwire-check.sh" >/dev/null 2>&1; check 0 "CRLF input still reads the counts" $?
+printf 'sha1 1\nsha2 0'    | bash "$S/adlc-tripwire-check.sh" >/dev/null 2>&1; check 1 "a last line with no newline is still read" $?
+eq "DIRECT: sha2" "…and names the commit" "$(printf 'sha1 1\nsha2 0' | bash "$S/adlc-tripwire-check.sh" 2>/dev/null)"
+grep -q '^  pull-requests: read' "$ROOT/templates/github/adlc-main-tripwire.yml" && ok "adlc-main-tripwire.yml grants pull-requests: read (the commit→PR lookup is a 403 without it on a private repo)" || bad "adlc-main-tripwire.yml: needs pull-requests: read"
+grep -qE '^\s+commits=\$\(git rev-list --no-merges \$range\)$' "$ROOT/templates/github/adlc-main-tripwire.yml" && ok "…and a failed rev-list fails the step instead of reading as no commits" || bad "adlc-main-tripwire.yml: rev-list must be its own statement with no 2>/dev/null"
 
 echo "doctor (placeholder scan):"
 FIX="$(mktemp -d)"
@@ -204,6 +230,9 @@ printf 'if: "{{PRINCIPAL}}"\n' > "$FIX/.github/workflows/adlc-x.yml"
 ADLC_DOCTOR_SKIP_LABELS=1 bash "$S/adlc-doctor.sh" "$FIX" >/dev/null 2>&1; check 1 "flags unfilled placeholder" $?
 printf 'if: "someuser"\n' > "$FIX/.github/workflows/adlc-x.yml"
 ADLC_DOCTOR_SKIP_LABELS=1 bash "$S/adlc-doctor.sh" "$FIX" >/dev/null 2>&1; check 0 "passes when filled + skills + deny present" $?
+printf '{"permissions":{"allow":["Bash(gh pr merge:*)"],"deny":[]}}' > "$FIX/.claude/settings.json"
+ADLC_DOCTOR_SKIP_LABELS=1 bash "$S/adlc-doctor.sh" "$FIX" >/dev/null 2>&1; check 1 "flags 'gh pr merge' that is only in the allow list" $?
+printf '{"permissions":{"deny":["Bash(gh pr merge:*)"]}}' > "$FIX/.claude/settings.json"   # restore
 # prompt-cache hygiene: a live CI run-id expansion in a frozen context file must fail
 printf '# proj\nBuild ref: ${GITHUB_RUN_ID}\n' > "$FIX/CLAUDE.md"
 ADLC_DOCTOR_SKIP_LABELS=1 bash "$S/adlc-doctor.sh" "$FIX" >/dev/null 2>&1; check 1 "flags live CI run-id in CLAUDE.md" $?
@@ -352,6 +381,15 @@ printf '%s' "$LF" | grep -q '"class":"hallucinated-api"' && ok "parses class" ||
 printf '%s' "$LF" | grep -q '"severity":"Critical"' && ok "parses severity" || bad "parses severity"
 printf '%s' "$LF" | grep -q '"pr":42' && ok "tags pr number" || bad "tags pr number"
 eq "" "empty when no findings" "$(printf 'nothing here\n' | bash "$S/adlc-log-findings.sh" 1 review)"
+eq "" "the quoted format line is not a finding" "$(printf 'Use: ADLC-FINDING: <severity> | <class> | <file>\n' | bash "$S/adlc-log-findings.sh" 1 review)"
+eq "" "a mid-sentence mention is not a finding"  "$(printf 'see ADLC-FINDING: High | x | y above\n' | bash "$S/adlc-log-findings.sh" 1 review)"
+eq "" "two fields are not a finding"             "$(printf 'ADLC-FINDING: High | x\n' | bash "$S/adlc-log-findings.sh" 1 review)"
+eq 2 "a numbered item and a heading are findings" "$(printf '1. ADLC-FINDING: High | a | x.py\n### ADLC-FINDING: Low | b | y.py\n' | bash "$S/adlc-log-findings.sh" 1 review | grep -c '"class"')"
+printf 'ADLC-FINDING: High | injection | src/db/*.py\n' | bash "$S/adlc-log-findings.sh" 1 review | jq -e '.file == "src/db/*.py"' >/dev/null 2>&1 && ok "a glob in the file field keeps its *" || bad "a glob in the file field keeps its *"
+LB=$(printf -- '- **ADLC-FINDING:** High | `tenant-leak` | src/y.py\n' | bash "$S/adlc-log-findings.sh" 7 qa)
+eq '{"ts":"'"$(printf '%s' "$LB" | jq -r .ts)"'","pr":7,"stage":"qa","severity":"High","class":"tenant-leak","file":"src/y.py"}' "a bullet with bold + backticks parses clean" "$LB"
+printf 'ADLC-FINDING: Low | odd | src/a"b.py\n' | bash "$S/adlc-log-findings.sh" 1 review | jq -e '.file == "src/a\"b.py"' >/dev/null 2>&1 && ok "a quote in a field is valid JSON" || bad "a quote in a field breaks the JSON"
+printf 'ADLC-FINDING: High | x | y\n' | bash "$S/adlc-log-findings.sh" abc review >/dev/null 2>&1; check 2 "a PR number that is not a number is an error" $?
 
 echo "cost/latency:"
 CO=$(printf 'adlc-builder 120 5000 0.10\nadlc-qa 80 3000 0.06\nadlc-builder 60 2000 0.04\n' | bash "$S/adlc-cost.sh")
@@ -359,6 +397,8 @@ printf '%s\n' "$CO" | grep -qE 'adlc-builder +2 +180 +90\.0 +7000' && ok "per-la
 printf '%s\n' "$CO" | grep -qE 'TOTAL +3 +260' && ok "pipeline total latency" || bad "pipeline total latency"
 LO=$(printf 'adlc-review 30\nadlc-review 10\n' | bash "$S/adlc-cost.sh")
 printf '%s\n' "$LO" | grep -qE 'adlc-review +2 +40 +20\.0' && ok "latency-only (no tokens)" || bad "latency-only"
+CE=$(printf 'adlc-review 30\n\nadlc-review 10\n' | bash "$S/adlc-cost.sh")
+printf '%s\n' "$CE" | grep -qE 'TOTAL +2 +40' && ok "a blank input line is not a run" || bad "a blank input line is not a run"
 
 echo "lane triggers (static):"
 # `labeled` fires on EVERY label change — including the label moves the lanes themselves make with
@@ -1016,11 +1056,13 @@ ADLC-ARCH:  CHANGES' 'ADLC-ARCH: PASS'
     mxpr 5 "2000-01-01T00:00:00Z" 'ADLC-ADV: CHANGES'
     mxpr 6 "$now" 'The lane reads `ADLC-ADV: CHANGES` to start the fix loop; nothing to fix here.
 ADLC-ADV: PASS' 'ADLC-ARCH: PASS'
+    mxpr 7 "$now" '**ADLC-ADV:** CHANGES' 'ADLC-ARCH: PASS'
+    mxpr 8 "$now" 'ADLC-ADV: PASSED' 'ADLC-ARCH: CHANGESET pending'
   } | jq -s . > "$MX/prs.json"
   : > "$MX/calls"
   OUT=$( cd "$MX/repo" && env PATH="$MX/bin:$PATH" MX_PRS="$MX/prs.json" MX_CALLS="$MX/calls" bash "$S/adlc-metrics.sh" 30 2>&1 ); check 0 "the script runs to the end" $?
-  eq "merged_prs: 5"             "merged PRs: those in the window"                                   "$(printf '%s\n' "$OUT" | grep '^merged_prs:')"
-  eq "first_pass_approved: 3 / 5" "first pass: no comment whose last verdict is CHANGES (a later PASS comment does not undo one; a PR with no verdict counts; a CHANGES quoted in the prose of a PASS comment is not one)" "$(printf '%s\n' "$OUT" | grep '^first_pass_approved:')"
+  eq "merged_prs: 7"             "merged PRs: those in the window"                                   "$(printf '%s\n' "$OUT" | grep '^merged_prs:')"
+  eq "first_pass_approved: 4 / 7" "first pass: no comment whose last verdict is CHANGES (a later PASS comment does not undo one; a PR with no verdict counts; a CHANGES quoted in the prose of a PASS comment is not one; a bold **ADLC-ADV:** CHANGES is one, as adlc-verdict.sh reads it; PASSED and CHANGESET are no verdict)" "$(printf '%s\n' "$OUT" | grep '^first_pass_approved:')"
   eq 1 "…from one gh pr list call, whatever the number of PRs" "$(grep -c '^pr list$' "$MX/calls")"
   echo '[]' > "$MX/prs.json"
   OUT=$( cd "$MX/repo" && env PATH="$MX/bin:$PATH" MX_PRS="$MX/prs.json" MX_CALLS="$MX/calls" bash "$S/adlc-metrics.sh" 30 2>&1 )
