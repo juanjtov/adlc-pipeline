@@ -6,12 +6,14 @@
 #
 # The retro produces the input from GitHub Actions runs, e.g.:
 #   gh run list --limit 200 --json name,startedAt,updatedAt \
-#     | jq -r '.[] | "\(.name) \(((.updatedAt|fromdate)-(.startedAt|fromdate)))"' \
+#     | jq -r '.[] | "\(.name|gsub(" ";"-")) \(((.updatedAt|fromdate)-(.startedAt|fromdate)))"' \
 #     | adlc-cost.sh
+# Fields split on whitespace, so a lane name must not contain a space (the recipe swaps them for `-`).
 # For token/cost, enable OTel (settings.telemetry.json) — that captures per-agent tokens+cost
 # directly; this script then just rolls them up alongside latency.
 set -euo pipefail
 awk '
+  NF==0 { next }
   { lane=$1; sec=$2+0; tok=$3+0; usd=$4+0
     n[lane]++; S[lane]+=sec; T[lane]+=tok; U[lane]+=usd
     N++; SS+=sec; TT+=tok; UU+=usd }
