@@ -1042,7 +1042,7 @@ SH
   chmod +x "$MX/bin/gh"
   now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   # <number> <mergedAt> <comment bodies…> → one PR object
-  mxpr() { local n="$1" at="$2"; shift 2; jq -cn --argjson n "$n" --arg at "$at" '$ARGS.positional | map({body: .}) | {number: $n, mergedAt: $at, changedFiles: 1, headRefName: ("feat/" + ($n|tostring)), comments: .}' --args "$@"; }
+  mxpr() { local n="$1" at="$2"; shift 2; jq -cn --argjson n "$n" --arg at "$at" '$ARGS.positional | map({body: .}) | {number: $n, mergedAt: $at, createdAt: ($at | fromdate - 3600 | todate), changedFiles: 1, headRefName: ("feat/" + ($n|tostring)), comments: .}' --args "$@"; }
   {
     mxpr 1 "$now" 'Findings: none.
 ADLC-ADV: PASS' 'Conforms.
@@ -1059,15 +1059,17 @@ ADLC-ADV: PASS' 'ADLC-ARCH: PASS'
     mxpr 7 "$now" '**ADLC-ADV:** CHANGES' 'ADLC-ARCH: PASS'
     mxpr 8 "$now" 'ADLC-ADV: PASSED' 'ADLC-ARCH: CHANGESET pending'
   } | jq -s . > "$MX/prs.json"
-  # CI runs: PR 1's branch went green first time, PR 2's took a red run then a green one; another workflow's run is ignored
+  # CI runs: PR 1's branch went green first time, PR 2's took a red run then a green one; another workflow's
+  # run is ignored, and so is a red run on PR 1's branch name from BEFORE that PR was opened (a reused name)
   jq -n --arg at "$now" '[
     {workflowName: "ADLC CI", headBranch: "feat/1", status: "completed", conclusion: "success", createdAt: $at},
+    {workflowName: "ADLC CI", headBranch: "feat/1", status: "completed", conclusion: "failure", createdAt: ($at | fromdate - 7200 | todate)},
     {workflowName: "ADLC CI", headBranch: "feat/2", status: "completed", conclusion: "failure", createdAt: $at},
     {workflowName: "ADLC CI", headBranch: "feat/2", status: "completed", conclusion: "success", createdAt: $at},
     {workflowName: "ADLC diff-scope", headBranch: "feat/2", status: "completed", conclusion: "failure", createdAt: $at}]' > "$MX/runs.json"
   : > "$MX/calls"
   OUT=$( cd "$MX/repo" && env PATH="$MX/bin:$PATH" MX_PRS="$MX/prs.json" MX_RUNS="$MX/runs.json" MX_CALLS="$MX/calls" bash "$S/adlc-metrics.sh" 30 2>&1 ); check 0 "the script runs to the end" $?
-  eq "iterations_to_green: avg 1.5 CI runs per merged PR; failed_first: 1 / 2" "iterations-to-green: CI runs per merged PR branch, from one run list call; other lanes do not count" "$(printf '%s\n' "$OUT" | grep '^iterations_to_green:')"
+  eq "iterations_to_green: avg 1.5 CI runs per merged PR; failed_first: 1 / 2" "iterations-to-green: CI runs per merged PR branch since the PR opened, from one run list call; other lanes and older runs on a reused branch name do not count" "$(printf '%s\n' "$OUT" | grep '^iterations_to_green:')"
   eq 1 "…from one gh run list call" "$(grep -c '^run list$' "$MX/calls")"
   eq "merged_prs: 7"             "merged PRs: those in the window"                                   "$(printf '%s\n' "$OUT" | grep '^merged_prs:')"
   eq "first_pass_approved: 4 / 7" "first pass: no comment whose last verdict is CHANGES (a later PASS comment does not undo one; a PR with no verdict counts; a CHANGES quoted in the prose of a PASS comment is not one; a bold **ADLC-ADV:** CHANGES is one, as adlc-verdict.sh reads it; PASSED and CHANGESET are no verdict)" "$(printf '%s\n' "$OUT" | grep '^first_pass_approved:')"
@@ -1264,6 +1266,9 @@ eq "adlc:builder=$FULL;"         "fix: the Builder"      "$(grants adlc-fix.yml)
 eq "adlc:qa-release-ops=$FULL;"  "qa: QA"                "$(grants adlc-qa.yml)"
 eq "-=$FULL;-=$FULL;"            "retro: the /adlc:retro and /adlc:cycle-retro skills, two steps, no agent" "$(grants adlc-retro.yml)"
 eq 2 "retro: each step names its skill once" "$(grep -c '^          prompt: "/adlc:\(cycle-\)\?retro"$' "$ROOT/templates/github/adlc-retro.yml")"
+eq "retro cycle-retro" "retro: a checkout reset (default branch, clean) sits between the two proposals, so the second does not carry the first's branch or ledgers" \
+   "$(awk '/prompt: "\/adlc:retro"/{a=1} a && /git checkout -q -f .*default_branch/{b=1} b && /git clean -fdq/{c=1} c && /prompt: "\/adlc:cycle-retro"/{print "retro cycle-retro"; exit}' "$ROOT/templates/github/adlc-retro.yml")"
+eq 0 "retro: the second proposal does not run on a cancelled job" "$(grep -c 'if: always()' "$ROOT/templates/github/adlc-retro.yml")"
 for f in "$T"/adlc-*.yml; do   # no template this table does not know about
   case "$(basename "$f")" in adlc-intake.yml|adlc-design.yml|adlc-review.yml|adlc-fast.yml|adlc-builder.yml|adlc-fix.yml|adlc-qa.yml|adlc-retro.yml) ;;
     *) eq "" "$(basename "$f"): runs no agent (or add it to the grants table)" "$(grants "$(basename "$f")")" ;; esac
@@ -1425,53 +1430,71 @@ case "$1 $2" in
   "run list")   src="$CY_FX/runs.json" ;;
   "issue list") src="$CY_FX/issues.json" ;;
   "pr list")    src="$CY_FX/prs.json" ;;
-  api*)         n=$(printf '%s' "$2" | sed -nE 's#.*/issues/([0-9]+)/timeline.*#\1#p'); src="$CY_FX/timeline-$n.json"; [ -f "$src" ] || src="$CY_FX/empty.json" ;;
+  "repo view")  src="$CY_FX/repo.json" ;;
+  api*)         n=$(printf '%s' "$2" | sed -nE 's#.*/issues/([0-9]+)/timeline.*#\1#p')
+                [ "$n" = 10 ] && { echo "gh: Not Found (HTTP 404)" >&2; exit 1; }
+                src="$CY_FX/timeline-$n.json"; [ -f "$src" ] || src="$CY_FX/empty.json" ;;
   *) exit 2 ;;
 esac
 f=.; while [ $# -gt 0 ]; do [ "$1" = "--jq" ] && f="$2"; shift; done
 jq -r "$f" "$src"
 SH
-  chmod +x "$CY/bin/gh"; echo '[]' > "$CY/fx/empty.json"; : > "$CY/calls"
+  chmod +x "$CY/bin/gh"; echo '[]' > "$CY/fx/empty.json"; echo '{"nameWithOwner":"Acme/Shop"}' > "$CY/fx/repo.json"; : > "$CY/calls"
   T1=$(date -u -v-2H +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d '-2 hours' +%Y-%m-%dT%H:%M:%SZ)
   T2=$(date -u -v-1H +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d '-1 hour' +%Y-%m-%dT%H:%M:%SZ)
   jq -n --arg a "$T1" --arg b "$T2" '[
-    {databaseId: 1, workflowName: "ADLC builder",  headBranch: "feat/42-thing", status: "completed", conclusion: "success", startedAt: $a, updatedAt: ($a | fromdate + 120 | todate)},
+    {databaseId: 1, workflowName: "ADLC Builder",  headBranch: "Feat/042-thing", status: "completed", conclusion: "success", startedAt: $a, updatedAt: ($a | fromdate + 120 | todate)},
     {databaseId: 2, workflowName: "ADLC CI",       headBranch: "feat/42-thing", status: "completed", conclusion: "failure", startedAt: $a, updatedAt: ($a | fromdate + 30 | todate)},
     {databaseId: 3, workflowName: "ADLC CI",       headBranch: "feat/42-thing", status: "completed", conclusion: "success", startedAt: $b, updatedAt: ($b | fromdate + 40 | todate)},
     {databaseId: 4, workflowName: "ADLC review",   headBranch: "main",          status: "in_progress", conclusion: null, startedAt: $b, updatedAt: $b},
+    {databaseId: 6, workflowName: "ADLC preview deploy", headBranch: "main",    status: "completed", conclusion: "success", startedAt: $b, updatedAt: ($b | fromdate + 7 | todate)},
     {databaseId: 5, workflowName: "Deploy site",   headBranch: "main",          status: "completed", conclusion: "success", startedAt: $b, updatedAt: $b}]' > "$CY/fx/runs.json"
   OUT=$( cd "$CY/repo" && env PATH="$CY/bin:$PATH" CY_FX="$CY/fx" CY_CALLS="$CY/calls" ADLC_REPO=acme/shop bash "$S/adlc-run-log.sh" actions 7 2>&1 ); check 0 "actions: runs to the end" $?
-  eq 3 "actions: completed ADLC lanes only (not the live run, not another workflow)" "$(printf '%s\n' "$OUT" | wc -l | tr -d ' ')"
-  eq "builder 42 120 null" "actions: lane → stage, branch → issue, seconds from the run; no tokens" \
+  eq 4 "actions: completed ADLC workflows only (not the live run, not another workflow)" "$(printf '%s\n' "$OUT" | wc -l | tr -d ' ')"
+  eq "builder 42 120 null" "actions: the template's lane name → stage, branch → issue by adlc-branch-issue.sh's rule (case, leading zeros), seconds from the run; no tokens" \
      "$(printf '%s\n' "$OUT" | jq -r 'select(.run_id == "actions:1") | "\(.stage) \(.issue) \(.seconds) \(.tokens)"')"
   eq "adlc-ci failure" "actions: a guard lane keeps its own name and its conclusion" "$(printf '%s\n' "$OUT" | jq -r 'select(.run_id == "actions:2") | "\(.stage) \(.conclusion)"')"
+  eq "adlc-preview-deploy null" "actions: a host repo's own 'ADLC …' workflow is a slug, not a reviewer; a default-branch run names no issue" "$(printf '%s\n' "$OUT" | jq -r 'select(.run_id == "actions:6") | "\(.stage) \(.issue)"')"
+  # the branch → issue rule is adlc-branch-issue.sh's; both must answer alike
+  for br in feat/12-add-login feat/012-x Feat/42-x fix-lane/042 main feat/x-12 12; do
+    want="$(bash "$S/adlc-branch-issue.sh" "$br")"; want="${want:-null}"
+    got="$(jq -rn --arg b "$br" 'def branch_issue: capture("^[^/]*/0*(?<n>[0-9]+)(-.*)?$") | .n | tonumber; ($b | branch_issue? // null)')"
+    eq "$want" "branch → issue agrees with adlc-branch-issue.sh for '$br'" "$got"
+  done
+  ( cd "$CY/repo" && ADLC_REPO="o'brien/shop" bash "$S/adlc-run-log.sh" actions 7 >/dev/null 2>&1 ); check 2 "run-log: a repo name that is not owner/name is refused before any query" $?
+  ( cd "$CY/repo" && ADLC_REPO= bash "$S/adlc-run-log.sh" otel "$CY/fx/telemetry.jsonl" >/dev/null 2>&1 ); check 2 "run-log: otel with no repo exits 2 like mc, not an empty-repo row" $?
   printf '%s\n' "$OUT" > "$CY/repo/.adlc/metrics/runs.jsonl"; printf '%s\n' "$B" >> "$CY/repo/.adlc/metrics/runs.jsonl"
   # --- cycle: issue 7 goes intake (10 min) → gate:stories (5 min) → design → build; PR 9 references it and drew one changes-requested
   tl() { jq -cn --arg t "$1" --arg e "$2" --arg l "$3" '{event: $e, created_at: $t, label: (if $l == "" then null else {name: $l} end), actor: {login: "bot"}}'; }
-  xref() { jq -cn --arg t "$1" --argjson n "$2" --argjson pr "$3" '{event: "cross-referenced", created_at: $t, source: {issue: ({number: $n} + (if $pr then {pull_request: {url: "x"}} else {} end))}}'; }
+  xref() { jq -cn --arg t "$1" --argjson n "$2" --argjson pr "$3" --arg repo "${4:-acme/shop}" '{event: "cross-referenced", created_at: $t, source: {issue: ({number: $n, repository: {full_name: $repo}} + (if $pr then {pull_request: {url: "x"}} else {} end))}}'; }
   at() { jq -rn --arg b "$T1" --argjson s "$1" '$b | fromdate + $s | todate'; }
   { tl "$(at 0)" labeled stage:intake; xref "$(at 30)" 5 false; tl "$(at 600)" unlabeled stage:intake; tl "$(at 600)" labeled gate:stories
     tl "$(at 900)" unlabeled gate:stories; tl "$(at 900)" labeled stage:design; tl "$(at 1000)" unlabeled stage:design; tl "$(at 1000)" labeled stage:build
-    xref "$(at 1800)" 9 true; tl "$(at 2000)" unlabeled stage:build; tl "$(at 2000)" labeled stage:qa; tl "$(at 2600)" unlabeled stage:qa; tl "$(at 2600)" labeled gate:deploy; } | jq -s . > "$CY/fx/timeline-7.json"
+    xref "$(at 1800)" 9 true; tl "$(at 2000)" unlabeled stage:build; tl "$(at 2000)" labeled stage:qa; tl "$(at 2600)" unlabeled stage:qa; tl "$(at 2600)" labeled gate:deploy
+    tl "$(at 3500)" labeled stage:intake; } | jq -s . > "$CY/fx/timeline-7.json"   # re-labeled 500 s AFTER the close: counts 0, not -500
   { tl "$(at 1900)" labeled adlc:changes-requested; tl "$(at 1950)" unlabeled adlc:changes-requested; tl "$(at 1990)" labeled lane:full; } | jq -s . > "$CY/fx/timeline-9.json"
   # issue 8: fast lane, its PR predates its intake label (filed from the PR) → intake_to_pr null
-  { xref "$(at 0)" 11 true; tl "$(at 100)" labeled stage:intake; tl "$(at 200)" unlabeled stage:intake; tl "$(at 200)" labeled stage:fast; } | jq -s . > "$CY/fx/timeline-8.json"
+  { xref "$(at -50)" 500 true other/plugin; xref "$(at 0)" 11 true; tl "$(at 100)" labeled stage:intake; tl "$(at 200)" unlabeled stage:intake; tl "$(at 200)" labeled stage:fast; } | jq -s . > "$CY/fx/timeline-8.json"
   jq -n --arg t1 "$T1" --arg close "$(at 3000)" --arg old "2020-01-01T00:00:00Z" '[
     {number: 7, title: "thing", createdAt: $t1, closedAt: $close, labels: []},
     {number: 8, title: "small", createdAt: $t1, closedAt: $close, labels: []},
+    {number: 10, title: "transferred away (timeline 404)", createdAt: $t1, closedAt: $close, labels: []},
     {number: 3, title: "ancient", createdAt: $old, closedAt: $old, labels: []}]' > "$CY/fx/issues.json"
   : > "$CY/calls"
-  OUT=$( cd "$CY/repo" && env PATH="$CY/bin:$PATH" CY_FX="$CY/fx" CY_CALLS="$CY/calls" bash "$S/adlc-cycle.sh" issues 7 2>&1 ); check 0 "cycle issues: runs to the end" $?
-  eq 2 "cycle issues: one row per issue created in the window" "$(printf '%s\n' "$OUT" | wc -l | tr -d ' ')"
+  OUT=$( cd "$CY/repo" && env PATH="$CY/bin:$PATH" CY_FX="$CY/fx" CY_CALLS="$CY/calls" bash "$S/adlc-cycle.sh" issues 7 2>"$CY/err" ); check 0 "cycle issues: runs to the end although one timeline read failed" $?
+  eq 2 "cycle issues: one row per readable issue created in the window" "$(printf '%s\n' "$OUT" | wc -l | tr -d ' ')"
+  eq 1 "cycle issues: the unreadable issue is named on stderr and skipped, not silently dropped" "$(grep -c 'timeline of #10; skipped' "$CY/err")"
+  eq 1 "…and gh's own error is kept" "$(grep -c 'HTTP 404' "$CY/err")"
   R7=$(printf '%s\n' "$OUT" | jq -c 'select(.issue == 7)')
-  eq "600 300 100 1000 600 400" "cycle: dwell per label from labeled→unlabeled intervals; an open gate runs to the issue's close" \
+  eq "600 300 100 1000 600 400" "cycle: dwell per label from labeled→unlabeled intervals; an open gate runs to the issue's close; a label put on after the close adds 0" \
      "$(printf '%s' "$R7" | jq -r '"\(.dwell["stage:intake"]) \(.dwell["gate:stories"]) \(.dwell["stage:design"]) \(.dwell["stage:build"]) \(.dwell["stage:qa"]) \(.dwell["gate:deploy"])"')"
   eq "full 9 1800 1 2300 700" "cycle: lane, first PR that references the issue (not the issue xref), intake→PR, rounds from the PR's changes-requested labels, stage vs gate seconds" \
      "$(printf '%s' "$R7" | jq -r '"\(.lane) \(.pr) \(.intake_to_pr_seconds) \(.rounds) \(.stage_seconds) \(.gate_seconds)"')"
-  eq "fast 11 null 0" "cycle: stage:fast → fast lane; a PR that predates the intake label gives no intake→PR; no changes-requested → 0 rounds" \
+  eq "fast 11 null 0" "cycle: stage:fast → fast lane; another repo's PR is not this issue's PR; a PR that predates the intake label gives no intake→PR; no changes-requested → 0 rounds" \
      "$(printf '%s\n' "$OUT" | jq -r 'select(.issue == 8) | "\(.lane) \(.pr) \(.intake_to_pr_seconds) \(.rounds)"')"
   eq 1 "cycle: one issue list call" "$(grep -c '^issue list$' "$CY/calls")"
-  eq 4 "cycle: one timeline call per issue, plus one per linked PR" "$(grep -c '^api ' "$CY/calls")"
+  eq 1 "cycle: one repo view call, outside the loop" "$(grep -c '^repo view$' "$CY/calls")"
+  eq 5 "cycle: one timeline call per issue, plus one per linked PR (none for a skipped issue)" "$(grep -c '^api ' "$CY/calls")"
   printf '%s\n' "$OUT" > "$CY/repo/.adlc/metrics/cycle.jsonl"
   OUT=$( cd "$CY/repo" && CLAUDE_PROJECT_DIR="$CY/repo" bash "$S/adlc-cycle.sh" report 7 2>&1 ); check 0 "cycle report: runs to the end" $?
   eq "builder          1               1      0.2       100%        60       100%  82%" "report: the per-stage spend table (agent runs only; cached share of the prompt)" "$(printf '%s\n' "$OUT" | grep '^builder ')"

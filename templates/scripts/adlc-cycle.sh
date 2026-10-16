@@ -18,42 +18,52 @@
 #       and .adlc/metrics/cycle.jsonl (materialize both first; see the skill). Window filters rows.
 #
 # Cost: one `gh issue list` + one timeline call per issue (+ one per linked PR). Materialize into
-# .adlc/metrics/cycle.jsonl the way the finding ledger is, never commit it from CI.
+# .adlc/metrics/cycle.jsonl the way the finding ledger is, never commit it from CI. An issue whose
+# timeline cannot be read (deleted, transferred, rate-limited) is skipped with a line on stderr and
+# the run goes on; a PR whose timeline fails gives rounds: null. Only cross-references from THIS
+# repo count as the issue's PR (a host repo's issues also cite the plugin repo's PRs).
 set -euo pipefail
 cmd="${1:-}"; days="${2:-30}"
 SINCE=$(date -u -v-"${days}"d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "-${days} days" +%Y-%m-%dT%H:%M:%SZ)
 M="${CLAUDE_PROJECT_DIR:-.}/.adlc/metrics"
 NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
-timeline() { gh api "repos/{owner}/{repo}/issues/$1/timeline?per_page=100" --paginate --jq '.[]' 2>/dev/null | jq -sc .; }
+timeline() { gh api "repos/{owner}/{repo}/issues/$1/timeline?per_page=100" --paginate --jq '.[]' | jq -sc .; }
+# A cross-referenced event's source repo, lower-cased, in either shape GitHub sends.
+XREF_REPO='((.source.issue.repository.full_name // (.source.issue.repository_url // "" | sub(".*/repos/"; ""))) | ascii_downcase)'
+
 
 case "$cmd" in
   issues)
+    REPO="$(gh repo view --json nameWithOwner --jq .nameWithOwner | tr 'A-Z' 'a-z')"
+    [ -n "$REPO" ] || { echo "adlc-cycle: cannot tell this repo's owner/name (gh repo view)" >&2; exit 2; }
     gh issue list --state all --limit 200 --json number,title,createdAt,closedAt,labels \
       --jq "[.[] | select(.createdAt >= \"$SINCE\")] | sort_by(.number)[] | @json" \
     | while IFS= read -r issue; do
         n="$(printf '%s' "$issue" | jq -r .number)"
-        tl="$(timeline "$n")"
-        pr="$(printf '%s' "$tl" | jq -r '[.[] | select(.event == "cross-referenced" and .source.issue.pull_request != null)] | sort_by(.created_at) | first | .source.issue.number // empty')"
+        tl="$(timeline "$n")" || { echo "adlc-cycle: could not read the timeline of #$n; skipped" >&2; continue; }
+        pr="$(printf '%s' "$tl" | jq -r --arg repo "$REPO" "[.[] | select(.event == \"cross-referenced\" and .source.issue.pull_request != null and $XREF_REPO == \$repo)] | sort_by(.created_at) | first | .source.issue.number // empty")"
         rounds=0
         if [ -n "$pr" ]; then
-          rounds="$(timeline "$pr" | jq '[.[] | select(.event == "labeled" and .label.name == "adlc:changes-requested")] | length')"
+          rounds="$(timeline "$pr" | jq '[.[] | select(.event == "labeled" and .label.name == "adlc:changes-requested")] | length')" \
+            || { echo "adlc-cycle: could not read the timeline of PR #$pr (issue #$n); rounds unknown" >&2; rounds=null; }
         fi
-        printf '%s' "$tl" | jq -c --argjson issue "$issue" --arg now "$NOW" --arg pr "${pr:-}" --argjson rounds "$rounds" '
+        printf '%s' "$tl" | jq -c --argjson issue "$issue" --arg now "$NOW" --arg pr "${pr:-}" --argjson rounds "$rounds" --arg repo "$REPO" '
           def t: fromdate;
           ($issue.closedAt // $now | t) as $end
           | [.[] | select(.event == "labeled" or .event == "unlabeled")
                  | select(.label.name | test("^(stage|gate):"))
                  | {e: .event, l: .label.name, t: (.created_at | t)}] as $ev
           | ($ev | map(.l) | unique) as $labels
-          # dwell per label: each labeled→next unlabeled interval; an open interval runs to $end.
+          # dwell per label: each labeled→next unlabeled interval; an open interval runs to $end, and one
+          # that opens after $end (a label put on a closed issue) counts 0, never negative.
           | ($labels | map({(.): (. as $l | [$ev[] | select(.l == $l)] | sort_by(.t)
                 | reduce .[] as $x ({open: null, sum: 0};
                     if $x.e == "labeled" then (if .open == null then .open = $x.t else . end)
                     else (if .open != null then .sum += ($x.t - .open) | .open = null else . end) end)
-                | .sum + (if .open != null then ($end - .open) else 0 end))}) | add // {}) as $dwell
+                | .sum + (if .open != null then ([$end - .open, 0] | max) else 0 end))}) | add // {}) as $dwell
           | ([$ev[] | select(.e == "labeled" and .l == "stage:intake")] | sort_by(.t) | first | .t) as $intake
-          | ([.[] | select(.event == "cross-referenced" and .source.issue.pull_request != null)] | sort_by(.created_at) | first | .created_at) as $pr_opened
+          | ([.[] | select(.event == "cross-referenced" and .source.issue.pull_request != null and '"$XREF_REPO"' == $repo)] | sort_by(.created_at) | first | .created_at) as $pr_opened
           | {issue: $issue.number, title: $issue.title, created: $issue.createdAt, closed: $issue.closedAt,
              lane: (if $labels | index("stage:fast") then "fast" else "full" end),
              pr: (if $pr == "" then null else ($pr | tonumber) end), pr_opened: $pr_opened,
