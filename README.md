@@ -55,6 +55,7 @@ skills/
   code-review/                 # scoped adversarial review: break assumptions, enforce contracts, no echo chamber
   test-strategy/               # scan repo + PRD → propose the CI test battery (not the test bodies)
   retro/                       # self-improvement loop: recurring findings → durable guards (propose-only)
+  cycle-retro/                 # efficiency loop: run ledger + cycle times → pipeline-shape proposals (propose-only)
   verify/                      # what proves a stage is done — per-role exit criteria
   efficient-runs/              # keep long runs cheap (cost ∝ #steps); shared by Builder/QA
   ablation/                    # periodic context reset so the setup doesn't rot append-only
@@ -83,7 +84,10 @@ templates/                     # what the wizard fills into the host repo
   scripts/  adlc-diff-scope.sh · adlc-tripwire-check.sh · adlc-fix-cap.sh · adlc-verdict.sh
             adlc-log-findings.sh · adlc-doctor.sh · adlc-metrics.sh · adlc-cost.sh
             adlc-cache.sh · adlc-triage.sh · adlc-pr-stage.sh · adlc-branch-issue.sh   # deterministic logic
+            adlc-run-log.sh · adlc-cycle.sh                                            # the cycle-retro's two ledgers
             #   adlc-cache.sh        = prompt-cache hit-rate rollup
+            #   adlc-run-log.sh      = run ledger: tokens · cost · seconds per agent run (Mission Control / OTel / Actions)
+            #   adlc-cycle.sh        = cycle time per stage + fix rounds per issue, from the label timeline; the ranked report
             #   adlc-triage.sh       = fast-lane eligibility cap (size + sensitive-path + submodules)
             #   adlc-pr-stage.sh     = which diff-scope stage a PR is in (from its linked issue)
             #   adlc-branch-issue.sh = which issue a lane branch names (feat/<issue>-<slug>)
@@ -138,6 +142,21 @@ and files an evidence-backed issue (`adlc:plugin-suggestion`) into the shared pl
 (`ADLC_PLUGIN_REPO`, default `juanjtov/adlc-pipeline`) — so improvements found in one of your
 projects can be curated into the plugin and reach them all. Only from repos you own/share.
 
+**The efficiency half: `cycle-retro`.** `retro` fixes what keeps going wrong in the code; the
+**`cycle-retro`** skill (manual `/adlc:cycle-retro [DAYS]`, or the second step of `adlc-retro.yml`)
+fixes the *cycle* — where a run's time and money go. Its inputs are two ledgers, both materialized on
+demand from deterministic sources (never an agent's own report of what it spent): **`runs.jsonl`**
+via `adlc-run-log.sh` — one row per agent run with seconds, input/output/cache tokens, cached share
+of the prompt and USD, read from Mission Control's local store (`mc`), the OTel collector's file
+(`otel`), or GitHub Actions run durations (`actions`, latency only) — and **`cycle.jsonl`** via
+`adlc-cycle.sh` — one row per issue from the GitHub label timeline: seconds in each `stage:*` /
+`gate:*` label (queue + agent time vs waiting on the Principal), intake→PR time, fix rounds, lane.
+`adlc-cycle.sh report` ranks stage × spend × wall time × rounds; the skill proposes the cheapest
+**pipeline-shape** lever — fast-lane routing, reviewer scope, tighter ACs against fix rounds, a
+cold-cache fix, a cheaper model tier for a stage, a flaky lane — in one propose-only PR with the
+report in its body. `adlc-metrics.sh` adds first-pass acceptance and iterations-to-green (CI runs
+per merged PR) from the same window.
+
 **Cost / latency / tokens.** Latency per lane and per pipeline run is tracked deterministically
 by `adlc-cost.sh` (from GitHub Actions run durations — no extra infra). Token count and cost per
 agent come from **opt-in OpenTelemetry** (`settings.telemetry.json`): Claude Code exports
@@ -145,7 +164,8 @@ per-session tokens + cost + duration to your OTel collector, and `service.name` 
 pipeline run. A ready-to-run collector ships in `telemetry/` (`docker compose up -d`); latency
 works without one. To see tokens and cost live, with no collector, use
 [Mission Control](#watch-it-run-mission-control) instead — one telemetry destination or the
-other per repo; the cache roll-up below needs the collector.
+other per repo; `adlc-run-log.sh` reads either, so the cycle-retro gets spend from whichever you
+chose. The cache roll-up below needs the collector.
 
 **Prompt caching, kept honest.** The harness re-serves each run's stable prefix — the tool set,
 the loaded skills, and `CLAUDE.md` — from cache at ~0.1× input price, so cost really scales with
@@ -245,6 +265,7 @@ Try it with made-up data: `adlc-mission-control --demo --open`.
 | `/adlc-intake` | starts a request: interview, preview, then a `stage:intake` issue |
 | `/adlc-mission-control` | opens the live view of the line |
 | `/adlc:retro` | runs the self-improvement review now and proposes durable fixes |
+| `/adlc:cycle-retro [DAYS]` | ranks where a run's time and money go (per agent, per stage, fix rounds, gate waits) and proposes pipeline-shape fixes |
 | `/adlc:ablation` | starts the periodic context reset: on a branch it empties the persistent context, re-adds only what earns its place back, and logs that in `CONTEXT-LOG.md` |
 
 The five agents are not commands: in the local recipe you invoke them by name, as the
