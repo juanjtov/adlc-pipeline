@@ -44,8 +44,17 @@ jobs:
             --allowedTools "Read,Edit,Write,Skill,Bash"
           prompt: "/adlc:retro"
 
+      # The first agent may have left the checkout on its proposal branch, with materialized ledgers
+      # on disk. The second proposal starts from the default branch, clean, or it would carry the
+      # first's commits and ship files the scripts say are never committed from CI.
+      - name: Back to a clean default branch
+        if: ${{ !cancelled() }}
+        run: |
+          git checkout -q -f "${{ github.event.repository.default_branch }}"
+          git clean -fdq
+
       - name: Run the cycle retro (opens a proposal PR on the pipeline's shape)
-        if: always()
+        if: ${{ !cancelled() }}
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}

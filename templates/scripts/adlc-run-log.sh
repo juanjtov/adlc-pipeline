@@ -18,8 +18,9 @@
 #                    Runs it cannot attribute to a pipeline agent ('custom' or unnamed) are kept with
 #                    agent "unknown" — set OTEL_LOG_TOOL_DETAILS=1 so Claude Code names the agent.
 #   actions [DAYS]   GitHub Actions lane durations (gh run list): latency per lane with no token data.
-#                    Lane name -> stage via the workflow name ("ADLC builder" -> builder, "ADLC
-#                    review" -> reviewer …); guard lanes keep their own name (adlc-ci …).
+#                    Lane name -> stage by the template's exact workflow name ("ADLC Builder" ->
+#                    builder, "ADLC review" -> reviewer …); other workflows keep their own name
+#                    as a slug (adlc-ci, adlc-diff-scope …).
 #
 # Row: {"ts","source","repo","issue","pr","stage","agent","run_id","seconds","input","output",
 #       "cache_read","cache_creation","tokens","cache_read_pct","cost_usd","model"}
@@ -32,25 +33,34 @@ set -euo pipefail
 src="${1:-}"; shift || true
 [ -n "$src" ] || { sed -n '2,30p' "$0"; exit 2; }
 
+# This repo as owner/name, lower-cased ($ADLC_REPO, else git remote origin). Every source needs it:
+# the store holds several repos' runs, and a row must say whose it is. Exit 2 when it cannot be
+# told or is not a GitHub-shaped name (it is spliced into the mc query, so it is checked first).
 repo_name() {
-  if [ -n "${ADLC_REPO:-}" ]; then printf '%s' "$ADLC_REPO" | tr 'A-Z' 'a-z'; return; fi
-  local url; url="$(git remote get-url origin 2>/dev/null || true)"
-  url="${url%/}"; url="${url%.git}"
-  # git@host:owner/name · https://host/owner/name · ssh://git@host/owner/name → owner/name
-  printf '%s' "$url" | sed -E 's#^[a-z+]+://[^/]+/##; s#^[^@/]+@[^:]+:##; s#^/##' | awk -F/ 'NF>=2 {print tolower($(NF-1)"/"$NF)}'
+  local url repo
+  if [ -n "${ADLC_REPO:-}" ]; then repo="$(printf '%s' "$ADLC_REPO" | tr 'A-Z' 'a-z')"
+  else
+    url="$(git remote get-url origin 2>/dev/null || true)"; url="${url%/}"; url="${url%.git}"
+    # git@host:owner/name · https://host/owner/name · ssh://git@host/owner/name → owner/name
+    repo="$(printf '%s' "$url" | sed -E 's#^[a-z+]+://[^/]+/##; s#^[^@/]+@[^:]+:##; s#^/##' | awk -F/ 'NF>=2 {print tolower($(NF-1)"/"$NF)}')"
+  fi
+  [ -n "$repo" ] || { echo "adlc-run-log: cannot tell this repo's owner/name (no git remote origin; set ADLC_REPO)" >&2; exit 2; }
+  printf '%s' "$repo" | grep -Eq '^[a-z0-9._-]+/[a-z0-9._-]+$' || { echo "adlc-run-log: '$repo' is not an owner/name" >&2; exit 2; }
+  printf '%s' "$repo"
 }
 
 # One stage vocabulary across sources — Mission Control's stations (analyst · architect · builder ·
 # reviewer · qa), plus the lanes that are not one agent's: fix (the Builder's fix round), fast,
-# retro, and the guard lanes by their own name (adlc-ci, adlc-diff-scope, …).
-lane_stage() {
-  case "$(printf '%s' "$1" | tr 'A-Z' 'a-z')" in
-    *intake*) echo analyst ;;    *design*) echo architect ;;   *builder*) echo builder ;;
-    *review*) echo reviewer ;;   *qa*) echo qa ;;              *fix*) echo fix ;;
-    *fast*) echo fast ;;         *retro*) echo retro ;;
-    *) printf '%s\n' "$1" | tr 'A-Z ' 'a-z-' ;;
-  esac
-}
+# retro. A workflow is mapped by its exact template name (templates/github/*.yml `name:`), so a host
+# repo's own "ADLC …" workflow is not mistaken for a lane; anything else keeps its own name as a
+# slug (adlc-ci, adlc-diff-scope, adlc-main-tripwire, …).
+LANE_STAGE_JQ='def lane_stage: (ascii_downcase) as $n
+  | {"adlc intake (auto-start)": "analyst", "adlc design": "architect", "adlc builder": "builder",
+     "adlc review": "reviewer", "adlc qa": "qa", "adlc fix loop": "fix", "adlc fast lane": "fast",
+     "adlc retro": "retro"}[$n] // ($n | gsub("[^a-z0-9]+"; "-") | sub("^-"; "") | sub("-$"; ""));'
+# The issue a lane branch names — the rule of adlc-branch-issue.sh (feat/12-add-login → 12, feat/012 → 12,
+# main → null), kept in step by a test there.
+BRANCH_ISSUE_JQ='def branch_issue: capture("^[^/]*/0*(?<n>[0-9]+)(-.*)?$") | .n | tonumber;'
 
 case "$src" in
   mc)
@@ -59,7 +69,6 @@ case "$src" in
     command -v sqlite3 >/dev/null 2>&1 || { echo "adlc-run-log: sqlite3 not found" >&2; exit 2; }
     [ -f "$db" ] || { echo "adlc-run-log: no Mission Control store at $db (start /adlc-mission-control, or set ADLC_MC_DB)" >&2; exit 2; }
     repo="$(repo_name)"
-    [ -n "$repo" ] || { echo "adlc-run-log: cannot tell this repo's owner/name (no git remote origin; set ADLC_REPO)" >&2; exit 2; }
     since=$(( $(date -u +%s) - days * 86400 ))
     # A run is one pipeline-agent session (or subagent); its api_request events carry the spend.
     # Latency = the run's own started→ended when known, else the span of its api events.
@@ -125,23 +134,17 @@ case "$src" in
     days="${1:-30}"
     repo="$(repo_name)"
     since=$(date -u -v-"${days}"d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "-${days} days" +%Y-%m-%dT%H:%M:%SZ)
-    export -f lane_stage
+    # An issue number comes from the head branch, so only PR-triggered lanes (review, fix, CI,
+    # diff-scope, fast) carry one; the issue-triggered lanes run on the default branch → null.
     gh run list --limit 500 --json databaseId,workflowName,headBranch,status,conclusion,startedAt,updatedAt \
       --jq "[.[] | select(.status == \"completed\" and .startedAt >= \"$since\")]" \
-    | jq -c '.[] | select(.workflowName | test("ADLC"; "i"))
-        | {ts: .startedAt, run_id: ("actions:" + (.databaseId | tostring)), lane: .workflowName, branch: .headBranch,
-           conclusion: .conclusion,
-           seconds: ((.updatedAt | fromdate) - (.startedAt | fromdate))}' \
-    | while IFS= read -r row; do
-        lane="$(printf '%s' "$row" | jq -r .lane)"
-        stage="$(lane_stage "$lane")"
-        branch="$(printf '%s' "$row" | jq -r .branch)"
-        issue="$(printf '%s' "$branch" | sed -nE 's#^[a-z]+/([0-9]+)(-.*)?$#\1#p')"
-        printf '%s' "$row" | jq -c --arg repo "$repo" --arg stage "$stage" --arg issue "$issue" \
-          '{ts, source: "actions", repo: $repo, issue: (if $issue == "" then null else ($issue | tonumber) end), pr: null,
-            stage: $stage, agent: null, run_id, seconds, input: null, output: null, cache_read: null, cache_creation: null,
-            tokens: null, cache_read_pct: null, cost_usd: null, model: null, lane, conclusion}'
-      done
+    | jq -c --arg repo "$repo" "$LANE_STAGE_JQ $BRANCH_ISSUE_JQ"'
+        .[] | select(.workflowName | test("ADLC"; "i"))
+        | {ts: .startedAt, source: "actions", repo: $repo, issue: ((.headBranch // "") | branch_issue? // null), pr: null,
+           stage: (.workflowName | lane_stage), agent: null, run_id: ("actions:" + (.databaseId | tostring)),
+           seconds: ((.updatedAt | fromdate) - (.startedAt | fromdate)),
+           input: null, output: null, cache_read: null, cache_creation: null, tokens: null, cache_read_pct: null,
+           cost_usd: null, model: null, lane: .workflowName, conclusion: .conclusion}'
     ;;
 
   *) echo "adlc-run-log: unknown source '$src' (mc | otel <file> | actions [DAYS])" >&2; exit 2 ;;
