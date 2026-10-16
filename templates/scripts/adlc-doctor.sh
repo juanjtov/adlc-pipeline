@@ -14,7 +14,11 @@ ok()   { echo "  ✓ $1"; }
 echo "adlc doctor — ${root}"
 
 # 1) Harness deny rules (no push-to-main / no self-merge)
-if grep -q 'gh pr merge' "${root}/.claude/settings.json" 2>/dev/null; then
+denied() { jq -e --arg re "$1" '[.permissions.deny[]? | select(test($re))] | length > 0' \
+             "${root}/.claude/settings.json" >/dev/null 2>&1; }
+if ! command -v jq >/dev/null 2>&1; then
+  note "jq not found — cannot read the deny rules in .claude/settings.json"
+elif denied 'gh pr merge'; then
   ok "deny rules present (.claude/settings.json)"
 else
   note "no 'gh pr merge' deny rule in .claude/settings.json"
