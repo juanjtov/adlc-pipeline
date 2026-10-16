@@ -10,7 +10,7 @@ LEDGER="${CLAUDE_PROJECT_DIR:-.}/.adlc/metrics/findings.jsonl"
 echo "# ADLC metrics — last ${DAYS}d (since ${SINCE})"
 
 # --- Delivery (from merged PRs) ---
-prs=$(gh pr list --state merged --limit 200 --json number,mergedAt,changedFiles,comments \
+prs=$(gh pr list --state merged --limit 200 --json number,mergedAt,changedFiles,comments,headRefName \
         --jq "[.[] | select(.mergedAt >= \"$SINCE\")]")
 merged=$(echo "$prs" | jq 'length')
 echo "merged_prs: $merged"
@@ -27,8 +27,20 @@ firstpass=$(echo "$prs" | jq '[.[] | select(any(.comments[].body;
   [match("ADLC-(ADV|ARCH):\\s*(PASS|CHANGES)"; "g").captures[1].string] | last == "CHANGES") | not)] | length')
 echo "first_pass_approved: $firstpass / $merged"
 
-# --- Iterations-to-green (CI runs per merged PR head) ---
-echo "iterations_to_green: run 'gh run list --json ...' per PR head SHA; high values ⇒ flaky tests or vague specs"
+# --- Iterations-to-green (CI runs per merged PR branch) ---
+# One `gh run list` call (the PR list above already carries each head branch): the completed CI runs of
+# the window, grouped by head branch. A merged PR's
+# iterations = the ADLC CI runs its branch took; failed_first = those that did not go green on the
+# first run. High values ⇒ flaky tests or vague specs (the cycle-retro's business, not a code finding).
+runs=$(gh run list --limit 500 --json workflowName,headBranch,status,conclusion,createdAt \
+        --jq "[.[] | select(.status == \"completed\" and .createdAt >= \"$SINCE\" and (.workflowName | test(\"CI\"; \"i\")))]")
+branches=$(echo "$prs" | jq '[.[].headRefName]')
+jq -rn --argjson runs "$runs" --argjson branches "$branches" '
+  [$branches[] as $b | ($runs | map(select(.headBranch == $b))) | select(length > 0)
+   | {n: length, red: ([.[] | select(.conclusion != "success")] | length)}] as $per
+  | if ($per | length) == 0 then "iterations_to_green: no CI runs found for the merged PRs of the window"
+    else "iterations_to_green: avg \(($per | map(.n) | add) / ($per | length) * 10 | round / 10) CI runs per merged PR; failed_first: \([$per[] | select(.red > 0)] | length) / \($per | length)"
+    end'
 
 # --- Change failure signal (bugs filed by Ops after a deploy) ---
 bugs=$(gh issue list --state all --label bug --limit 200 --json createdAt \
