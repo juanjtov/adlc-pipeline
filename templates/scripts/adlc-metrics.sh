@@ -38,8 +38,10 @@ echo "first_pass_approved: $firstpass / $merged"
 oldest=$(echo "$prs" | jq -r '[.[].createdAt] | min // empty')
 runs=$(gh run list --limit 500 --json workflowName,headBranch,status,conclusion,createdAt \
         --jq "[.[] | select(.status == \"completed\" and .createdAt >= \"${oldest:-$SINCE}\" and (.workflowName | test(\"CI\"; \"i\")))]")
-jq -rn --argjson runs "$runs" --argjson prs "$prs" '
-  [$prs[] as $p | ($runs | map(select(.headBranch == $p.headRefName and .createdAt >= $p.createdAt))) | select(length > 0)
+# Both lists go in through file descriptors: 200 PRs with their comments overflow an argument.
+jq -rn --slurpfile runs <(echo "$runs") --slurpfile prs <(echo "$prs") '
+  $runs[0] as $runs | $prs[0] as $prs
+  | [$prs[] as $p | ($runs | map(select(.headBranch == $p.headRefName and .createdAt >= $p.createdAt))) | select(length > 0)
    | {n: length, red: ([.[] | select(.conclusion != "success")] | length)}] as $per
   | if ($per | length) == 0 then "iterations_to_green: no CI runs found for the merged PRs of the window"
     else "iterations_to_green: avg \(($per | map(.n) | add) / ($per | length) * 10 | round / 10) CI runs per merged PR; failed_first: \([$per[] | select(.red > 0)] | length) / \($per | length)"
