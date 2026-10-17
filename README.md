@@ -199,9 +199,17 @@ Inside a session the same two steps are `/plugin marketplace add juanjtov/adlc-p
 (`claude plugin update adlc@adlc-pipeline`), unless you enable auto-update for the marketplace
 in `/plugin`.
 
-The Actions lanes install it the same way on the runner. To work on the plugin itself, load a
-checkout instead — `claude --plugin-dir /path/to/adlc-pipeline` — and `/reload-plugins` picks
-up edits.
+`main` is development. The marketplace entry pins the plugin to a release tag (`ref` in
+`.claude-plugin/marketplace.json`), so you and the Actions lanes get that tagged release, not
+whatever was last pushed. [CHANGELOG.md](CHANGELOG.md) lists the releases and says for each
+whether your repo needs a tooling refresh (run `/adlc-init` again). The refresh is needed
+because `/adlc-init` copies workflows and scripts into your repo as frozen files;
+`.adlc/VERSION` records which release they came from, and `.adlc/scripts/adlc-doctor.sh` tells
+you when it differs from the installed plugin.
+
+To work on the plugin itself, load a checkout instead — `claude --plugin-dir
+/path/to/adlc-pipeline` — and `/reload-plugins` picks up edits. That loads your working
+tree, not a release.
 
 ## Use
 
@@ -339,8 +347,9 @@ nothing about this plugin. So every agent step in the lane templates does three 
 
 - **Installs the plugin on the runner** — `plugin_marketplaces` + `plugins: adlc@adlc-pipeline`.
   That is where the agent definitions, the `adlc:*` skills and the guard hook come from; nothing
-  is vendored into your repo. It installs this repo's default branch at run time, so point both
-  inputs at your own fork if you want to control when the lanes pick up a change.
+  is vendored into your repo. The marketplace entry is pinned to a release tag, so the runner
+  installs that tagged release, not the default branch. Point both inputs at your own fork if
+  you want to control when the lanes pick up a change.
 - **Runs as its named agent** — `--agent adlc:builder` (and so on), which gives the session that
   agent's prompt, model and `tools:`.
 - **Grants that lane's tools** — `--permission-mode dontAsk` + `--allowedTools`. The Analyst

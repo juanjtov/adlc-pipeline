@@ -233,6 +233,27 @@ ADLC_DOCTOR_SKIP_LABELS=1 bash "$S/adlc-doctor.sh" "$FIX" >/dev/null 2>&1; check
 printf '{"permissions":{"allow":["Bash(gh pr merge:*)"],"deny":[]}}' > "$FIX/.claude/settings.json"
 ADLC_DOCTOR_SKIP_LABELS=1 bash "$S/adlc-doctor.sh" "$FIX" >/dev/null 2>&1; check 1 "flags 'gh pr merge' that is only in the allow list" $?
 printf '{"permissions":{"deny":["Bash(gh pr merge:*)"]}}' > "$FIX/.claude/settings.json"   # restore
+
+echo "doctor (tooling version stamp):"
+PL="$(mktemp -d)"; mkdir -p "$PL/.claude-plugin"; printf '{"name":"adlc","version":"9.9.9"}' > "$PL/.claude-plugin/plugin.json"
+vdoc() { ADLC_PLUGIN_ROOT="$PL" CLAUDE_CONFIG_DIR="$PL/none" ADLC_DOCTOR_SKIP_LABELS=1 bash "$S/adlc-doctor.sh" "$FIX" 2>&1; }
+mkdir -p "$FIX/.adlc"; echo 9.9.9 > "$FIX/.adlc/VERSION"
+eq 1 "a matching .adlc/VERSION is confirmed" "$(vdoc | grep -c 'tooling version 9.9.9 matches')"
+echo 0.1.0 > "$FIX/.adlc/VERSION"
+eq 1 "a different .adlc/VERSION says to run /adlc-init" "$(vdoc | grep -c 'from plugin 0.1.0, the plugin is 9.9.9 — run /adlc-init')"
+vdoc >/dev/null; check 0 "…and a stale stamp is a note, not a failure" $?
+rm "$FIX/.adlc/VERSION"
+eq 1 "a missing .adlc/VERSION says the tooling predates stamping" "$(vdoc | grep -c 'no .adlc/VERSION')"
+eq 1 "no plugin found: the check is skipped, not failed" "$(CLAUDE_PLUGIN_ROOT= ADLC_PLUGIN_ROOT= CLAUDE_CONFIG_DIR="$PL/none" ADLC_DOCTOR_SKIP_LABELS=1 bash "$S/adlc-doctor.sh" "$FIX" 2>&1 | grep -c 'skipped tooling-version check')"
+mkdir -p "$PL/cfg/plugins"; printf '{"plugins":{"adlc@adlc-pipeline":[{"installPath":"%s"}]}}' "$PL" > "$PL/cfg/plugins/installed_plugins.json"
+eq 1 "falls back to the install path in installed_plugins.json" "$(CLAUDE_PLUGIN_ROOT= ADLC_PLUGIN_ROOT= CLAUDE_CONFIG_DIR="$PL/cfg" ADLC_DOCTOR_SKIP_LABELS=1 bash "$S/adlc-doctor.sh" "$FIX" 2>&1 | grep -c 'plugin is 9.9.9')"
+grep -q "write the plugin's version to" "$ROOT/skills/bootstrap/SKILL.md" && ok "bootstrap writes .adlc/VERSION" || bad "bootstrap: must write .adlc/VERSION"
+rm -rf "$FIX/.adlc"
+echo "marketplace (release pin):"
+eq "github" "the adlc entry is a github source" "$(jq -r '.plugins[]|select(.name=="adlc").source.source' "$ROOT/.claude-plugin/marketplace.json")"
+eq "juanjtov/adlc-pipeline" "…of this repo" "$(jq -r '.plugins[]|select(.name=="adlc").source.repo' "$ROOT/.claude-plugin/marketplace.json")"
+case "$(jq -r '.plugins[]|select(.name=="adlc").source.ref' "$ROOT/.claude-plugin/marketplace.json")" in v[0-9]*.[0-9]*.[0-9]*) ok "…pinned to a release tag (vX.Y.Z)";; *) bad "marketplace: ref must be a vX.Y.Z tag";; esac
+grep -q "^## \[\?$(jq -r .version "$ROOT/.claude-plugin/plugin.json")" "$ROOT/CHANGELOG.md" && ok "CHANGELOG.md has an entry for the plugin.json version" || bad "CHANGELOG.md: no entry for the plugin.json version"
 # prompt-cache hygiene: a live CI run-id expansion in a frozen context file must fail
 printf '# proj\nBuild ref: ${GITHUB_RUN_ID}\n' > "$FIX/CLAUDE.md"
 ADLC_DOCTOR_SKIP_LABELS=1 bash "$S/adlc-doctor.sh" "$FIX" >/dev/null 2>&1; check 1 "flags live CI run-id in CLAUDE.md" $?
