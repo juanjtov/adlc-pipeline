@@ -247,7 +247,7 @@ eq 1 "a missing .adlc/VERSION says the tooling predates stamping" "$(vdoc | grep
 eq 1 "no plugin found: the check is skipped, not failed" "$(CLAUDE_PLUGIN_ROOT= ADLC_PLUGIN_ROOT= CLAUDE_CONFIG_DIR="$PL/none" ADLC_DOCTOR_SKIP_LABELS=1 bash "$S/adlc-doctor.sh" "$FIX" 2>&1 | grep -c 'skipped tooling-version check')"
 mkdir -p "$PL/cfg/plugins"; printf '{"plugins":{"adlc@adlc-pipeline":[{"installPath":"%s"}]}}' "$PL" > "$PL/cfg/plugins/installed_plugins.json"
 eq 1 "falls back to the install path in installed_plugins.json" "$(CLAUDE_PLUGIN_ROOT= ADLC_PLUGIN_ROOT= CLAUDE_CONFIG_DIR="$PL/cfg" ADLC_DOCTOR_SKIP_LABELS=1 bash "$S/adlc-doctor.sh" "$FIX" 2>&1 | grep -c 'plugin is 9.9.9')"
-grep -q '\.adlc/VERSION' "$ROOT/skills/bootstrap/SKILL.md" && ok "bootstrap writes .adlc/VERSION" || bad "bootstrap: must write .adlc/VERSION"
+grep -q "write the plugin's version to" "$ROOT/skills/bootstrap/SKILL.md" && ok "bootstrap writes .adlc/VERSION" || bad "bootstrap: must write .adlc/VERSION"
 rm -rf "$FIX/.adlc"
 echo "marketplace (release pin):"
 eq "github" "the adlc entry is a github source" "$(jq -r '.plugins[]|select(.name=="adlc").source.source' "$ROOT/.claude-plugin/marketplace.json")"
