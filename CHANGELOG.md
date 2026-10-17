@@ -12,7 +12,11 @@ Tooling refresh needed: **yes** for a repo set up before this release (its copie
 the lane wiring, the trusted guards and the fixes below, and it has no `.adlc/VERSION`).
 **No** for a repo set up with this release.
 
-This is the first tagged release. It covers everything on `main` up to 2026-10-16.
+This is the first tagged release. `plugin.json` has said `0.2.0` since 2026-10-03, so a
+machine that installed before this tag has a cache entry under the same version string, and
+`claude plugin update` may report it as already current. Such a machine should uninstall and
+reinstall `adlc@adlc-pipeline` (untested here). The next release avoids this by bumping the
+version. It covers everything on `main` up to 2026-10-16.
 
 - **Lanes run as their agents.** Each Actions lane installs the plugin, runs as its named
   agent (`--agent adlc:<role>`) and gets only that lane's tools. `tests/run.sh` pins every
