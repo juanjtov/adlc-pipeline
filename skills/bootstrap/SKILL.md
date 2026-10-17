@@ -180,7 +180,7 @@ Create/write:
 
 8b. `.adlc/scripts/` + the local guard — copy `templates/scripts/*.sh` to `.adlc/scripts/`
    (chmod +x). These are the **deterministic guardrails** (`adlc-diff-scope`, `adlc-tripwire-check`,
-   `adlc-fix-cap`, `adlc-verdict`, `adlc-metrics`, `adlc-doctor`) that the workflows and the local
+   `adlc-fix-cap`, `adlc-verdict`, `adlc-metrics`, `adlc-run-log`, `adlc-cycle`, `adlc-doctor`) that the workflows and the local
    hook call — one unit-tested source of truth, not prose. Then install the **local diff-scope
    guard**: copy `templates/hooks/pre-commit` to `.git/hooks/pre-commit` (chmod +x) — **ask first
    if a pre-commit hook already exists** — so the Builder's declared scope is enforced on every
@@ -240,7 +240,11 @@ If the **self-improvement loop** is enabled (Phase 1): create `.adlc/metrics/` (
 `.gitkeep`) so the reviewer/QA/security skills can append the finding ledger, and — for full
 automation — copy `adlc-retro.yml` and `.adlc/scripts/adlc-metrics.sh`. Tell the user the
 retro is **propose-only** (it opens a PR through the gates) and runs on the workflow's schedule
-or on demand via `/adlc:retro`.
+or on demand via `/adlc:retro`. The same workflow then runs `/adlc:cycle-retro` — the efficiency
+half: per-agent spend and latency (`adlc-run-log.sh`, from Mission Control's store or the OTel
+collector) and cycle time per stage from the label timeline (`adlc-cycle.sh`) → a proposal PR on
+the pipeline's shape. Token and cost figures exist only where telemetry is on (Mission Control or
+the collector), so point the user at one of the two if they want spend, not just latency.
 
 For the **fast lane** (trivial changes skip design + Gate 1): copy `adlc-fast.yml` and
 `.adlc/scripts/adlc-triage.sh`. On intake the Analyst triages (the `triage` skill) and
