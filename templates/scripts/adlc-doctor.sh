@@ -5,7 +5,9 @@
 #         every lane installs the plugin and grants its agent tools · the scripts the lanes
 #         call are installed · the project skills exist ·
 #         and, when gh is available: the state-machine labels exist · the default branch has a
-#         merge gate (a required approving review, or at least the tripwire).
+#         merge gate (a required approving review, or at least the tripwire);
+#         and, when it can find the plugin, whether .adlc/VERSION (stamped by /adlc-init)
+#         matches the plugin's version — a mismatch is a note, not a failure.
 set -uo pipefail
 root="${1:-.}"
 probs=0
@@ -177,6 +179,42 @@ if [ "$agent_steps" -gt 0 ]; then
   else
     echo "  · skipped merge-gate check (gh not available/authenticated)"
   fi
+fi
+
+# 7) Tooling version. /adlc-init stamps the plugin's version into .adlc/VERSION when it copies
+#    the scripts, workflows and hooks into this repo. Those copies are frozen: they change only
+#    on a refresh. A different plugin version may have newer ones, so say so. This is a note,
+#    not a problem: it does not change the exit code (a newer plugin need not mean broken tooling).
+#    The running plugin's version is read from its plugin.json, found in this order:
+#      ADLC_PLUGIN_ROOT (explicit; the tests use it), CLAUDE_PLUGIN_ROOT (set for hooks and for
+#      skill text, and not guaranteed in a shell command), the install path that
+#      installed_plugins.json records for adlc@adlc-pipeline. Not found: the check is skipped.
+#      It does not read the lanes' copy: that one is installed on the runner, not here.
+plugin_version() {
+  local dir manifest
+  for dir in "${ADLC_PLUGIN_ROOT:-}" "${CLAUDE_PLUGIN_ROOT:-}"; do
+    [ -n "$dir" ] && [ -f "${dir}/.claude-plugin/plugin.json" ] && { manifest="${dir}/.claude-plugin/plugin.json"; break; }
+  done
+  if [ -z "${manifest:-}" ] && command -v jq >/dev/null 2>&1; then
+    dir=$(jq -r '.plugins["adlc@adlc-pipeline"][0].installPath // empty' \
+            "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/installed_plugins.json" 2>/dev/null)
+    [ -n "$dir" ] && [ -f "${dir}/.claude-plugin/plugin.json" ] && manifest="${dir}/.claude-plugin/plugin.json"
+  fi
+  [ -n "${manifest:-}" ] && command -v jq >/dev/null 2>&1 && jq -r '.version // empty' "$manifest" 2>/dev/null
+}
+if plugin_v=$(plugin_version) && [ -n "$plugin_v" ]; then
+  if [ -f "${root}/.adlc/VERSION" ]; then
+    tooling_v=$(head -n 1 "${root}/.adlc/VERSION" | tr -d '[:space:]')
+    if [ "$tooling_v" = "$plugin_v" ]; then
+      ok "tooling version ${tooling_v} matches the plugin"
+    else
+      echo "  ↻ tooling in this repo is from plugin ${tooling_v:-unknown}, the plugin is ${plugin_v} — run /adlc-init to refresh the tooling (check the plugin's CHANGELOG.md: some releases need no refresh)"
+    fi
+  else
+    echo "  ↻ no .adlc/VERSION: this tooling predates version stamping (plugin is ${plugin_v}) — run /adlc-init to refresh it"
+  fi
+else
+  echo "  · skipped tooling-version check (could not find the plugin's version)"
 fi
 
 if [ "$probs" -eq 0 ]; then echo "OK — setup looks intact."; exit 0; else echo "${probs} problem(s) found."; exit 1; fi

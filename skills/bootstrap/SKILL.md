@@ -181,7 +181,11 @@ Create/write:
 8b. `.adlc/scripts/` + the local guard — copy `templates/scripts/*.sh` to `.adlc/scripts/`
    (chmod +x). These are the **deterministic guardrails** (`adlc-diff-scope`, `adlc-tripwire-check`,
    `adlc-fix-cap`, `adlc-verdict`, `adlc-metrics`, `adlc-doctor`) that the workflows and the local
-   hook call — one unit-tested source of truth, not prose. Then install the **local diff-scope
+   hook call — one unit-tested source of truth, not prose. Also write the plugin's version to
+   `.adlc/VERSION` (one line): read `.version` from `${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json`.
+   That stamp says which plugin release these frozen copies came from, so `adlc-doctor.sh` can tell
+   the user when a newer release may have newer tooling (the plugin's `CHANGELOG.md` says per
+   release whether a refresh is needed). Re-running this step is the refresh: it restamps. Then install the **local diff-scope
    guard**: copy `templates/hooks/pre-commit` to `.git/hooks/pre-commit` (chmod +x) — **ask first
    if a pre-commit hook already exists** — so the Builder's declared scope is enforced on every
    local commit, not only in CI. Set the hook's `ADLC_TEST_DIRS` default to the repo's test dirs
@@ -342,7 +346,8 @@ automation is live.
 
 ## Phase 4 — Verify & first run
 
-1. **Self-check.** Run `.adlc/scripts/adlc-doctor.sh` and report its output — it deterministically
+1. **Self-check.** Run `ADLC_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}" .adlc/scripts/adlc-doctor.sh` (the
+   variable lets it compare `.adlc/VERSION` with this plugin's version) and report its output — it deterministically
    checks the deny rules, unfilled `{{...}}` placeholders, that every lane installs the plugin and
    grants its agent tools, that the scripts the lanes call are installed, the project skills, and
    (with gh) the state-machine labels and the **merge gate**: whether the default branch requires
