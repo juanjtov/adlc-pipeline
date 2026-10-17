@@ -8,7 +8,7 @@ Run:   python3 docs/readme-hero.py              # re-render the dark hero from t
        python3 docs/readme-hero.py --capture    # first refresh docs/readme-hero-mc.png from a running
                                                 #   demo server (adlc-mission-control --demo), then render
 Needs: pip install playwright pillow && python3 -m playwright install chromium (once). Rendering
-loads the Inter font from Google Fonts; offline it falls back to the system sans.
+loads the Inter font from Google Fonts; offline it stops rather than render in the system sans.
 
 Every sentence in the picture is a claim about the plugin. Check it against the code and the
 explainer (docs/adlc-pipeline-explained.md) before changing it; say "may not", not "never can".
@@ -23,9 +23,10 @@ DEMO_URL = "http://localhost:4319/?demo=1"
 CAPTURE_VIEWPORT = (1440, 900)                 # at 2x
 LINE_CROP = (43, 137, 2837, 936)               # the "Assembly line" panel inside that capture
 
-# station colours: Mission Control's default "Cool revival" palette, light set (mission-control/web/styles.css),
-# so the numbered circles match the stations in the capture below them
-COL = dict(request="#526C7A", analyst="#00A870", architect="#0090DB", builder="#00B53A", reviewer="#5560E6", qa="#00A8B8")
+# station colours and digit colours: Mission Control's default "Cool revival" palette, dark set, as the capture
+# shows it (mission-control/web/styles.css, .mc[data-pal="cool"][data-theme="dark"] and its --*-on digits)
+COL = dict(request="#526C7A", analyst="#00DE94", architect="#00AEFF", builder="#00FF52", reviewer="#5B6CFF", qa="#00FFFF")
+ON = dict(request="#FFFFFF", analyst="#04141C", architect="#04141C", builder="#04141C", reviewer="#FFFFFF", qa="#04141C")
 
 THEMES = {
     "light": dict(bg="linear-gradient(180deg,#FFFFFF 0%,#F1F7FA 100%)", eyebrow="#0090DB", h1="#06202B", p="#3F5866",
@@ -38,13 +39,13 @@ THEMES = {
                   cap="#A6C6D4", capb="#F4FCFF"),
 }
 
-STEPS = [("1", "Request",   "an idea, a PRD or a ticket becomes one GitHub issue",   COL["request"]),
-         ("2", "Analyst",   "user stories with pass/fail checks, plus a lane",        COL["analyst"]),
-         (None, "Gate 1",   "you approve the plan and pick the lane, or opt in to autopilot", None),
-         ("3", "Architect", "design record and the files each task may touch",        COL["architect"]),
-         ("4", "Builder",   "code and a test per check, on its own branch",           COL["builder"]),
-         ("5", "Review",    "one agent tries to break it, one checks the design",     COL["reviewer"]),
-         ("6", "QA",        "full test suite, security pass, action card",            COL["qa"]),
+STEPS = [("1", "Request",   "an idea, a PRD or a ticket becomes one GitHub issue",   "request"),
+         ("2", "Analyst",   "user stories with pass/fail checks, plus a lane",        "analyst"),
+         (None, "Gate 1",   "you approve the plan and pick the lane; autopilot may do it, full lane only", None),
+         ("3", "Architect", "design record and the files each task may touch",        "architect"),
+         ("4", "Builder",   "code and a test per check, on its own branch",           "builder"),
+         ("5", "Review",    "one agent tries to break it, one checks the design",     "reviewer"),
+         ("6", "QA",        "full test suite, security pass, action card",            "qa"),
          (None, "Gate 2",   "you merge and deploy. Agents may not.",                   None)]
 
 PERSON = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#3D2800" stroke-width="2.4" stroke-linecap="round"><circle cx="12" cy="8" r="4"/><path d="M4.5 21a7.5 7.5 0 0 1 15 0"/></svg>'
@@ -52,8 +53,8 @@ PERSON = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#3
 def html(t):
     steps = "".join(
         f'<div class="step gate"><div class="n">{PERSON}</div><b>{name}</b><span>{d}</span></div>' if n is None else
-        f'<div class="step"><div class="n" style="background:{col}">{n}</div><b>{name}</b><span>{d}</span></div>'
-        for n, name, d, col in STEPS)
+        f'<div class="step"><div class="n" style="background:{COL[k]};color:{ON[k]}">{n}</div><b>{name}</b><span>{d}</span></div>'
+        for n, name, d, k in STEPS)
     return f"""<!doctype html><html><head><meta charset="utf-8">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
@@ -72,10 +73,10 @@ h1{{margin:16px auto 0;font-size:40px;line-height:1.1;font-weight:800;letter-spa
 .step b{{display:block;margin-top:13px;font-size:15px;font-weight:700;color:{t['name']};letter-spacing:-.01em}}
 .step.gate b{{color:{t['gate']}}}
 .step span{{display:block;margin-top:5px;font-size:14px;line-height:1.38;color:{t['desc']};padding:0 2px}}
-.fast{{position:absolute;left:0;right:0;top:418px;text-align:center;font-size:14px;color:{t['desc']}}}
+.fast{{position:absolute;left:0;right:0;top:438px;text-align:center;font-size:14px;color:{t['desc']}}}
 .fast i{{display:inline-block;width:30px;border-top:2px dashed #FAB219;vertical-align:middle;margin-right:10px}}
 .fast b{{color:{t['name']};font-weight:700}}
-.mc{{position:absolute;left:0;right:0;top:476px;text-align:center}}
+.mc{{position:absolute;left:0;right:0;top:494px;text-align:center}}
 .mc .cap{{font-size:14px;color:{t['cap']};font-weight:500;max-width:1000px;margin:0 auto;line-height:1.4}}
 .mc .cap b{{color:{t['capb']};font-weight:700}}
 .frame{{width:1180px;margin:16px auto 0;border-radius:14px;overflow:hidden;background:#061018;border:1px solid {t['frame']};box-shadow:{t['frameshadow']}}}
@@ -114,7 +115,8 @@ async def main(do_capture, themes):
             pg = await b.new_page(viewport=dict(width=W, height=H), device_scale_factor=2)
             await pg.set_content(html(t), wait_until="load")
             await pg.evaluate("document.fonts.ready")
-            if not await pg.evaluate('document.fonts.check("800 40px Inter")'):
+            # fonts.check() is true for a family with no face at all, so ask for the faces themselves
+            if await pg.evaluate('document.fonts.load("800 40px Inter").then(faces => faces.length === 0)'):
                 sys.exit("Inter did not load (offline?); the layout would rewrap. Connect and run again.")
             out = os.path.join(HERE, f"readme-hero-{name}.png")
             await (await pg.query_selector("#hero")).screenshot(path=out)
