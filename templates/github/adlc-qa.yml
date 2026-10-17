@@ -48,7 +48,8 @@ jobs:
             --allowedTools "Read,Edit,Write,Skill,Bash"
           prompt: |
             Gate the PR linked to issue #${{ github.event.issue.number }}. Load your role's
-            skills with the Skill tool first.
+            skills with the Skill tool first: adlc:role-qa-release-ops, then the rest your agent
+            file lists.
             Verify AC coverage, run the full test battery (paste real output), run the
             adversarial security gate. On a clean verdict, add gate:deploy and post a
             Proposed Action Card. Never merge, never deploy.

@@ -85,7 +85,7 @@ case "$src" in
     | jq -c --arg repo "$repo" '.[]
         | (.started // .first_ts) as $t0
         | (.ended // .last_ts) as $t1
-        | (.agent | if . == null then null else (split(":") | last) end) as $agent
+        | (.agent | if . == null then null else (split(":") | last | sub("^adlc-"; "")) end) as $agent
         | {ts: ($t0 | if . == null then null else (floor | todate) end), source: "mc", repo: $repo,
            issue: .issue, pr: .pr, stage: .stage, agent: $agent, run_id: .run_id,
            seconds: (if $t0 == null or $t1 == null then null else (($t1 - $t0) | floor) end),
