@@ -115,6 +115,15 @@ detected values pre-selected as the recommended option. Cover:
      step is reviewing + merging that PR at Gate 2. (Auto-advance is done by the workflow, not
      the Analyst — the Principal opts in per issue via the label.)
 8. **Project identity** — project name and the Principal's GitHub handle.
+9. **Model per agent** — which model each of the five agents runs on when this repo's RUNBOOK
+   invokes it: `product-analyst`, `architect`, `builder`, `adversarial-reviewer`,
+   `qa-release-ops`. Pre-fill the plugin's defaults — `opus` for the Analyst, the Architect and
+   QA/Ops, `fable` for the Builder and the Adversarial Reviewer — or, on a refresh, the current
+   `model:` line of each existing `.claude/agents/adlc-<role>.md`, so a re-run never silently
+   resets a choice. Accept an alias (`opus`, `sonnet`, `haiku`, `fable`), a full model name, or
+   `inherit` (the invoking session's model). This sets only this repo's copies of the agents
+   (Phase 2, step 8c); the plugin's own `adlc:<role>` agents, which the Actions lanes run, keep
+   the plugin's defaults, and a model named in a call itself still wins for that call.
 
 If an answer is missing or contradictory, ask a follow-up rather than guessing.
 
@@ -190,6 +199,18 @@ Create/write:
    if a pre-commit hook already exists** — so the Builder's declared scope is enforced on every
    local commit, not only in CI. Set the hook's `ADLC_TEST_DIRS` default to the repo's test dirs
    (the same regex that fills `{{TEST_DIR_REGEX}}`).
+
+8c. `.claude/agents/adlc-<role>.md` — five files, from `templates/agents/adlc-<role>.md.tmpl`:
+   `adlc-product-analyst`, `adlc-architect`, `adlc-builder`, `adlc-adversarial-reviewer`,
+   `adlc-qa-release-ops`. Fill each one's placeholder with the Phase 1 answer (question 9):
+   `{{PRODUCT_ANALYST_MODEL}}`, `{{ARCHITECT_MODEL}}`, `{{BUILDER_MODEL}}`,
+   `{{ADVERSARIAL_REVIEWER_MODEL}}`, `{{QA_RELEASE_OPS_MODEL}}`; change nothing else in them.
+   These are this repo's copies of the plugin's agents: thin wrappers that preload the role
+   prompt (the plugin's `adlc:role-<role>` skill) and the role's other skills, so a copy and the
+   plugin's `adlc:<role>` agent behave the same, and only the `model:` line is this repo's. The
+   RUNBOOK invokes the copies by name, and `/adlc-model` shows or changes a model line later.
+   An existing file gets the usual treatment — show the diff and ask — and a refresh re-copies
+   the wrapper around the model the user confirmed in Phase 1 (pre-filled from the file).
 
 9. **UI projects only** (frontend detected): note that the `design-system` and
    `verify-frontend-change` skills are expected by the Builder/QA agents when frontend
@@ -358,20 +379,21 @@ automation is live.
    an approving review on a pull request, or at least has the tripwire. If it reports no gate,
    say plainly that nothing outside the agents' own guard stops a merge there. Also
    confirm the charter + RUNBOOK + ADR, CLAUDE.md (with the
-   ablation-date comment), CONTEXT-LOG.md, and (if chosen) the workflows exist. Report a short
-   ✅/⬜ checklist.
+   ablation-date comment), CONTEXT-LOG.md, the five `.claude/agents/adlc-*.md` (each with its
+   model line), and (if chosen) the workflows exist. Report a short ✅/⬜ checklist.
 2. **Offer the first pipeline run** — through the `intake` skill, so every request enters the
    same way (interview → preview → `stage:intake` issue, filed only on a yes):
    - **Greenfield:** offer to run `intake` on the PRD — it slices it, sharpens the first
-     slice, and files that as the first intake issue; then hand it to the `product-analyst`
-     agent.
+     slice, and files that as the first intake issue; then hand it to the
+     `adlc-product-analyst` agent.
    - **Brownfield:** suggest a small, well-scoped starter item to run the full loop on
      end-to-end before trusting it with bigger work, and offer to file it with `intake`.
    Mention the other starting points it takes (an idea, an existing issue, a Notion/Linear
    ticket) in one line — don't walk through them.
 3. **Print the "you're ready" summary:** what was created, the automation level, the exact
-   next command (e.g. "invoke the product-analyst agent on issue #N", or "read
-   docs/adlc/RUNBOOK.md and run stage 1"), and the reminder that nothing was committed —
+   next command (e.g. "invoke the adlc-product-analyst agent on issue #N", or "read
+   docs/adlc/RUNBOOK.md and run stage 1"), the model each agent copy was given (one line:
+   `/adlc-model` changes it), and the reminder that nothing was committed —
    the Principal reviews and commits the generated files. Add one clause pointing to
    `/adlc-mission-control`, the live view of the line.
 

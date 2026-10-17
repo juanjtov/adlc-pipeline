@@ -43,12 +43,13 @@ plain-language tour with a [one-page diagram](docs/adlc-pipeline-diagram.png).
 ```
 .claude-plugin/plugin.json     # manifest (plugin name: "adlc")
 .claude-plugin/marketplace.json  # marketplace "adlc-pipeline" — how the lanes install it
-agents/                        # the 4 role agents + adversarial-reviewer (stack-agnostic)
+agents/                        # the 4 role agents + adversarial-reviewer: thin wrappers (tools, model, the skills to preload)
 hooks/
   hooks.json                   # wires both hooks below into every session that enables the plugin
   adlc-guard.sh · adlc_guard.py  # the guard, on every Bash command: no merge / push-to-main / force-push
 skills/
   charter/                     # portable process rules: principles, roles, state machine, gates
+  role-<role>/                 # the five role prompts (what each agent is told); the wrappers preload them
   triage/                      # size an issue → fast lane (trivial) vs full pipeline
   edd-spec/                    # story/AC templates, traceability, metric taxonomy
   security-gate/               # secure-coding checklist + severity rubric (two modes)
@@ -64,11 +65,13 @@ skills/
 commands/adlc-init.md          # friendly alias that launches the wizard
 commands/adlc-intake.md        # friendly alias that starts a request (the intake interview)
 commands/adlc-mission-control.md   # opens Mission Control, the live view of the line
+commands/adlc-model.md         # shows or sets the model of this repo's agent copies
 mission-control/               # ← MISSION CONTROL: local live view (Python stdlib server + static page)
 bin/adlc-mission-control       # its launcher (on the Bash PATH when the plugin is enabled)
 mission-control/hook.sh        # reports pipeline-agent activity to Mission Control when it is running
 docs/                          # the plain-language explainer + the one-page pipeline diagram
 templates/                     # what the wizard fills into the host repo
+  agents/adlc-<role>.md.tmpl   # this repo's copies of the five agents; the wizard fills each model line
   host-CLAUDE.md.tmpl          # minimalist CLAUDE.md (commands + gotchas + pointers)
   skills/project-conventions.SKILL.md.tmpl   # lean: only what the code doesn't reveal
   skills/release-ops.SKILL.md.tmpl
@@ -118,8 +121,8 @@ in `.adlc/scope/<issue>.txt`; the diff-scope check fails a lane PR that strays o
 declares none. That check and the fast-lane cap run on `pull_request_target` — the workflow and
 scripts come from the default branch and the PR is only read as data — so a PR cannot edit the
 guards that judge it. `adlc-doctor.sh` validates a host repo's setup (deny rules, unfilled
-placeholders, lanes that can't run their agent, skills, labels, and whether the default branch
-has a merge gate). Judgment guardrails
+placeholders, lanes that can't run their agent, skills, the five agent copies and their model
+lines, labels, and whether the default branch has a merge gate). Judgment guardrails
 (design conformance, security severity) stay as skills + the adversarial review — those can't
 be made deterministic without losing the point.
 
@@ -178,12 +181,13 @@ rises), so the metric is the point.
 
 ### Two layers, on purpose
 
-- **Portable core** (ships in the plugin, never changes per project): the role agents, the
-  `charter`/`edd-spec`/`security-gate` skills, the guard hook, the deny rules, the Action Card
-  format.
+- **Portable core** (ships in the plugin, never changes per project): the role agents and their
+  role prompts, the `charter`/`edd-spec`/`security-gate` skills, the guard hook, the deny rules,
+  the Action Card format.
 - **Project substrate** (the wizard generates it per repo): `project-conventions` and
-  `release-ops` skills, the per-project charter, RUNBOOK, and ADRs — the only place your
-  stack, commands, deploy topology, roles, and tenancy live.
+  `release-ops` skills, the per-project charter, RUNBOOK, ADRs, and the agent copies whose
+  `model:` lines you own — the only place your stack, commands, deploy topology, roles, tenancy
+  and model choices live.
 
 ## Install
 
@@ -272,12 +276,20 @@ Try it with made-up data: `adlc-mission-control --demo --open`.
 | `/adlc-init` | sets the pipeline up in this repo (the wizard; same as `/adlc:bootstrap`) |
 | `/adlc-intake` | starts a request: interview, preview, then a `stage:intake` issue |
 | `/adlc-mission-control` | opens the live view of the line |
+| `/adlc-model [<role> <model>]` | prints which model each of this repo's five agent copies runs on, or sets one (the `model:` line of `.claude/agents/adlc-<role>.md`; nothing is committed) |
 | `/adlc:retro` | runs the self-improvement review now and proposes durable fixes |
 | `/adlc:cycle-retro [DAYS]` | ranks where a run's time and money go (per agent, per stage, fix rounds, gate waits) and proposes pipeline-shape fixes |
 | `/adlc:ablation` | starts the periodic context reset: on a branch it empties the persistent context, re-adds only what earns its place back, and logs that in `CONTEXT-LOG.md` |
 
 The five agents are not commands: in the local recipe you invoke them by name, as the
-generated `docs/adlc/RUNBOOK.md` lays out.
+generated `docs/adlc/RUNBOOK.md` lays out. What the RUNBOOK names are **this repo's copies**,
+`.claude/agents/adlc-<role>.md`, which `/adlc-init` writes: each is a thin wrapper that
+preloads the role prompt (the plugin's `adlc:role-<role>` skill) and the role's other skills,
+so it behaves like the plugin's `adlc:<role>` agent, and its `model:` line is yours. The wizard
+asks for the five models, pre-filled with the plugin's defaults — `opus` for the Analyst, the
+Architect and QA/Ops, `fable` for the Builder and the reviewer — and `/adlc-model` prints them
+or changes one. A model named in the call itself still wins for that call. The plugin's own
+`adlc:<role>` agents keep the defaults; they are what the Actions lanes run.
 
 ## The pipeline
 
@@ -351,7 +363,9 @@ nothing about this plugin. So every agent step in the lane templates does three 
   installs that tagged release, not the default branch. Point both inputs at your own fork if
   you want to control when the lanes pick up a change.
 - **Runs as its named agent** — `--agent adlc:builder` (and so on), which gives the session that
-  agent's prompt, model and `tools:`.
+  agent's model, `tools:` and wrapper prompt. A `skills:` preload happens only for subagents, so
+  in a lane the agent loads its role prompt (`adlc:role-builder`) and its other skills with its
+  first Skill calls; every lane prompt tells it to.
 - **Grants that lane's tools** — `--permission-mode dontAsk` + `--allowedTools`. The Analyst
   and the reviewers get named `gh`/`git` commands and no edit tools; the Architect, in the
   design lane, gets those plus file edits under `docs/` only; the Builder and QA get the shell.

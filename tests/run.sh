@@ -5,7 +5,8 @@
 # hook. The static checks cover what can't be run here for real: the workflow templates (their
 # triggers, their agent wiring, the intake, diff-scope and design-handoff steps against a stub
 # gh, and the fast lane's and the fix loop's cap steps on a real git history), the pre-commit
-# hook, labels.sh, and adlc-metrics.sh (against a stub gh).
+# hook, labels.sh, adlc-metrics.sh (against a stub gh), and the agents: thin wrappers over the
+# role skills, the vendored copies the wizard fills, the RUNBOOK that invokes them, /adlc-model.
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 S="$ROOT/templates/scripts"
@@ -222,10 +223,12 @@ grep -qE '^\s+commits=\$\(git rev-list --no-merges \$range\)$' "$ROOT/templates/
 
 echo "doctor (placeholder scan):"
 FIX="$(mktemp -d)"
-mkdir -p "$FIX/.claude/skills/project-conventions" "$FIX/.claude/skills/release-ops" "$FIX/.github/workflows"
+mkdir -p "$FIX/.claude/skills/project-conventions" "$FIX/.claude/skills/release-ops" "$FIX/.claude/agents" "$FIX/.github/workflows"
 printf '{"permissions":{"deny":["Bash(gh pr merge:*)"]}}' > "$FIX/.claude/settings.json"
 echo x > "$FIX/.claude/skills/project-conventions/SKILL.md"
 echo x > "$FIX/.claude/skills/release-ops/SKILL.md"
+agent_copy() { printf -- '---\nname: adlc-%s\ndescription: x\ntools: Read, Skill\nskills:\n  - adlc:role-%s\nmodel: %s\n---\n\nx\n' "$1" "$1" "$2" > "$FIX/.claude/agents/adlc-$1.md"; }
+for a in product-analyst architect builder adversarial-reviewer qa-release-ops; do agent_copy "$a" opus; done
 printf 'if: "{{PRINCIPAL}}"\n' > "$FIX/.github/workflows/adlc-x.yml"
 ADLC_DOCTOR_SKIP_LABELS=1 bash "$S/adlc-doctor.sh" "$FIX" >/dev/null 2>&1; check 1 "flags unfilled placeholder" $?
 printf 'if: "someuser"\n' > "$FIX/.github/workflows/adlc-x.yml"
@@ -267,6 +270,13 @@ ADLC_DOCTOR_SKIP_LABELS=1 bash "$S/adlc-doctor.sh" "$FIX" >/dev/null 2>&1; check
 # a lane that calls the action with no plugin and no tools starts, and its agent can do nothing
 doctor() { ADLC_DOCTOR_SKIP_LABELS=1 bash "$S/adlc-doctor.sh" "$FIX" >/dev/null 2>&1; }
 lane()   { printf "$@" > "$FIX/.github/workflows/adlc-x.yml"; }
+echo "doctor (project agents — the RUNBOOK invokes these copies):"
+eq 1 "reports each copy with its model" "$(ADLC_DOCTOR_SKIP_LABELS=1 bash "$S/adlc-doctor.sh" "$FIX" 2>&1 | grep -c 'agent: adlc-builder (model: opus)')"
+rm "$FIX/.claude/agents/adlc-builder.md";     doctor; check 1 "flags a missing agent copy" $?
+agent_copy builder '{{BUILDER_MODEL}}';       doctor; check 1 "flags an unfilled model placeholder" $?
+agent_copy builder '';                        doctor; check 1 "flags an empty model line" $?
+agent_copy builder fable;                     doctor; check 0 "passes with all five copies and their models" $?
+eq 1 "…reporting the model set" "$(ADLC_DOCTOR_SKIP_LABELS=1 bash "$S/adlc-doctor.sh" "$FIX" 2>&1 | grep -c 'agent: adlc-builder (model: fable)')"
 J='jobs:\n  a:\n    steps:\n'
 USES='      - uses: anthropics/claude-code-action@v1\n        with:\n'
 MKT='          plugin_marketplaces: "https://github.com/o/adlc-pipeline.git"\n'
@@ -1306,6 +1316,67 @@ for f in "$ROOT"/agents/*.md; do
   esac
 done
 
+echo "agents (thin wrappers over role skills · vendored copies · the RUNBOOK · /adlc-model):"
+# Each agent is a wrapper: frontmatter (tools, model, the skills to preload) and a few lines of
+# body. The role prompt is the plugin skill adlc:role-<role>, so the plugin's agent and the
+# copy /adlc-init writes into a repo (templates/agents/, name adlc-<role>, model from the wizard)
+# can share it. A `skills:` preload happens only for subagents, so the body must name the role
+# skill for a --agent session to load it with the Skill tool.
+ROLES="product-analyst architect builder adversarial-reviewer qa-release-ops"
+fm()   { awk 'NR==1 && $0=="---"{f=1; next} f && $0=="---"{exit} f' "$1"; }   # the frontmatter's lines
+body() { awk 'f==2{print} $0=="---"{f++}' "$1"; }                               # everything after it
+eq "$(printf '%s\n' $ROLES | sort | tr '\n' ' ')" "exactly the five agents" "$(ls "$ROOT"/agents/*.md | xargs -n1 basename | sed 's/\.md$//' | sort | tr '\n' ' ')"
+for a in $ROLES; do
+  f="$ROOT/agents/$a.md"; F="$(fm "$f")"; sk="$ROOT/skills/role-$a/SKILL.md"
+  for k in name description tools model skills; do printf '%s\n' "$F" | grep -q "^$k:" || bad "agents/$a.md: no $k: in the frontmatter"; done
+  eq "$a" "agents/$a.md: name is the role" "$(printf '%s\n' "$F" | sed -n 's/^name: *//p')"
+  printf '%s\n' "$F" | grep -qx "  - adlc:role-$a" && ok "agents/$a.md preloads adlc:role-$a" || bad "agents/$a.md: skills: must list adlc:role-$a"
+  [ -f "$sk" ] && ok "skills/role-$a/SKILL.md exists" || { bad "skills/role-$a/SKILL.md missing"; continue; }
+  eq "role-$a" "role-$a: the skill's name" "$(fm "$sk" | sed -n 's/^name: *//p')"
+  grep -qE '^disable-model-invocation: *true' "$sk" && bad "role-$a: disable-model-invocation would stop the Skill load" || ok "role-$a: the model may load it"
+  n=$(body "$f" | grep -c .); [ "$n" -le 12 ] && ok "agents/$a.md is a thin wrapper ($n body lines)" || bad "agents/$a.md: $n body lines — the role prompt belongs in skills/role-$a/"
+  body "$f" | grep -q "adlc:role-$a" && ok "…whose body names the role skill (a --agent session gets no preload)" || bad "agents/$a.md: the body must name adlc:role-$a"
+  body "$f" | grep -q 'Skill tool' && : || bad "agents/$a.md: the body must say to load the skills with the Skill tool under --agent"
+  A=$(printf '%s' "$a" | tr 'a-z-' 'A-Z_'); t="$ROOT/templates/agents/adlc-$a.md.tmpl"
+  [ -f "$t" ] || { bad "templates/agents/adlc-$a.md.tmpl missing"; continue; }
+  sed -e "s/^name: $a\$/name: adlc-$a/" -e "s/^model: .*/model: {{${A}_MODEL}}/" "$f" | diff -q - "$t" >/dev/null \
+    && ok "adlc-$a.md.tmpl is the wrapper with name adlc-$a and model {{${A}_MODEL}}" || bad "templates/agents/adlc-$a.md.tmpl drifted from agents/$a.md (regenerate it)"
+done
+# the charter: every role but the reviewer, which stays fresh-context (the diff + the criteria only)
+for a in $ROLES; do
+  has=$(grep -cx '  - adlc:charter' "$ROOT/agents/$a.md")
+  case "$a" in adversarial-reviewer) eq 0 "the reviewer preloads no charter (fresh context)" "$has" ;; *) eq 1 "$a preloads adlc:charter" "$has" ;; esac
+done
+# the placeholders in templates/agents are exactly the ones the wizard fills, one per role
+want=$(for a in $ROLES; do printf '{{%s_MODEL}}\n' "$(printf '%s' "$a" | tr 'a-z-' 'A-Z_')"; done | sort)
+eq "$want" "templates/agents: one {{<ROLE>_MODEL}} placeholder per role, nothing else" "$(grep -ohE '\{\{[A-Z_]+\}\}' "$ROOT"/templates/agents/*.tmpl | sort -u)"
+eq "$want" "bootstrap names every one of them" "$(grep -oE '\{\{[A-Z_]+_MODEL\}\}' "$ROOT/skills/bootstrap/SKILL.md" | sort -u)"
+eq 5 "templates/agents holds the five copies and no other file" "$(ls "$ROOT"/templates/agents | wc -l | tr -d ' ')"
+grep -q 'templates/agents/adlc-<role>.md.tmpl' "$ROOT/skills/bootstrap/SKILL.md" && ok "bootstrap copies them" || bad "bootstrap: must copy templates/agents/adlc-<role>.md.tmpl"
+grep -q 'Model per agent' "$ROOT/skills/bootstrap/SKILL.md" && ok "bootstrap asks for the model per agent" || bad "bootstrap: must ask for the model per agent"
+for m in "\`opus\` for the Analyst" "\`fable\` for the Builder"; do grep -q "$m" "$ROOT/skills/bootstrap/SKILL.md" || bad "bootstrap: the pre-filled default is not today's ($m)"; done
+eq "opus opus fable fable opus" "…and those defaults are the plugin agents' models" \
+   "$(for a in $ROLES; do sed -n 's/^model: *//p' "$ROOT/agents/$a.md"; done | tr '\n' ' ' | sed 's/ $//')"
+# the RUNBOOK invokes the copies only, and says where each model lives
+RB="$ROOT/templates/RUNBOOK.md.tmpl"
+eq "" "RUNBOOK invokes no agent by a bare or plugin name" "$(grep -oE 'Invoke the \*\*[a-z:-]+\*\*' "$RB" | grep -vE '^Invoke the \*\*adlc-(product-analyst|architect|builder|adversarial-reviewer|qa-release-ops)\*\*$')"
+eq "$(grep -c 'Invoke the \*\*' "$RB")" "RUNBOOK: every invoke line names one of the five copies" "$(grep -cE 'Invoke the \*\*adlc-(product-analyst|architect|builder|adversarial-reviewer|qa-release-ops)\*\* ' "$RB")"
+for a in $ROLES; do grep -q "adlc-$a\.md" "$RB" && ok "RUNBOOK says where adlc-$a's model is" || bad "RUNBOOK must name .claude/agents/adlc-$a.md"; done
+grep -q '/adlc-model' "$RB" && ok "RUNBOOK points at /adlc-model" || bad "RUNBOOK: must point at /adlc-model"
+# /adlc-model
+CM="$ROOT/commands/adlc-model.md"
+[ -f "$CM" ] && ok "commands/adlc-model.md exists" || bad "commands/adlc-model.md missing"
+for a in $ROLES; do grep -q "\`$a\`" "$CM" || bad "/adlc-model: does not name the $a role"; done
+grep -q '\$ARGUMENTS' "$CM" && ok "/adlc-model takes arguments" || bad "/adlc-model: must take \$ARGUMENTS"
+grep -q 'adlc:<role>' "$CM" && ok "/adlc-model says the plugin's agents keep their defaults" || bad "/adlc-model: must say the plugin's adlc:<role> agents keep their defaults"
+grep -q 'still wins' "$CM" && ok "/adlc-model says a model named in the call still wins" || bad "/adlc-model: must say a per-call model still wins"
+grep -q 'Commit nothing' "$CM" && ok "/adlc-model commits nothing" || bad "/adlc-model: must commit nothing"
+# the lanes keep running the plugin's agents (the copies are the local recipe's)
+eq "" "no lane runs a repo copy" "$(grep -hoE -- '--agent adlc-[a-z-]+' "$ROOT"/templates/github/adlc-*.yml)"
+# the guard's docstring and the reporter name both spellings
+grep -q 'adlc-<role>' "$ROOT/hooks/adlc_guard.py" && ok "the guard documents the adlc-<role> spelling" || bad "adlc_guard.py: document the vendored copies' name"
+grep -q 'adlc\[:-\]' "$ROOT/mission-control/hook.sh" && ok "Mission Control's reporter forwards adlc-<role> events" || bad "mission-control/hook.sh: must match adlc-<role> too"
+
 echo "guard hook (merge / push-to-main / force-push / role limits):"
 if command -v python3 >/dev/null 2>&1 && command -v git >/dev/null 2>&1; then
   H="$ROOT/hooks/adlc-guard.sh"
@@ -1402,7 +1473,8 @@ echo "adlc-run-log.sh + adlc-cycle.sh (the cycle-retro's ledgers):"
 if command -v jq >/dev/null 2>&1 && command -v sqlite3 >/dev/null 2>&1; then
   CY="$(mktemp -d)"; mkdir -p "$CY/bin" "$CY/repo/.adlc/metrics" "$CY/fx"
   now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-  # --- otel: two batches; session A = adlc:builder (2 events, 60 s apart), session B = 'custom' (unnamed), one non-api record
+  # --- otel: session A = adlc:builder (2 events, 60 s apart), session B = 'custom' (unnamed), one non-api record,
+  #     session C = adlc-builder (a repo's copy of the plugin agent reports by its file name)
   otlp() { # <session> <agent> <ts-seconds> <input> <output> <cache_read> <cache_creation> <cost> [event]
     jq -cn --arg s "$1" --arg a "$2" --arg t "$3" --argjson i "$4" --argjson o "$5" --argjson r "$6" --argjson w "$7" --arg c "$8" --arg e "${9:-claude_code.api_request}" '
       {resourceLogs: [{resource: {attributes: [{key: "service.name", value: {stringValue: "adlc"}}]},
@@ -1417,10 +1489,12 @@ if command -v jq >/dev/null 2>&1 && command -v sqlite3 >/dev/null 2>&1; then
   { otlp A adlc:builder "$e0"           10 5 90 0 0.10
     otlp A adlc:builder "$((e0 + 60))"  10 5 90 20 0.10
     otlp B custom       "$e0"           50 1  0  0 0.05
+    otlp C adlc-builder "$e0"           10 5  0  0 0.01
     otlp A adlc:builder "$((e0 + 30))"  99 99 99 99 9 claude_code.tool_result; } > "$CY/fx/telemetry.jsonl"
   OUT=$( cd "$CY/repo" && ADLC_REPO=acme/shop bash "$S/adlc-run-log.sh" otel "$CY/fx/telemetry.jsonl" 2>&1 ); check 0 "otel: runs to the end" $?
-  eq 2 "otel: one row per session+agent (the tool_result record is not a run)" "$(printf '%s\n' "$OUT" | wc -l | tr -d ' ')"
-  B=$(printf '%s\n' "$OUT" | jq -c 'select(.agent == "builder")')
+  eq 3 "otel: one row per session+agent (the tool_result record is not a run)" "$(printf '%s\n' "$OUT" | wc -l | tr -d ' ')"
+  eq "builder builder C:adlc-builder" "otel: a repo's adlc-builder copy is the builder stage too" "$(printf '%s\n' "$OUT" | jq -r 'select(.run_id == "C:adlc-builder") | "\(.stage) \(.agent) \(.run_id)"')"
+  B=$(printf '%s\n' "$OUT" | jq -c 'select(.run_id == "A:adlc:builder")')
   eq "builder 60 20 10 180 20 230 81.8 0.2 claude-x acme/shop" "otel: builder row sums its events; seconds = event span; cached% = read/(input+read+write)" \
      "$(printf '%s' "$B" | jq -r '"\(.stage) \(.seconds) \(.input) \(.output) \(.cache_read) \(.cache_creation) \(.tokens) \(.cache_read_pct) \(.cost_usd) \(.model) \(.repo)"')"
   eq "unknown null" "otel: an unnamed ('custom') agent is kept as unknown, with no stage" "$(printf '%s\n' "$OUT" | jq -r 'select(.agent == "unknown") | "\(.agent) \(.stage)"')"
