@@ -7,7 +7,7 @@
   "plugins": [
     {
       "name": "adlc",
-      "source": "./",
+      "source": { "source": "github", "repo": "juanjtov/adlc-pipeline", "ref": "v0.2.0" },
       "description": "A portable four-agent software-delivery pipeline (Analyst → Architect → Builder → QA/Ops) with human gates, plus a dual-mode bootstrap wizard that adapts it to any repo — greenfield PRD or mature codebase."
     }
   ]
