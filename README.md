@@ -10,21 +10,10 @@ a PRD) or a mature codebase — and be running in minutes.
 
 ## At a glance
 
-```mermaid
-flowchart LR
-    I[Idea / PRD / ticket] --> N[Intake<br/>one clear issue]
-    N --> A[Product Analyst]
-    A --> G1{{"Gate 1<br/>you approve the stories<br/>(or opt-in autopilot, full lane only)"}}
-    G1 --> R[Architect<br/>design + ADR]
-    R --> B[Builder<br/>scoped change]
-    B --> V[Adversarial + architect review]
-    V -->|findings| B
-    V --> Q[QA / Release-Ops]
-    Q --> G2{{Gate 2<br/>human merges}}
-    G2 --> D[Deploy]
-    A -.->|trivial change,<br/>human-approved| F["Fast lane<br/>scoped build + adversarial/security review"] -.-> G2
-    V -. findings .-> RT[Retro loop<br/>findings → tests, CI checks]
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/readme-hero-dark.png">
+  <img alt="ADLC at a glance: a request goes to the Analyst, then Gate 1 where you approve the plan and pick the lane, then Architect, Builder, two reviewers and QA, then Gate 2 where you merge. Small fixes you approve take a fast lane. Below, Mission Control shows the live assembly line with one station per agent." src="docs/readme-hero-light.png" width="100%">
+</picture>
 
 - **Two gates; the merge is always yours.** Agents move work *up to* a gate, never through it. Gate 1 can be handed to autopilot per issue, into the full lane only; Gate 2 never can. No agent verifies, merges, or deploys its own work.
 - **Deterministic where it matters.** Path scope, direct-push detection, fix-loop caps and verdict parsing are small unit-tested shell scripts shared by CI and a local pre-commit hook.
@@ -67,7 +56,7 @@ commands/adlc-mission-control.md   # opens Mission Control, the live view of the
 mission-control/               # ← MISSION CONTROL: local live view (Python stdlib server + static page)
 bin/adlc-mission-control       # its launcher (on the Bash PATH when the plugin is enabled)
 mission-control/hook.sh        # reports pipeline-agent activity to Mission Control when it is running
-docs/                          # the plain-language explainer + the one-page pipeline diagram
+docs/                          # the plain-language explainer, the one-page pipeline diagram, the README hero (readme-hero.py)
 templates/                     # what the wizard fills into the host repo
   host-CLAUDE.md.tmpl          # minimalist CLAUDE.md (commands + gotchas + pointers)
   skills/project-conventions.SKILL.md.tmpl   # lean: only what the code doesn't reveal
