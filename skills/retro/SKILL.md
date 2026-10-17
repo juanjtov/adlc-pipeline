@@ -85,6 +85,13 @@ land in the plugin and reach every project on the next `/adlc:init` refresh or
 `claude plugin update`. **Privacy:** only file from repos you own / are entitled to share — never
 copy another team's findings into the shared plugin.
 
+## Sibling: the cycle
+
+This skill fixes what keeps going wrong in the code. Where a run's **time and money** go — which
+stage dominates spend, how many fix rounds, how long at a gate — is the `cycle-retro` skill's
+question, with its own ledgers (`adlc-run-log.sh`, `adlc-cycle.sh`) and its own PR. A slow or
+flaky CI lane belongs there; a recurring code defect belongs here.
+
 ## Cadence
 
 - Manual: `/adlc:retro` anytime (optionally `since <date|N merges>`).
