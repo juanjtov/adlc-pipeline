@@ -110,7 +110,7 @@ Then `gh issue create --label stage:intake --body-file <file>` (or `gh issue edi
 
 End with the single next step, by what is true of the issue now:
 - **No `adlc:auto` on it** (the default; intake adds it only when asked): "invoke the
-  product-analyst agent on issue #N" — or, where the auto-start lane is installed, "add
+  adlc-product-analyst agent on issue #N" — or, where the auto-start lane is installed, "add
   `adlc:auto` to start the Analyst".
 - **Filed with `adlc:auto`:** "the Analyst is running and will stop at Gate 1" (with
   `adlc:autopilot`, a FULL verdict goes straight on to design).

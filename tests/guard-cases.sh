@@ -512,6 +512,14 @@ g D $AR feat 'git commit -m adr'
 
 # ── role names: a vendored copy matches; another plugin's agent does not ──────────────────
 g D product-analyst feat 'git commit -am x'
+g D adlc-product-analyst feat 'git commit -am x'                # this repo's copy, as /adlc-init writes it
+g D adlc-adversarial-reviewer feat 'gh pr review 5 --approve'
+g D adlc-architect feat 'gh pr create --title x'
+g A adlc-architect feat 'gh issue edit 5 --remove-label stage:design --add-label stage:build'
+g A adlc-builder feat 'git commit -am x && git push -u origin feat/1-x'
+g D adlc-builder feat 'gh pr merge 5'
+g D adlc-qa-release-ops feat 'git push origin main'
+g A adlc-other feat 'git commit -am x'                          # not one of the narrow roles: universal blocks only
 g A other:architect feat 'git commit -am x'
 g A adlc:builder feat 'git commit -am x && git push -u origin feat/1-x'
 g D adlc:builder feat 'gh pr merge 5'

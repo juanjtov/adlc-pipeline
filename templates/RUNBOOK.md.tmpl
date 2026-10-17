@@ -7,13 +7,19 @@ advance. Agents never advance through a gate; you do.
 To watch the line while you drive it, run `/adlc-mission-control`: a read-only live page on
 your own machine.
 
+The agents you invoke here are this repo's copies of the plugin's, `.claude/agents/adlc-<role>.md`,
+written by `/adlc-init`. Each file's `model:` line is the model that agent runs on; `/adlc-model`
+prints them all or changes one, and a model named in the call itself still wins for that call.
+The Actions lanes run the plugin's own `adlc:<role>` agents, which keep the plugin's defaults.
+
 ## Stage 1 — Intake → triage → stories (Product Analyst)
 
 1. Run `/adlc-intake` — from an idea, a PRD, an existing issue, a bug, or a Notion/Linear
    ticket it interviews you for what's missing and files the `stage:intake` issue once you
    confirm. (Already sharp? Create the issue yourself and label it `stage:intake`.)
-2. Invoke the **product-analyst** agent with the issue number. If it stops with numbered
-   questions, answer them with `/adlc-intake <issue>` and invoke it again.
+2. Invoke the **adlc-product-analyst** agent with the issue number (its model is the `model:`
+   line in `.claude/agents/adlc-product-analyst.md`). If it stops with numbered questions,
+   answer them with `/adlc-intake <issue>` and invoke it again.
 3. It **triages** (the `triage` skill), posting an `ADLC-TRIAGE: FAST|FULL` verdict, then either
    the full story set (FULL) or a change brief (FAST), and moves the issue to `gate:stories`.
 4. **Gate 1 (you):** accept or return. On accept, apply `stage:design` for the full pipeline —
@@ -26,23 +32,27 @@ directly to a fresh issue (your own triage) or after the Analyst recommends FAST
 
 1. Run the fast-lane cap on your intended scope first — `printf '<files>' | .adlc/scripts/adlc-triage.sh`
    (FULL means it's too big or touches something sensitive → use the full pipeline instead).
-2. Invoke the **builder** agent on the `stage:fast` issue: it makes the scoped change + a test
-   (no ADR — it works from the change brief), writes `.adlc/scope/<n>.txt`, and opens a PR.
-3. Invoke the **adversarial-reviewer** on the PR (walk the `adlc:security-gate` classes). The cap
+2. Invoke the **adlc-builder** agent on the `stage:fast` issue (its model is the `model:` line
+   in `.claude/agents/adlc-builder.md`): it makes the scoped change + a test (no ADR — it works
+   from the change brief), writes `.adlc/scope/<n>.txt`, and opens a PR.
+3. Invoke the **adlc-adversarial-reviewer** agent on the PR (its model is the `model:` line in
+   `.claude/agents/adlc-adversarial-reviewer.md`; walk the `adlc:security-gate` classes). The cap
    is enforced again on the real diff — an over-cap/sensitive diff goes to `stage:design`.
 4. On a PASS verdict, apply `gate:deploy`. **Gate 2 (you):** merge. On CHANGES, hand it back to
    the Builder (the same fix cycle as the full lane).
 
 ## Stage 2 — Design (Architect, duty 1)
 
-1. Invoke the **architect** agent on the `stage:design` issue.
+1. Invoke the **adlc-architect** agent on the `stage:design` issue (its model is the `model:`
+   line in `.claude/agents/adlc-architect.md`).
 2. It writes `docs/adr/NNNN-*.md` + a task breakdown comment + blast-radius check, then
    advances to `stage:build`.
 3. Review the ADR. (You accept ADRs; the Architect never accepts its own.)
 
 ## Stage 3 — Build (Builder)
 
-1. Invoke the **builder** agent on the `stage:build` issue.
+1. Invoke the **adlc-builder** agent on the `stage:build` issue (its model is the `model:` line
+   in `.claude/agents/adlc-builder.md`).
 2. It branches `feat/<n>-<slug>`, implements within the declared diff scope (recorded in
    `.adlc/scope/<n>.txt`, which the pre-commit hook enforces), writes AC-traced tests, runs the
    project's test/build commands, and opens a PR.
@@ -52,13 +62,15 @@ directly to a fresh issue (your own triage) or after the Analyst recommends FAST
 
 ## Stage 4 — Design-conformance review (Architect, duty 2)
 
-1. Invoke the **architect** agent on the Builder's PR.
+1. Invoke the **adlc-architect** agent on the Builder's PR (its model is the `model:` line in
+   `.claude/agents/adlc-architect.md`).
 2. It reviews for diff-scope + design conformance and submits `--approve` /
    `--request-changes`. On approval, you (or CI) advance the issue `stage:build → stage:qa`.
 
 ## Stage 5 — QA gate (QA & Release/Ops)
 
-1. Invoke the **qa-release-ops** agent on the `stage:qa` PR.
+1. Invoke the **adlc-qa-release-ops** agent on the `stage:qa` PR (its model is the `model:`
+   line in `.claude/agents/adlc-qa-release-ops.md`).
 2. It verifies AC coverage, writes missing tests, runs the full battery, and runs the
    **adversarial security gate**. For UI changes it runs browser verification.
 3. You run `/security-review` on the PR branch and post findings.

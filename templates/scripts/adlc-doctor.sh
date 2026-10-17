@@ -3,7 +3,8 @@
 # (or pass the root as $1). Non-zero exit if any problem is found.
 # Checks: harness deny rules present · no leftover {{...}} placeholders in copied workflows ·
 #         every lane installs the plugin and grants its agent tools · the scripts the lanes
-#         call are installed · the project skills exist ·
+#         call are installed · the project skills exist · the five project agents the RUNBOOK
+#         invokes exist, each with a model line ·
 #         and, when gh is available: the state-machine labels exist · the default branch has a
 #         merge gate (a required approving review, or at least the tripwire);
 #         and, when it can find the plugin, whether .adlc/VERSION (stamped by /adlc-init)
@@ -95,9 +96,28 @@ for s in project-conventions release-ops; do
   if [ -f "${root}/.claude/skills/${s}/SKILL.md" ]; then ok "skill: ${s}"; else note "missing skill: .claude/skills/${s}/SKILL.md"; fi
 done
 
-# 4) Prompt-cache hygiene — the persistent prefix (CLAUDE.md + the skills the agents load)
-#    is the cached part of every request. Prefix caching is a byte-exact match, so a value
-#    that changes between runs baked in here re-processes everything after it at full price;
+# 3b) The project agents the RUNBOOK invokes: this repo's copies of the plugin's five, written by
+#     /adlc-init to .claude/agents/adlc-<role>.md. Each is a thin wrapper that preloads the role
+#     prompt (the plugin's adlc:role-<role> skill); its `model:` line is what this repo chose
+#     (/adlc-model shows or changes it). A missing copy leaves a RUNBOOK step with no agent to
+#     invoke; a model line still holding its {{...}} placeholder names no model at all.
+for a in product-analyst architect builder adversarial-reviewer qa-release-ops; do
+  f="${root}/.claude/agents/adlc-${a}.md"
+  if [ ! -f "$f" ]; then
+    note "missing project agent: .claude/agents/adlc-${a}.md (run /adlc-init; the RUNBOOK invokes it)"
+    continue
+  fi
+  model=$(sed -n 's/^model:[[:space:]]*//p' "$f" | head -n 1 | tr -d '[:space:]')
+  case "$model" in
+    ''|'{{'*) note "no model in .claude/agents/adlc-${a}.md (the model: line is missing or unfilled; set it with /adlc-model)" ;;
+    *)        ok "agent: adlc-${a} (model: ${model})" ;;
+  esac
+done
+
+# 4) Prompt-cache hygiene — the persistent prefix (CLAUDE.md + the skills the agents load +
+#    the project agents' own files) is the cached part of every request. Prefix caching is a
+#    byte-exact match, so a value that changes between runs baked in here re-processes
+#    everything after it at full price;
 #    such values belong in the task prompt (the volatile tail), not a frozen context file.
 #    A regex can't tell a live baked value from a documentation example (a `created_at`
 #    sample, a mention of GITHUB_SHA), so this scan is deliberately narrow: it flags only the
@@ -108,7 +128,7 @@ done
 #    `efficient-runs` skill for humans; verify actual hit-rate with adlc-cache.sh.
 ctx=()
 for f in "${root}/CLAUDE.md" "${root}/.claude/CLAUDE.md"; do [ -f "$f" ] && ctx+=("$f"); done
-while IFS= read -r f; do [ -n "$f" ] && ctx+=("$f"); done < <(ls "${root}"/.claude/skills/*/SKILL.md 2>/dev/null || true)
+while IFS= read -r f; do [ -n "$f" ] && ctx+=("$f"); done < <(ls "${root}"/.claude/skills/*/SKILL.md "${root}"/.claude/agents/adlc-*.md 2>/dev/null || true)
 if [ "${#ctx[@]}" -gt 0 ]; then
   # Requires the `$`/`${` sigil on the CI ids so a bare prose mention ("CI sets GITHUB_SHA")
   # and a static timestamp example ("2024-01-01T00:00:00Z") do NOT false-positive.
@@ -182,9 +202,10 @@ if [ "$agent_steps" -gt 0 ]; then
 fi
 
 # 7) Tooling version. /adlc-init stamps the plugin's version into .adlc/VERSION when it copies
-#    the scripts, workflows and hooks into this repo. Those copies are frozen: they change only
-#    on a refresh. A different plugin version may have newer ones, so say so. This is a note,
-#    not a problem: it does not change the exit code (a newer plugin need not mean broken tooling).
+#    the scripts, workflows, hooks and project agents into this repo. Those copies are frozen:
+#    they change only on a refresh. A different plugin version may have newer ones, so say so.
+#    This is a note, not a problem: it does not change the exit code (a newer plugin need not
+#    mean broken tooling).
 #    The running plugin's version is read from its plugin.json, found in this order:
 #      ADLC_PLUGIN_ROOT (explicit; the tests use it), CLAUDE_PLUGIN_ROOT (set for hooks and for
 #      skill text, and not guaranteed in a shell command), the install path that

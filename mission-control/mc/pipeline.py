@@ -12,8 +12,10 @@ SLOTS = ['intake', 'analyst', 'gate1', 'architect', 'builder', 'reviewer', 'qa',
 STATIONS = ['analyst', 'architect', 'builder', 'reviewer', 'qa']
 GATES = ['gate1', 'gate2']
 
-# Claude Code reports a plugin's agent as '<plugin name>:<agent file name>'. Only this plugin's agents are pipeline agents:
-# another plugin's 'builder', or a project's own 'architect', is not.
+# Claude Code reports a plugin's agent as '<plugin name>:<agent file name>', and a project's own agent by its file
+# name. Pipeline agents are this plugin's five ('adlc:builder') and a repo's copies of them ('adlc-builder', written by
+# /adlc-init to .claude/agents/, where each one's model is set). Another plugin's 'builder', or a project's own
+# 'architect', is not one.
 PLUGIN = 'adlc'
 # Agent file (agents/<name>.md) -> station.
 AGENT_STATION = {
@@ -51,9 +53,15 @@ _BRANCH_RE = re.compile(r'^[^/]*/(\d+)(?:-.*)?$')   # the same rule as templates
 
 
 def station_for(agent_type):
-    """'adlc:builder' -> 'builder'. Anything that is not one of this plugin's five agents -> None."""
-    plugin, _, name = (agent_type if isinstance(agent_type, str) else '').partition(':')
-    return AGENT_STATION.get(name) if plugin == PLUGIN else None
+    """'adlc:builder' -> 'builder'; so does 'adlc-builder', a repo's copy of the plugin agent. Anything else -> None."""
+    if not isinstance(agent_type, str):
+        return None
+    plugin, sep, name = agent_type.partition(':')
+    if sep:
+        return AGENT_STATION.get(name) if plugin == PLUGIN else None
+    if agent_type.startswith(PLUGIN + '-'):
+        return AGENT_STATION.get(agent_type[len(PLUGIN) + 1:])
+    return None
 
 
 def refs_in(text):

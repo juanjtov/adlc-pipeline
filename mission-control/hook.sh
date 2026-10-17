@@ -11,9 +11,10 @@ home="${ADLC_MC_HOME:-$HOME/.adlc/mission-control}"
 port="$(sed -n 's/.*"port": *\([0-9][0-9]*\).*/\1/p' "$home/server.json" 2>/dev/null | head -1)"
 [ -n "$port" ] || exit 0
 
-# A pipeline agent's own events carry "agent_type":"adlc:<agent>". A session handing work to one carries
-# "subagent_type":"adlc:<agent>". Any other event stays here, whatever agent or session it comes from.
-ours='"(agent_type|subagent_type)"[[:space:]]*:[[:space:]]*"adlc:(product-analyst|architect|builder|adversarial-reviewer|qa-release-ops)"'
+# A pipeline agent's own events carry "agent_type":"adlc:<agent>" (the plugin's agent) or "adlc-<agent>" (this
+# repo's copy of it, written by /adlc-init to .claude/agents/, where its model is set). A session handing work to
+# one carries "subagent_type" with the same name. Any other event stays here, whatever agent or session it comes from.
+ours='"(agent_type|subagent_type)"[[:space:]]*:[[:space:]]*"adlc[:-](product-analyst|architect|builder|adversarial-reviewer|qa-release-ops)"'
 # Reading costs bash about 50 ms a megabyte, and it is the user's tool call that waits. An event past 2 MB (a tool
 # that returned a very large result) is let go: its step then shows as not reported back, which is true.
 max=2097152

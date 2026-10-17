@@ -44,8 +44,10 @@ page still shows the line and every step; the token and cost figures stay empty.
   with no run on this machine is shown as "at" its station, not as queued or idle: the page
   cannot tell whether its agent is at work elsewhere.
 - **Only pipeline agents.** `hook.sh` forwards an event only when it names one of this plugin's
-  five agents (`adlc:builder` and so on), and only while Mission Control is running. That is an
-  agent's own events, and the call a session makes to hand work to one. Nothing else is sent.
+  five agents (`adlc:builder` and so on) or a repo's own copy of one (`adlc-builder`, which
+  `/adlc-init` writes to `.claude/agents/` so the model can be set there), and only while
+  Mission Control is running. That is an agent's own events, and the call a session makes to
+  hand work to one. Nothing else is sent.
 - **What is kept.** For each run: its task prompt and its final message, and for each tool call
   a one-line label, the file an edit touched, and the skill a Skill call loaded. What a tool
   returned is not kept. It all stays in one SQLite file on this machine.
