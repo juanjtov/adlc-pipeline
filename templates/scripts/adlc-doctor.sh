@@ -107,7 +107,11 @@ for a in product-analyst architect builder adversarial-reviewer qa-release-ops; 
     note "missing project agent: .claude/agents/adlc-${a}.md (run /adlc-init; the RUNBOOK invokes it)"
     continue
   fi
-  model=$(sed -n 's/^model:[[:space:]]*//p' "$f" | head -n 1 | tr -d '[:space:]')
+  # Only the frontmatter (between the first two --- lines) holds the setting; a `model:` in the body
+  # is prose. The value may be quoted or followed by a comment; CRLF files are read the same.
+  model=$(awk 'NR == 1 && $0 ~ /^---\r?$/ { f = 1; next }
+               f && $0 ~ /^---\r?$/ { exit }
+               f && /^model:/ { sub(/^model:[ \t]*/, ""); sub(/[ \t]*#.*$/, ""); gsub(/["\047\r]/, ""); gsub(/[ \t]+$/, ""); print; exit }' "$f")
   case "$model" in
     ''|'{{'*) note "no model in .claude/agents/adlc-${a}.md (the model: line is missing or unfilled; set it with /adlc-model)" ;;
     *)        ok "agent: adlc-${a} (model: ${model})" ;;

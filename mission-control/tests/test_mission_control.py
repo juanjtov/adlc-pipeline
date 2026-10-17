@@ -106,6 +106,12 @@ class PipelineRules(unittest.TestCase):
         self.assertTrue(info['prompt'].startswith('You are the **Builder**'))
         self.assertIn('Bash', info['tools'])
         self.assertEqual(info['guard'], 'ok')
+        # the role prompt is a preloaded plugin skill, read beside the wrapper
+        self.assertIn('adlc:role-builder', info['preloads'])
+        self.assertIn('adlc:charter', info['preloads'])
+        self.assertEqual(info['role_file'], 'skills/role-builder/SKILL.md')
+        self.assertTrue(info['role_prompt'].startswith('# Builder (Agent 3) — role prompt'))
+
         # A narrow role's limits come from the guard hook, not from the agent file: they replace its bare "Bash".
         reviewer = pipeline.read_agent(PLUGIN, 'reviewer')
         self.assertIn('gh pr diff', reviewer['tools'])
@@ -118,6 +124,19 @@ class PipelineRules(unittest.TestCase):
         self.assertEqual(info['blocked'], ['gh pr merge', 'Push to main', 'Force-push', 'GitHub API writes'])
         self.assertEqual(reviewer['blocked'], ['gh pr merge', 'Push to main', 'Force-push', 'GitHub API writes',
                                                'Other gh and git commands', 'Edit', 'Write'])
+
+    def test_a_repo_copys_model_line_is_read_for_its_runs(self):
+        root = tempfile.mkdtemp()
+        try:
+            os.makedirs(os.path.join(root, '.claude', 'agents'))
+            with open(os.path.join(root, '.claude', 'agents', 'adlc-builder.md'), 'w') as fh:
+                fh.write('---\nname: adlc-builder\nmodel: "sonnet"   # until the next retro\n---\n\nmodel: not this one\n')
+            self.assertEqual(pipeline.copy_model(root, 'adlc-builder'), 'sonnet')
+            self.assertEqual(pipeline.copy_model(root, 'adlc:builder'), '')     # the plugin's agent: its file has the model
+            self.assertEqual(pipeline.copy_model(root, 'adlc-architect'), '')   # no copy written
+            self.assertEqual(pipeline.copy_model(None, 'adlc-builder'), '')
+        finally:
+            shutil.rmtree(root)
 
     def test_lane_grants_are_read_from_the_templates(self):
         lanes = {l['lane']: l['tools'] for l in pipeline.read_agent(PLUGIN, 'architect')['lanes']}

@@ -57,7 +57,8 @@ jobs:
             Design duty. For issue #${{ github.event.issue.number }} write the ADR
             (docs/adr/NNNN-*.md, status Proposed) + a task-breakdown comment with a declared diff
             scope per task + a blast-radius check. Load your role's skills with the Skill tool
-            first. You can write under docs/ only. End the task-breakdown comment with the line
+            first: adlc:role-architect, then the rest your agent file lists. You can write under
+            docs/ only. End the task-breakdown comment with the line
             `ADLC-BREAKDOWN: <the ADR's path>` (for example
             `ADLC-BREAKDOWN: docs/adr/0007-login.md`). Do NOT commit and do NOT change labels:
             the next step commits docs/ to the design branch and advances the issue to

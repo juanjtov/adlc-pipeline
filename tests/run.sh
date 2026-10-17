@@ -275,6 +275,12 @@ eq 1 "reports each copy with its model" "$(ADLC_DOCTOR_SKIP_LABELS=1 bash "$S/ad
 rm "$FIX/.claude/agents/adlc-builder.md";     doctor; check 1 "flags a missing agent copy" $?
 agent_copy builder '{{BUILDER_MODEL}}';       doctor; check 1 "flags an unfilled model placeholder" $?
 agent_copy builder '';                        doctor; check 1 "flags an empty model line" $?
+printf -- '---\nname: adlc-builder\ntools: Read\n---\n\nmodel: fable is only mentioned in the body\n' > "$FIX/.claude/agents/adlc-builder.md"
+doctor; check 1 "a model: line outside the frontmatter does not count" $?
+printf -- '---\nname: adlc-builder\nmodel: "sonnet"   # until the next retro\n---\n\nx\n' > "$FIX/.claude/agents/adlc-builder.md"
+eq 1 "a quoted model line with a comment is read as its value" "$(ADLC_DOCTOR_SKIP_LABELS=1 bash "$S/adlc-doctor.sh" "$FIX" 2>&1 | grep -c 'agent: adlc-builder (model: sonnet)')"
+printf -- '---\r\nname: adlc-builder\r\nmodel: haiku\r\n---\r\n\r\nx\r\n' > "$FIX/.claude/agents/adlc-builder.md"
+eq 1 "a CRLF file is read the same" "$(ADLC_DOCTOR_SKIP_LABELS=1 bash "$S/adlc-doctor.sh" "$FIX" 2>&1 | grep -c 'agent: adlc-builder (model: haiku)')"
 agent_copy builder fable;                     doctor; check 0 "passes with all five copies and their models" $?
 eq 1 "…reporting the model set" "$(ADLC_DOCTOR_SKIP_LABELS=1 bash "$S/adlc-doctor.sh" "$FIX" 2>&1 | grep -c 'agent: adlc-builder (model: fable)')"
 J='jobs:\n  a:\n    steps:\n'
@@ -1307,6 +1313,20 @@ done
 for a in $(grep -hoE -- '--agent adlc:[a-z-]+' "$T"/adlc-*.yml | sed 's/.*adlc://' | sort -u); do
   [ -f "$ROOT/agents/$a.md" ] && ok "lane agent exists: $a" || bad "lane names a missing agent: $a"
 done
+# A `skills:` preload happens only for subagents. A lane runs its agent with --agent, so the role
+# prompt reaches the model only through a Skill call the prompt asks for: each agent step's prompt
+# must name that step's own role skill (adlc:role-<agent>), and no other role's.
+role_calls() { # <template> → "<agent>=<role skill named in its prompt>;" per mention, in file order
+  awk '/^[ \t]*#/ { next }
+       /^[ \t]*--agent adlc:/ { cur = $2; sub(/^adlc:/, "", cur) }
+       match($0, /adlc:role-[a-z-]+/) { printf "%s=%s;", cur, substr($0, RSTART + 10, RLENGTH - 10) }' "$T/$1"
+}
+for f in "$T"/adlc-*.yml; do
+  b=$(basename "$f")
+  agents=$(grants "$b" | tr ';' '\n' | sed -n 's/=.*//p' | grep -v '^-$' | sed 's/^adlc://')
+  [ -n "$agents" ] || continue
+  eq "$(printf '%s\n' $agents | awk '{ printf "%s=%s;", $1, $1 }')" "$b: each agent step's prompt names its own role skill to load first" "$(role_calls "$b")"
+done
 # `tools:` takes tool NAMES. A command specifier there is ignored and grants the whole tool.
 for f in "$ROOT"/agents/*.md; do
   case "$(grep -m1 '^tools:' "$f")" in
@@ -1335,8 +1355,10 @@ for a in $ROLES; do
   eq "role-$a" "role-$a: the skill's name" "$(fm "$sk" | sed -n 's/^name: *//p')"
   grep -qE '^disable-model-invocation: *true' "$sk" && bad "role-$a: disable-model-invocation would stop the Skill load" || ok "role-$a: the model may load it"
   n=$(body "$f" | grep -c .); [ "$n" -le 12 ] && ok "agents/$a.md is a thin wrapper ($n body lines)" || bad "agents/$a.md: $n body lines — the role prompt belongs in skills/role-$a/"
-  body "$f" | grep -q "adlc:role-$a" && ok "…whose body names the role skill (a --agent session gets no preload)" || bad "agents/$a.md: the body must name adlc:role-$a"
+  body "$f" | grep -q "\`adlc:role-$a\` first" && ok "…whose body says to load the role skill first (a --agent session gets no preload)" || bad "agents/$a.md: the body must say to load \`adlc:role-$a\` first"
   body "$f" | grep -q 'Skill tool' && : || bad "agents/$a.md: the body must say to load the skills with the Skill tool under --agent"
+  # the body's prose list is what a --agent session loads: every preloaded skill must be in it
+  for sk in $(printf '%s\n' "$F" | sed -n 's/^  - //p'); do body "$f" | grep -q "\`$sk\`" || bad "agents/$a.md: the body does not name the preloaded skill $sk"; done
   A=$(printf '%s' "$a" | tr 'a-z-' 'A-Z_'); t="$ROOT/templates/agents/adlc-$a.md.tmpl"
   [ -f "$t" ] || { bad "templates/agents/adlc-$a.md.tmpl missing"; continue; }
   sed -e "s/^name: $a\$/name: adlc-$a/" -e "s/^model: .*/model: {{${A}_MODEL}}/" "$f" | diff -q - "$t" >/dev/null \
@@ -1507,11 +1529,13 @@ if command -v jq >/dev/null 2>&1 && command -v sqlite3 >/dev/null 2>&1; then
                INSERT INTO runs VALUES ('r2','s1',NULL,'adlc:architect','architect','acme/shop','/x','feat/42-x',42,NULL,'claude-y','','',$t0,NULL,$t0);
                INSERT INTO runs VALUES ('r3','s2','a3','adlc:builder','builder','other/repo','/y','main',NULL,NULL,NULL,'','',$t0,$((t0+10)),$((t0+10)));
                INSERT INTO runs VALUES ('r4','s3',NULL,NULL,NULL,'acme/shop','/x','main',NULL,NULL,NULL,'','',$t0,$((t0+10)),$((t0+10)));
+               INSERT INTO runs VALUES ('r5','s4','a5','adlc-builder','builder','acme/shop','/x','feat/43-y',43,NULL,NULL,'','',$t0,$((t0+100)),$((t0+100)));
                INSERT INTO api (run,ts,model,input,output,cache_read,cache_creation,cost,ms) VALUES ('r1',$((t0+5)),'claude-x',10,5,90,0,0.10,1000),('r1',$((t0+200)),'claude-x',10,5,90,20,0.10,1000);
                INSERT INTO api (run,ts,model,input,output,cache_read,cache_creation,cost,ms) VALUES ('r2',$((t0+20)),'claude-y',0,1,0,0,0.01,500),('r2',$((t0+80)),'claude-y',0,1,0,0,0.01,500);
                INSERT INTO api (run,ts,model,input,output,cache_read,cache_creation,cost,ms) VALUES ('r3',$t0,'claude-x',1,1,1,1,1.0,1);"
   OUT=$( cd "$CY/repo" && ADLC_MC_DB="$DB" ADLC_REPO=Acme/Shop bash "$S/adlc-run-log.sh" mc 7 2>&1 ); check 0 "mc: runs to the end" $?
-  eq 2 "mc: only this repo's runs with a station (repo name case-insensitive)" "$(printf '%s\n' "$OUT" | wc -l | tr -d ' ')"
+  eq 3 "mc: only this repo's runs with a station (repo name case-insensitive)" "$(printf '%s\n' "$OUT" | wc -l | tr -d ' ')"
+  eq "builder builder 43" "mc: a repo's adlc-builder copy is the builder agent" "$(printf '%s\n' "$OUT" | jq -r 'select(.run_id == "r5") | "\(.stage) \(.agent) \(.issue)"')"
   eq "builder builder 42 300 20 10 180 20 230 81.8 0.2 claude-x" "mc: the run's own started→ended is its latency; tokens/cost summed from its api events" \
      "$(printf '%s\n' "$OUT" | jq -r 'select(.run_id == "r1") | "\(.stage) \(.agent) \(.issue) \(.seconds) \(.input) \(.output) \(.cache_read) \(.cache_creation) \(.tokens) \(.cache_read_pct) \(.cost_usd) \(.model)"')"
   eq "architect 80 null claude-y" "mc: a run still open runs from its start to its last api event; no cache → null share; the run's model wins" \

@@ -365,7 +365,8 @@ nothing about this plugin. So every agent step in the lane templates does three 
 - **Runs as its named agent** — `--agent adlc:builder` (and so on), which gives the session that
   agent's model, `tools:` and wrapper prompt. A `skills:` preload happens only for subagents, so
   in a lane the agent loads its role prompt (`adlc:role-builder`) and its other skills with its
-  first Skill calls; every lane prompt tells it to.
+  first Skill calls; every lane prompt names the role skill to load first, and `tests/run.sh`
+  pins that.
 - **Grants that lane's tools** — `--permission-mode dontAsk` + `--allowedTools`. The Analyst
   and the reviewers get named `gh`/`git` commands and no edit tools; the Architect, in the
   design lane, gets those plus file edits under `docs/` only; the Builder and QA get the shell.
