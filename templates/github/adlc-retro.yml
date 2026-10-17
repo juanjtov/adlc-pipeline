@@ -1,13 +1,16 @@
-# ADLC retro — the scheduled half of the self-improvement loop.
+# ADLC retro — the scheduled half of the self-improvement loop, both skills.
 # Runs the retro on a cadence: reads the metrics + finding ledger, and opens a PROPOSAL PR
-# with durable fixes (regression tests / checks / conventions) + context pruning. It NEVER
-# auto-applies — the PR goes through the normal gates (QA + adversarial review).
+# with durable fixes (regression tests / checks / conventions) + context pruning. Then runs the
+# cycle-retro: lane latency, label-timeline cycle times and fix rounds → a PROPOSAL PR on the
+# pipeline's shape. (Tokens and cost live in Mission Control's local store, so the scheduled
+# cycle-retro sees latency and rounds only; run /adlc:cycle-retro locally for spend.) Neither
+# auto-applies — each PR goes through the normal gates (QA + adversarial review).
 #
 # PREREQUISITES: CLAUDE_CODE_OAUTH_TOKEN + ADLC_DISPATCH_TOKEN (the dispatch token so the
 # proposal PR is bot-authored and can trigger the review/CI lanes). Also add `jq` if your
 # metrics script needs it (ubuntu-latest has it).
-# The step installs the plugin and invokes its `retro` skill by name (`/adlc:retro`), with the
-# tools the skill needs (see adlc-builder.yml, HOW THE AGENT RUNS).
+# Each step installs the plugin and invokes one skill by name (`/adlc:retro`, `/adlc:cycle-retro`),
+# with the tools the skill needs (see adlc-builder.yml, HOW THE AGENT RUNS).
 name: ADLC retro
 
 on:
@@ -40,3 +43,26 @@ jobs:
             --permission-mode dontAsk
             --allowedTools "Read,Edit,Write,Skill,Bash"
           prompt: "/adlc:retro"
+
+      # The first agent may have left the checkout on its proposal branch, with materialized ledgers
+      # on disk. The second proposal starts from the default branch, clean, or it would carry the
+      # first's commits and ship files the scripts say are never committed from CI.
+      - name: Back to a clean default branch
+        if: ${{ !cancelled() }}
+        run: |
+          git checkout -q -f "${{ github.event.repository.default_branch }}"
+          git clean -fdq
+
+      - name: Run the cycle retro (opens a proposal PR on the pipeline's shape)
+        if: ${{ !cancelled() }}
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.ADLC_DISPATCH_TOKEN }}
+          allowed_bots: "{{BUILDER_BOT}}"
+          plugin_marketplaces: "https://github.com/juanjtov/adlc-pipeline.git"
+          plugins: "adlc@adlc-pipeline"
+          claude_args: |
+            --permission-mode dontAsk
+            --allowedTools "Read,Edit,Write,Skill,Bash"
+          prompt: "/adlc:cycle-retro"

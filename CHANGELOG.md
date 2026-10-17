@@ -40,6 +40,10 @@ This is the first tagged release. It covers everything on `main` up to 2026-10-1
   the templates: a failed lookup no longer reads as "nothing to check" (tripwire, fix cap,
   verdict, diff-scope), and the tripwire workflow has the `pull-requests: read` it needs on
   a private repo.
+- **Cycle retro.** A `cycle-retro` skill reads a run ledger (`adlc-run-log.sh`: tokens, cost and
+  latency per agent run, from Mission Control, OpenTelemetry or Actions data) and per-issue
+  cycle times from the label timeline (`adlc-cycle.sh`), then proposes changes in one pull
+  request. It never merges.
 - **Docs.** README has an At a glance section, a version badge and a commands table;
   `docs/` has a plain-language explainer and a one-page diagram.
 - **Release process.** Releases are git tags. `main` is development. The marketplace entry
