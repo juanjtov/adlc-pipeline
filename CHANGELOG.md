@@ -1,0 +1,66 @@
+# Changelog
+
+Newest first. Each release says whether a **tooling refresh** is needed. A refresh means
+running `/adlc-init` again in your repo: it re-copies the workflows, `.adlc/scripts/*.sh`
+and the local hook from the plugin, because those are frozen copies that only change on a
+refresh. Your repo's `.adlc/VERSION` says which release its copies came from, and
+`.adlc/scripts/adlc-doctor.sh` tells you when it differs from the installed plugin.
+
+## 0.2.0
+
+Tooling refresh needed: **yes** for a repo set up before this release (its copies predate
+the lane wiring, the trusted guards and the fixes below, and it has no `.adlc/VERSION`).
+**No** for a repo set up with this release.
+
+This is the first tagged release. It covers everything on `main` up to 2026-10-16.
+
+- **Lanes run as their agents.** Each Actions lane installs the plugin, runs as its named
+  agent (`--agent adlc:<role>`) and gets only that lane's tools. `tests/run.sh` pins every
+  lane's agent and tool grant. The plugin's guard hook blocks merge, push-to-main and
+  force-push, and now also a `gh` alias definition or `git -c alias.…`, which could hide one.
+- **Diff guards run from the default branch.** The diff-scope workflow (the scope check and
+  the fast-lane cap check) runs on `pull_request_target`, so its workflow and scripts are the
+  default branch's and a pull request cannot edit the check that judges it. The scope file is
+  read as a git blob and a link at the scope folder is refused.
+- **Fast lane.** Trivial changes can skip design and Gate 1. The cap fails closed, a
+  submodule change (and `.gitmodules`) is never fast-eligible, and a human approves the
+  lane.
+- **Fix loop.** The cap counts only the pull request's own fix rounds.
+- **Intake.** `/adlc-intake` is one front door for an idea, a PRD, an issue, a bug or a
+  ticket from another tracker. It files a sharpened `stage:intake` issue only on a yes.
+- **Mission Control.** `/adlc-mission-control` opens a local, live view of the pipeline
+  (stations, requests, tokens, cost). It reads GitHub through your `gh` login.
+- **Doctor.** Checks that every agent step installs the plugin and grants tools, that the
+  scripts the lanes call are installed, and, when `gh` can ask, that the default branch has
+  a merge gate (an approving review, or at least the tripwire). It runs `gh` inside the
+  repo named by its argument. New: it compares `.adlc/VERSION` with the plugin's version.
+- **Metrics.** `first_pass_approved` counts pull requests with no CHANGES verdict comment,
+  reading a comment's last marker as `adlc-verdict.sh` does.
+- **Guard fixes ported from a host repo.** Nine scripts hardened in a real repo are back in
+  the templates: a failed lookup no longer reads as "nothing to check" (tripwire, fix cap,
+  verdict, diff-scope), and the tripwire workflow has the `pull-requests: read` it needs on
+  a private repo.
+- **Docs.** README has an At a glance section, a version badge and a commands table;
+  `docs/` has a plain-language explainer and a one-page diagram.
+- **Release process.** Releases are git tags. `main` is development. The marketplace entry
+  is pinned to the release tag, so installs and the Actions runner get the tagged release,
+  not whatever is on `main`.
+
+## How a release is cut
+
+1. On `main`, bump `version` in `.claude-plugin/plugin.json`. Only the release commit
+   changes it: Claude Code keys its cache on that string, so users see an update only
+   when it changes.
+2. Add the entry above, with its "Tooling refresh needed" line. A refresh is needed when
+   the release changes anything under `templates/` that `/adlc-init` copies into a repo.
+3. Commit, then tag the commit `vX.Y.Z` and push the tag.
+4. In `.claude-plugin/marketplace.json`, move the `adlc` entry's `ref` to the new tag and
+   push. Run `claude plugin validate .` first.
+5. Users get it with `claude plugin update adlc@adlc-pipeline`. Lanes get it on their next
+   run.
+
+Rollback: move the marketplace `ref` back to the previous tag and push. Claude Code has no
+rollback command, and how an already-updated machine reacts to an older version string is
+not verified here, so test it before relying on it.
+
+Plugin development does not need a release: run `claude --plugin-dir <checkout>`.

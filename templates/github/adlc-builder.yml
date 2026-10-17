@@ -17,8 +17,11 @@
 # HOW THE AGENT RUNS (every ADLC lane does these same things — the action grants NO shell,
 # edit or gh access on its own, and knows nothing about the plugin until it is installed):
 #   - `plugin_marketplaces` + `plugins` install the ADLC plugin on the runner, so the agent
-#     definitions, the adlc:* skills and the guard hook exist there. If you installed the
-#     plugin from a fork or a private marketplace, point both at yours (a private one also
+#     definitions, the adlc:* skills and the guard hook exist there. The runner installs the
+#     release the marketplace entry is pinned to (a git tag), so a push to the plugin's main
+#     branch does not change your lanes until a release moves that pin. The copied scripts and
+#     workflows in your repo are frozen: CHANGELOG.md says per release whether to re-run
+#     /adlc-init. If you installed the plugin from a fork or a private marketplace, point both at yours (a private one also
 #     needs the runner to have git access to it).
 #   - `--agent adlc:<role>` runs the session AS that agent (its prompt, model and tools).
 #   - `--permission-mode dontAsk` + `--allowedTools` grant this lane's tools; anything else
