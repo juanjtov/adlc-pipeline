@@ -10,10 +10,7 @@ a PRD) or a mature codebase — and be running in minutes.
 
 ## At a glance
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/readme-hero-dark.png">
-  <img alt="ADLC at a glance: a request goes to the Analyst, then Gate 1 where you approve the plan and pick the lane, then Architect, Builder, two reviewers and QA, then Gate 2 where you merge. Small fixes you approve take a fast lane. Below, Mission Control shows the live assembly line with one station per agent." src="docs/readme-hero-light.png" width="100%">
-</picture>
+<img alt="ADLC at a glance: a request goes to the Analyst, then Gate 1 where you approve the plan and pick the lane, then Architect, Builder, two reviewers and QA, then Gate 2 where you merge. Small fixes you approve take a fast lane. Below, Mission Control shows the live assembly line with one station per agent." src="docs/readme-hero-dark.png" width="100%">
 
 - **Two gates; the merge is always yours.** Agents move work *up to* a gate, never through it. Gate 1 can be handed to autopilot per issue, into the full lane only; Gate 2 never can. No agent verifies, merges, or deploys its own work.
 - **Deterministic where it matters.** Path scope, direct-push detection, fix-loop caps and verdict parsing are small unit-tested shell scripts shared by CI and a local pre-commit hook.
