@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """README hero image — generator.
 
-Builds docs/readme-hero-light.png and docs/readme-hero-dark.png (the README picks one with
-<picture> by the reader's GitHub theme) from an HTML layout and a capture of Mission Control.
+Builds docs/readme-hero-dark.png, the image the README shows, from an HTML layout and a capture of
+Mission Control. A light variant exists for other uses (--theme light); the README always shows the dark one.
 
-Run:   python3 docs/readme-hero.py              # re-render both variants from the stored capture
+Run:   python3 docs/readme-hero.py              # re-render the dark hero from the stored capture
        python3 docs/readme-hero.py --capture    # first refresh docs/readme-hero-mc.png from a running
                                                 #   demo server (adlc-mission-control --demo), then render
 Needs: pip install playwright pillow && python3 -m playwright install chromium (once). Rendering
@@ -105,11 +105,12 @@ async def capture(b):
     png = await pg.screenshot(); await ctx.close()
     Image.open(io.BytesIO(png)).crop(LINE_CROP).save(MC); print("captured", MC)
 
-async def main(do_capture):
+async def main(do_capture, themes):
     async with async_playwright() as p:
         b = await p.chromium.launch()
         if do_capture: await capture(b)
-        for name, t in THEMES.items():
+        for name in themes:
+            t = THEMES[name]
             pg = await b.new_page(viewport=dict(width=W, height=H), device_scale_factor=2)
             await pg.set_content(html(t), wait_until="load")
             await pg.evaluate("document.fonts.ready")
@@ -123,4 +124,6 @@ async def main(do_capture):
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--capture", action="store_true", help="refresh docs/readme-hero-mc.png from a running demo server first")
-    asyncio.run(main(ap.parse_args().capture))
+    ap.add_argument("--theme", choices=["dark", "light", "all"], default="dark", help="which variant to render (default: dark, the one the README shows)")
+    a = ap.parse_args()
+    asyncio.run(main(a.capture, list(THEMES) if a.theme == "all" else [a.theme]))
