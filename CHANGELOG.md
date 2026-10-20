@@ -7,11 +7,14 @@ because those are frozen copies that only change on a refresh. Your repo's `.adl
 says which release its copies came from, and `.adlc/scripts/adlc-doctor.sh` tells you when
 it differs from the installed plugin.
 
-## Unreleased (on `main` after 0.2.0)
+## 0.3.0
 
 Tooling refresh needed: **yes** — `/adlc-init` now writes this repo's copies of the five
 agents and a RUNBOOK that invokes them; until then the RUNBOOK copy in your repo still names
 the plugin's agents, which keep working.
+
+Covers everything on `main` after the 0.2.0 tag (`04b7ad2`) up to and including this release
+commit: pull requests 31 to 33, the last of them merged as `6292a21` on 2026-10-20.
 
 - **The model per agent is yours.** Each role prompt is now a plugin skill
   (`adlc:role-<role>`) and the plugin's agents are thin wrappers that preload it with the
@@ -23,6 +26,8 @@ the plugin's agents, which keep working.
   copy reports to hooks as `adlc-<role>`, so the guard hook, Mission Control and the run
   ledger treat it as the role, like `adlc:<role>`. The doctor checks the five copies exist
   and each has a model.
+- **Docs.** The README's At a glance chart is now a hero image that shows the pipeline and
+  Mission Control, in place of the Mermaid flowchart; `docs/readme-hero.py` regenerates it.
 
 ## 0.2.0
 
