@@ -23,7 +23,10 @@
 #     workflows in your repo are frozen: CHANGELOG.md says per release whether to re-run
 #     /adlc-init. If you installed the plugin from a fork or a private marketplace, point both at yours (a private one also
 #     needs the runner to have git access to it).
-#   - `--agent adlc:<role>` runs the session AS that agent (its prompt, model and tools).
+#   - `--agent adlc:<role>` runs the session AS that agent (its model, tools and wrapper prompt).
+#     A `skills:` preload happens only for subagents, so each lane's prompt names the role prompt
+#     skill (adlc:role-<role>) to load with the Skill tool first, then the rest the agent file
+#     lists; tests/run.sh pins that every agent step's prompt names its own role skill.
 #   - `--permission-mode dontAsk` + `--allowedTools` grant this lane's tools; anything else
 #     that would need approval is denied (file reads and read-only commands still run). The
 #     plugin's PreToolUse guard additionally blocks merge, push-to-main and force-push in
@@ -97,7 +100,8 @@ jobs:
             --allowedTools "Read,Edit,Write,Skill,Bash"
           prompt: |
             Implement issue #${{ github.event.issue.number }} following its task breakdown and
-            ADR. Load your role's skills with the Skill tool first. When the design lane ran, this
+            ADR. Load your role's skills with the Skill tool first: adlc:role-builder, then the rest
+            your agent file lists. When the design lane ran, this
             branch already holds its commit: the ADR under docs/adr/, and
             .adlc/scope/${{ github.event.issue.number }}.txt listing those design files. Cut your
             feature branch from here so your PR carries the ADR, and leave the ADR unchanged.

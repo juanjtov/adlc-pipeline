@@ -80,7 +80,8 @@ jobs:
             --allowedTools "Read,Edit,Write,Skill,Bash"
           prompt: |
             PR #${{ github.event.pull_request.number }} was labelled adlc:changes-requested. Load
-            your role's skills with the Skill tool first. Read the architect + adversarial review
+            your role's skills with the Skill tool first: adlc:role-builder, then the rest your
+            agent file lists. Read the architect + adversarial review
             comments on the PR, fix the issues WITHIN the declared diff scope, keep the AC-traced
             tests green, commit with a message starting `adlc-fix:` and push to the same branch.
             Do not merge, do not change labels — the push re-runs the review lane.
