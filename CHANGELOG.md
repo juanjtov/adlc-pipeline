@@ -1,10 +1,28 @@
 # Changelog
 
 Newest first. Each release says whether a **tooling refresh** is needed. A refresh means
-running `/adlc-init` again in your repo: it re-copies the workflows, `.adlc/scripts/*.sh`
-and the local hook from the plugin, because those are frozen copies that only change on a
-refresh. Your repo's `.adlc/VERSION` says which release its copies came from, and
-`.adlc/scripts/adlc-doctor.sh` tells you when it differs from the installed plugin.
+running `/adlc-init` again in your repo: it re-copies the workflows, `.adlc/scripts/*.sh`,
+the local hook and the project agents (`.claude/agents/adlc-<role>.md`) from the plugin,
+because those are frozen copies that only change on a refresh. Your repo's `.adlc/VERSION`
+says which release its copies came from, and `.adlc/scripts/adlc-doctor.sh` tells you when
+it differs from the installed plugin.
+
+## Unreleased (on `main` after 0.2.0)
+
+Tooling refresh needed: **yes** — `/adlc-init` now writes this repo's copies of the five
+agents and a RUNBOOK that invokes them; until then the RUNBOOK copy in your repo still names
+the plugin's agents, which keep working.
+
+- **The model per agent is yours.** Each role prompt is now a plugin skill
+  (`adlc:role-<role>`) and the plugin's agents are thin wrappers that preload it with the
+  role's other skills. `/adlc-init` writes the same wrappers into your repo as
+  `.claude/agents/adlc-<role>.md`, asking which model each one runs on (defaults: `opus` for
+  the Analyst, the Architect and QA/Ops; `fable` for the Builder and the reviewer); the
+  RUNBOOK invokes those copies, and `/adlc-model` prints the five models or changes one. The
+  Actions lanes still run the plugin's `adlc:<role>` agents with the plugin's defaults. A
+  copy reports to hooks as `adlc-<role>`, so the guard hook, Mission Control and the run
+  ledger treat it as the role, like `adlc:<role>`. The doctor checks the five copies exist
+  and each has a model.
 
 ## 0.2.0
 

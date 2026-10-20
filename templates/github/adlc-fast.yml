@@ -67,7 +67,8 @@ jobs:
             --allowedTools "Read,Edit,Write,Skill,Bash"
           prompt: |
             FAST LANE. Implement issue #${{ github.event.issue.number }} from its change brief —
-            there is NO ADR. Load your role's skills plus adlc:triage with the Skill tool first.
+            there is NO ADR. Load your role's skills with the Skill tool first: adlc:role-builder,
+            then the rest your agent file lists, plus adlc:triage.
             Write the declared scope to
             .adlc/scope/${{ github.event.issue.number }}.txt — one path prefix per line, covering
             every file you touch, the test included (the diff-scope check enforces it) — stay
@@ -173,7 +174,8 @@ jobs:
           prompt: |
             FAST-LANE PR #${{ github.event.pull_request.number }}. Review in fresh context,
             read-only, seeing ONLY the diff + the issue's change brief (there is no ADR — do not
-            ask for one). Load your role's skills with the Skill tool first. Apply the three pillars,
+            ask for one). Load your role's skills with the Skill tool first:
+            adlc:role-adversarial-reviewer, then the rest your agent file lists. Apply the three pillars,
             walking every security-gate attack class against the diff. Post findings as ONE PR
             comment whose LAST line is exactly `ADLC-ADV: PASS` (nothing blocking) or
             `ADLC-ADV: CHANGES` (a confirmed Critical/High). Never edit code, never merge, never

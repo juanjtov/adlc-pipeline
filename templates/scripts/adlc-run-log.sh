@@ -85,7 +85,7 @@ case "$src" in
     | jq -c --arg repo "$repo" '.[]
         | (.started // .first_ts) as $t0
         | (.ended // .last_ts) as $t1
-        | (.agent | if . == null then null else (split(":") | last) end) as $agent
+        | (.agent | if . == null then null else (split(":") | last | sub("^adlc-"; "")) end) as $agent
         | {ts: ($t0 | if . == null then null else (floor | todate) end), source: "mc", repo: $repo,
            issue: .issue, pr: .pr, stage: .stage, agent: $agent, run_id: .run_id,
            seconds: (if $t0 == null or $t1 == null then null else (($t1 - $t0) | floor) end),
@@ -118,7 +118,7 @@ case "$src" in
     | jq -sc --arg repo "$repo" '
       add // [] | group_by([.session, .agent]) | .[]
       | (map(.ts) | min) as $t0 | (map(.ts) | max) as $t1
-      | (.[0].agent | if . == null or . == "custom" then "unknown" else (split(":") | last) end) as $agent
+      | (.[0].agent | if . == null or . == "custom" then "unknown" else (split(":") | last | sub("^adlc-"; "")) end) as $agent
       | (map(.input) | add) as $in | (map(.cache_read) | add) as $rd | (map(.cache_creation) | add) as $wr
       | {ts: ($t0 | floor | todate), source: "otel", repo: $repo, issue: null, pr: null,
          stage: ({"product-analyst":"analyst","architect":"architect","builder":"builder","adversarial-reviewer":"reviewer","qa-release-ops":"qa"}[$agent] // null),

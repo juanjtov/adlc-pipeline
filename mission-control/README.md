@@ -28,7 +28,7 @@ Requirements: Python 3.9 or newer (the one that ships with macOS developer tools
 | Where each request is, gates waiting on you, verdicts, merges | GitHub, read with your `gh` login (one GraphQL call) | every 15 s while the page is open |
 | What each agent is doing, step by step | The plugin's hooks (`hooks/hooks.json` -> `hook.sh`) | at once |
 | Tokens, cache use, cost, latency | Claude Code telemetry sent straight here (OTLP over HTTP/JSON) | about 2 s |
-| System prompt, what each agent may run | The agent files in `agents/`; the guard hook (`hooks/adlc_guard.py`) for a narrow role's command list; the lane templates (`templates/github/`) for each Actions lane's grant | on load |
+| System prompt, what each agent may run | The agent files in `agents/` and the role prompt each preloads (`skills/role-<role>/`); a repo copy's own `model:` line (`.claude/agents/adlc-<role>.md`) until its first reply names the model; the guard hook (`hooks/adlc_guard.py`) for a narrow role's command list; the lane templates (`templates/github/`) for each Actions lane's grant | on load |
 
 Telemetry is opt-in. Merge the `env` block of `templates/settings.mission-control.json` into
 the repo's `.claude/settings.local.json` and start a new Claude Code session. Without it the
@@ -44,8 +44,10 @@ page still shows the line and every step; the token and cost figures stay empty.
   with no run on this machine is shown as "at" its station, not as queued or idle: the page
   cannot tell whether its agent is at work elsewhere.
 - **Only pipeline agents.** `hook.sh` forwards an event only when it names one of this plugin's
-  five agents (`adlc:builder` and so on), and only while Mission Control is running. That is an
-  agent's own events, and the call a session makes to hand work to one. Nothing else is sent.
+  five agents (`adlc:builder` and so on) or a repo's own copy of one (`adlc-builder`, which
+  `/adlc-init` writes to `.claude/agents/` so the model can be set there), and only while
+  Mission Control is running. That is an agent's own events, and the call a session makes to
+  hand work to one. Nothing else is sent.
 - **What is kept.** For each run: its task prompt and its final message, and for each tool call
   a one-line label, the file an edit touched, and the skill a Skill call loaded. What a tool
   returned is not kept. It all stays in one SQLite file on this machine.

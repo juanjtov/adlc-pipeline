@@ -15,7 +15,8 @@ force-pushes):
 
 Blocked per role (ROLE_RULES): for the three roles whose gh/git surface is deliberately
 narrow, any gh or git subcommand outside the role's list. Agent `tools:` frontmatter takes
-tool NAMES only, so these per-command limits live here.
+tool NAMES only, so these per-command limits live here. The role is read from the hook's
+agent_type: the plugin's `adlc:<role>` and a repo's vendored copy `adlc-<role>` alike.
 
 The command is parsed (quotes, heredocs, $(...), subshells, `sh -c '...'`), so flag order, a
 compound command, or a wrapper does not hide a call, and text inside a quoted comment body is
@@ -1538,8 +1539,12 @@ def main():
         return 0
     agent = data.get("agent_type")
     agent = agent if isinstance(agent, str) else ""
+    # The plugin's agents report as "adlc:<role>"; a repo's own copies of them, which /adlc-init
+    # writes to .claude/agents/adlc-<role>.md (where the model is set), as "adlc-<role>". Both
+    # are the role. A bare "<role>" (a hand-vendored copy) is too; another plugin's is not.
+    role = agent[len("adlc:"):] if agent.startswith(("adlc:", "adlc-")) else agent
     cwd = data.get("cwd")
-    guard = Guard(agent[len("adlc:"):] if agent.startswith("adlc:") else agent,
+    guard = Guard(role,
                   cwd if isinstance(cwd, str) and cwd else os.getcwd(), command)
     try:
         guard.check_text(command)

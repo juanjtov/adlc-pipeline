@@ -6,7 +6,7 @@ Run:  python3 docs/adlc-pipeline-diagram.py
       -> rewrites docs/adlc-pipeline-diagram.html and prints the artifact-body path
 Then: python3 ~/.claude/skills/diagram/render.py docs/adlc-pipeline-diagram.html docs/adlc-pipeline-diagram.png
 
-Draw the as-built truth: re-read agents/, skills/charter, skills/triage, skills/intake and
+Draw the as-built truth: re-read agents/, skills/role-*, skills/charter, skills/triage, skills/intake and
 templates/github/*.yml before changing a flow.
 """
 import sys, os

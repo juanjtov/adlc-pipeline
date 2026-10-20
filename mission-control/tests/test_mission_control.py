@@ -68,7 +68,11 @@ class PipelineRules(unittest.TestCase):
     def test_only_this_plugins_agents_are_pipeline_agents(self):
         self.assertEqual(pipeline.station_for('adlc:builder'), 'builder')
         self.assertEqual(pipeline.station_for('adlc:adversarial-reviewer'), 'reviewer')
-        for other in ('builder', 'other-plugin:builder', 'architect', 'Explore', 'custom', '', None, 7):
+        # a repo's copies of the plugin's agents (.claude/agents/adlc-<role>.md, from /adlc-init) report by file name
+        self.assertEqual(pipeline.station_for('adlc-builder'), 'builder')
+        self.assertEqual(pipeline.station_for('adlc-qa-release-ops'), 'qa')
+        for other in ('builder', 'other-plugin:builder', 'architect', 'Explore', 'custom', '', None, 7,
+                      'adlc-', 'adlc-explore', 'adlc:adlc-builder', 'other:adlc-builder'):
             self.assertIsNone(pipeline.station_for(other), other)
 
     def test_prompt_refs(self):
@@ -102,6 +106,12 @@ class PipelineRules(unittest.TestCase):
         self.assertTrue(info['prompt'].startswith('You are the **Builder**'))
         self.assertIn('Bash', info['tools'])
         self.assertEqual(info['guard'], 'ok')
+        # the role prompt is a preloaded plugin skill, read beside the wrapper
+        self.assertIn('adlc:role-builder', info['preloads'])
+        self.assertIn('adlc:charter', info['preloads'])
+        self.assertEqual(info['role_file'], 'skills/role-builder/SKILL.md')
+        self.assertTrue(info['role_prompt'].startswith('# Builder (Agent 3) — role prompt'))
+
         # A narrow role's limits come from the guard hook, not from the agent file: they replace its bare "Bash".
         reviewer = pipeline.read_agent(PLUGIN, 'reviewer')
         self.assertIn('gh pr diff', reviewer['tools'])
@@ -114,6 +124,19 @@ class PipelineRules(unittest.TestCase):
         self.assertEqual(info['blocked'], ['gh pr merge', 'Push to main', 'Force-push', 'GitHub API writes'])
         self.assertEqual(reviewer['blocked'], ['gh pr merge', 'Push to main', 'Force-push', 'GitHub API writes',
                                                'Other gh and git commands', 'Edit', 'Write'])
+
+    def test_a_repo_copys_model_line_is_read_for_its_runs(self):
+        root = tempfile.mkdtemp()
+        try:
+            os.makedirs(os.path.join(root, '.claude', 'agents'))
+            with open(os.path.join(root, '.claude', 'agents', 'adlc-builder.md'), 'w') as fh:
+                fh.write('---\nname: adlc-builder\nmodel: "sonnet"   # until the next retro\n---\n\nmodel: not this one\n')
+            self.assertEqual(pipeline.copy_model(root, 'adlc-builder'), 'sonnet')
+            self.assertEqual(pipeline.copy_model(root, 'adlc:builder'), '')     # the plugin's agent: its file has the model
+            self.assertEqual(pipeline.copy_model(root, 'adlc-architect'), '')   # no copy written
+            self.assertEqual(pipeline.copy_model(None, 'adlc-builder'), '')
+        finally:
+            shutil.rmtree(root)
 
     def test_lane_grants_are_read_from_the_templates(self):
         lanes = {l['lane']: l['tools'] for l in pipeline.read_agent(PLUGIN, 'architect')['lanes']}
@@ -621,6 +644,10 @@ class OverHttp(unittest.TestCase):
         # a session handing work to a pipeline agent is ours too: it carries that agent's task prompt
         self.hook(fx.hook('PreToolUse', session='s-main', agent=None, tool_name='Agent', tool_input={'subagent_type': 'adlc:qa-release-ops', 'prompt': 'Gate PR #11.'}))
         self.assertEqual(len(self.arrived), 3)
+        # a repo's copy of a plugin agent (.claude/agents/adlc-<role>.md, from /adlc-init) reports by its file name
+        self.hook(fx.hook('PreToolUse', session='s-copy', agent='adlc-builder', agent_id='c1', tool_name='Bash', tool_input={'command': 'npm test'}, tool_use_id='t2'))
+        self.hook(fx.hook('PreToolUse', session='s-main', agent=None, tool_name='Agent', tool_input={'subagent_type': 'adlc-architect', 'prompt': 'Design issue #12.'}))
+        self.assertEqual(len(self.arrived), 5)
 
     def test_events_that_name_no_pipeline_agent_never_leave_the_hook(self):
         plain = {'hook_event_name': 'PreToolUse', 'session_id': 's-other', 'cwd': '/work/shop', 'tool_name': 'Bash', 'tool_input': {'command': 'cat notes.txt'}}
@@ -629,6 +656,7 @@ class OverHttp(unittest.TestCase):
             dict(plain, agent_type='Explore', agent_id='x1'),                                     # another subagent
             dict(plain, agent_type='other-plugin:builder'),                                       # another plugin's agent of the same name
             dict(plain, agent_type='builder'),                                                    # a project's own agent of the same name
+            dict(plain, agent_type='adlc-explore'),                                               # a project agent with the prefix but no role
             dict(plain, tool_name='Agent', tool_input={'subagent_type': 'Explore', 'prompt': 'Find the adlc:builder agent file'}),
             {'hook_event_name': 'SessionEnd', 'session_id': 's-other', 'cwd': '/work/shop', 'reason': 'exit'},
             dict(plain, tool_input={'command': 'echo "agent_type" adlc:builder'}),                # the words alone are not the field

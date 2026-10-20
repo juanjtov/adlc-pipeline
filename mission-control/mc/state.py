@@ -319,9 +319,22 @@ def _run_detail(store, run, by_n, agent, repo, comments, events, prs, now, plugi
 
     ctx = []
     if agent.get('prompt'):
-        ctx.append({'id': 'agent', 'name': 'System prompt: the agent definition', 'tok': P.est_tokens(len(agent['prompt'])), 'cached': True, 'est': True,
-                    'detail': 'The agent file is this agent’s whole system prompt. It ships with the plugin, so it is shown in full.',
-                    'items': [{'name': agent.get('file', ''), 'tok': P.est_tokens(len(agent['prompt']))}], 'text': agent['prompt']})
+        # The agent file is a thin wrapper; its role prompt is a plugin skill the file preloads. A subagent (a run with an
+        # agent_id) gets that preload, so both are its system prompt. A session's own run (`claude --agent …`) gets no
+        # preload and loads the skill with the Skill tool instead, which shows under the skills loaded.
+        items = [{'name': agent.get('file', ''), 'tok': P.est_tokens(len(agent['prompt']))}]
+        text, detail = agent['prompt'], 'The agent file is this agent’s system prompt. It ships with the plugin, so it is shown in full.'
+        if agent.get('role_prompt') and run.get('agent_id'):
+            items.append({'name': agent.get('role_file', ''), 'tok': P.est_tokens(len(agent['role_prompt']))})
+            text = agent['prompt'] + '\n\n---\n\n' + agent['role_prompt']
+            others = [s for s in agent.get('preloads', []) if s != 'adlc:role-' + agent.get('agent', '')]
+            detail = ('The agent file is a thin wrapper; its role prompt is the adlc:role-%s skill, preloaded for a subagent, so both are shown in full. '
+                      'The other skills the file preloads (%s) are not counted here.' % (agent.get('agent', ''), ', '.join(others) or 'none'))
+        elif agent.get('role_prompt'):
+            detail = ('The agent file is a thin wrapper; its role prompt is the adlc:role-%s skill, which a session running as this agent '
+                      'loads with the Skill tool (counted under the skills loaded).' % agent.get('agent', ''))
+        ctx.append({'id': 'agent', 'name': 'System prompt: the agent definition', 'tok': sum(i['tok'] for i in items), 'cached': True, 'est': True,
+                    'detail': detail, 'items': items, 'text': text})
     skills = [{'name': name, 'tok': P.skill_tokens(plugin_root, run.get('cwd'), name)} for name in store.step_values(run['id'], 'skill')]
     if skills:
         ctx.append({'id': 'skills', 'name': '%d skill%s loaded' % (len(skills), '' if len(skills) == 1 else 's'), 'tok': sum(s.get('tok') or 0 for s in skills),
@@ -366,7 +379,7 @@ def _run_detail(store, run, by_n, agent, repo, comments, events, prs, now, plugi
     return {
         'id': run['id'], 'station': run['station'], 'n': req['n'] if req else run.get('issue'), 'title': req['title'] if req else '',
         'round': _round_of(run, req), 'live': live, 't0': run['started'], 't1': t1, 'session': (run.get('session') or '')[:10],
-        'model': run.get('model') or agent.get('model') or '',
+        'model': run.get('model') or P.copy_model(run.get('cwd'), run.get('agent_type')) or agent.get('model') or '',
         'steps': [{'kind': s['kind'], 'label': s['label'], 't0': s['started'], 't1': s['ended'], 'ok': s['ok'] != 0} for s in steps],
         'stepCount': store.step_count(run['id']), 'total': None,
         'prompt': prompt, 'payload': payload, 'ctx': ctx, 'ctxTotal': ctx_total,

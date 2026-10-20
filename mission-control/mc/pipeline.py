@@ -12,8 +12,10 @@ SLOTS = ['intake', 'analyst', 'gate1', 'architect', 'builder', 'reviewer', 'qa',
 STATIONS = ['analyst', 'architect', 'builder', 'reviewer', 'qa']
 GATES = ['gate1', 'gate2']
 
-# Claude Code reports a plugin's agent as '<plugin name>:<agent file name>'. Only this plugin's agents are pipeline agents:
-# another plugin's 'builder', or a project's own 'architect', is not.
+# Claude Code reports a plugin's agent as '<plugin name>:<agent file name>', and a project's own agent by its file
+# name. Pipeline agents are this plugin's five ('adlc:builder') and a repo's copies of them ('adlc-builder', written by
+# /adlc-init to .claude/agents/, where each one's model is set). Another plugin's 'builder', or a project's own
+# 'architect', is not one.
 PLUGIN = 'adlc'
 # Agent file (agents/<name>.md) -> station.
 AGENT_STATION = {
@@ -51,9 +53,15 @@ _BRANCH_RE = re.compile(r'^[^/]*/(\d+)(?:-.*)?$')   # the same rule as templates
 
 
 def station_for(agent_type):
-    """'adlc:builder' -> 'builder'. Anything that is not one of this plugin's five agents -> None."""
-    plugin, _, name = (agent_type if isinstance(agent_type, str) else '').partition(':')
-    return AGENT_STATION.get(name) if plugin == PLUGIN else None
+    """'adlc:builder' -> 'builder'; so does 'adlc-builder', a repo's copy of the plugin agent. Anything else -> None."""
+    if not isinstance(agent_type, str):
+        return None
+    plugin, sep, name = agent_type.partition(':')
+    if sep:
+        return AGENT_STATION.get(name) if plugin == PLUGIN else None
+    if agent_type.startswith(PLUGIN + '-'):
+        return AGENT_STATION.get(agent_type[len(PLUGIN) + 1:])
+    return None
 
 
 def refs_in(text):
@@ -138,13 +146,14 @@ def step_label(tool, tool_input, cwd=''):
 
 
 def read_agent(plugin_root, station):
-    """The agent file for a station — frontmatter fields plus the body, which is its system prompt — and what the
-    plugin lets that agent run: the guard hook's command limits (a local run) and each Actions lane's grant.
-    Nothing here is typed in: it is read from agents/, hooks/adlc_guard.py and templates/github/."""
+    """The agent file for a station — frontmatter fields plus the body, a thin wrapper — and the role prompt it
+    preloads (the plugin skill adlc:role-<name>, which a subagent gets in full), plus what the plugin lets that agent
+    run: the guard hook's command limits (a local run) and each Actions lane's grant. Nothing here is typed in: it is
+    read from agents/, skills/role-*/, hooks/adlc_guard.py and templates/github/."""
     name = STATION_AGENT[station]
     path = os.path.join(plugin_root, 'agents', name + '.md')
     info = {'station': station, 'agent': name, 'file': 'agents/' + name + '.md', 'prompt': '', 'model': '', 'tools': [],
-            'blocked': [], 'lanes': [], 'guard': 'missing'}
+            'preloads': [], 'role_file': '', 'role_prompt': '', 'blocked': [], 'lanes': [], 'guard': 'missing'}
     try:
         with open(path, encoding='utf-8') as fh:
             text = fh.read()
@@ -160,6 +169,18 @@ def read_agent(plugin_root, station):
             info['model'] = value
         elif key == 'tools':
             info['tools'] = _split_tools(value)
+    # The `skills:` list (the frontmatter's only list) is what a subagent gets preloaded. The role prompt among
+    # them is the skill adlc:role-<name>: read its body too, since the agent file alone is now a few lines.
+    info['preloads'] = re.findall(r'^\s*-\s*(\S+)\s*$', front, re.M)
+    if 'adlc:role-' + name in info['preloads']:
+        try:
+            with open(os.path.join(plugin_root, 'skills', 'role-' + name, 'SKILL.md'), encoding='utf-8') as fh:
+                role = fh.read()
+            rm = re.match(r'^---\n(.*?)\n---\n(.*)$', role, re.S)
+            info['role_file'] = 'skills/role-%s/SKILL.md' % name
+            info['role_prompt'] = (rm.group(2) if rm else role).strip()
+        except OSError:
+            pass
     # An agent file's `tools:` names whole tools. What a narrow role may run THROUGH Bash is held by the plugin's
     # guard hook, so that is where the truth is: show its commands in place of a bare "Bash". When the guard cannot
     # be read, the line stands as written and 'guard' says so — the page then shows that the limits are unknown.
@@ -262,6 +283,26 @@ def _split_tools(value):
         else:
             cur += ch
     return out
+
+
+def copy_model(cwd, agent_type):
+    """The `model:` line of a repo's own copy of a plugin agent (.claude/agents/adlc-<role>.md under cwd, written by
+    /adlc-init). '' for a plugin agent, a missing file, or no model line. Quotes and a trailing comment are dropped."""
+    if not (isinstance(agent_type, str) and agent_type.startswith(PLUGIN + '-') and cwd):
+        return ''
+    try:
+        with open(os.path.join(cwd, '.claude', 'agents', agent_type + '.md'), encoding='utf-8') as fh:
+            text = fh.read()
+    except OSError:
+        return ''
+    m = re.match(r'^---\r?\n(.*?)\r?\n---', text, re.S)
+    if not m:
+        return ''
+    for line in m.group(1).splitlines():
+        key, _, value = line.partition(':')
+        if key.strip() == 'model':
+            return value.split('#', 1)[0].strip().strip('"\'')
+    return ''
 
 
 def skill_tokens(plugin_root, cwd, name):
