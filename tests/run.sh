@@ -257,6 +257,11 @@ eq "github" "the adlc entry is a github source" "$(jq -r '.plugins[]|select(.nam
 eq "juanjtov/adlc-pipeline" "…of this repo" "$(jq -r '.plugins[]|select(.name=="adlc").source.repo' "$ROOT/.claude-plugin/marketplace.json")"
 case "$(jq -r '.plugins[]|select(.name=="adlc").source.ref' "$ROOT/.claude-plugin/marketplace.json")" in v[0-9]*.[0-9]*.[0-9]*) ok "…pinned to a release tag (vX.Y.Z)";; *) bad "marketplace: ref must be a vX.Y.Z tag";; esac
 grep -q "^## \[\?$(jq -r .version "$ROOT/.claude-plugin/plugin.json")" "$ROOT/CHANGELOG.md" && ok "CHANGELOG.md has an entry for the plugin.json version" || bad "CHANGELOG.md: no entry for the plugin.json version"
+# A note, not a failure: the release recipe (CHANGELOG.md) tags before it moves the ref, so the
+# release PR's own CI runs one tag behind by design. Without it a forgotten ref move prints nothing.
+mref="$(jq -r '.plugins[]|select(.name=="adlc").source.ref' "$ROOT/.claude-plugin/marketplace.json")"
+pver="$(jq -r .version "$ROOT/.claude-plugin/plugin.json")"
+[ "$mref" = "v$pver" ] || echo "  · note: marketplace ref $mref is not v$pver, the plugin.json version (release recipe step 4 pending, or a rollback)"
 # prompt-cache hygiene: a live CI run-id expansion in a frozen context file must fail
 printf '# proj\nBuild ref: ${GITHUB_RUN_ID}\n' > "$FIX/CLAUDE.md"
 ADLC_DOCTOR_SKIP_LABELS=1 bash "$S/adlc-doctor.sh" "$FIX" >/dev/null 2>&1; check 1 "flags live CI run-id in CLAUDE.md" $?
