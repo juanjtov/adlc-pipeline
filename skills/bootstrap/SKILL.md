@@ -194,7 +194,11 @@ Create/write:
    `.adlc/VERSION` (one line): read `.version` from `${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json`.
    That stamp says which plugin release these frozen copies came from, so `adlc-doctor.sh` can tell
    the user when a newer release may have newer tooling (the plugin's `CHANGELOG.md` says per
-   release whether a refresh is needed). Re-running this step is the refresh: it restamps. Then install the **local diff-scope
+   release whether a refresh is needed). Re-running this step is the refresh: it restamps. Also copy
+   `templates/LICENSE` to `.adlc/LICENSE`: it is the MIT notice for every file this wizard copies
+   from `templates/` (the scripts, the workflows, the agent copies, the hook, the generated docs),
+   which the MIT license requires to travel with them; the plugin itself is AGPL, the copies are
+   not. Then install the **local diff-scope
    guard**: copy `templates/hooks/pre-commit` to `.git/hooks/pre-commit` (chmod +x) — **ask first
    if a pre-commit hook already exists** — so the Builder's declared scope is enforced on every
    local commit, not only in CI. Set the hook's `ADLC_TEST_DIRS` default to the repo's test dirs

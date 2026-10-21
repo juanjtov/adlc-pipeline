@@ -7,6 +7,17 @@ because those are frozen copies that only change on a refresh. Your repo's `.adl
 says which release its copies came from, and `.adlc/scripts/adlc-doctor.sh` tells you when
 it differs from the installed plugin.
 
+## Unreleased (on `main` after 0.3.0)
+
+Tooling refresh needed: **no** — a re-run only adds `.adlc/LICENSE`, the MIT notice for the
+copies already in your repo; nothing they do changes.
+
+- **Licensed.** Everything outside `templates/` is under the AGPL v3 (`LICENSE-AGPL`);
+  everything under `templates/` — the files `/adlc-init` copies into a repo — is under the MIT
+  license (`LICENSE-MIT`). `/adlc-init` now copies that notice to `.adlc/LICENSE` beside the
+  scripts, so the copies carry it as MIT requires. The README's Licensing section draws the
+  line, and `plugin.json` declares `AGPL-3.0-only AND MIT`.
+
 ## 0.3.0
 
 Tooling refresh needed: **yes** — `/adlc-init` now writes this repo's copies of the five

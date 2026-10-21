@@ -435,3 +435,25 @@ pipeline only; it never starts the **fast lane** (that skips design, so the lane
 explicit human approval — a `FAST` recommendation waits at `gate:stories`). The label has to be
 on the issue before the Analyst starts (apply it when you file); added later, it does not advance
 an issue already waiting at Gate 1, and taking it off before the Analyst finishes opts back out.
+
+## Licensing
+
+Two licenses, drawn along one line: what runs as the plugin, and what the wizard writes into
+your repo.
+
+- **Everything outside `templates/` is licensed under the [AGPL v3](LICENSE-AGPL)** — the
+  `adlc:*` skills, the agents, the commands, the guard hook, `bin/`, Mission Control, the
+  telemetry, the tests and the docs. Installing
+  and running it, at your company or anywhere else, triggers no obligation: AGPL applies if you
+  modify the plugin *and* distribute or host that modified version for others. Open forks are
+  welcome; the license rules out a closed relaunch.
+- **Everything under [`templates/`](templates/) is licensed under the [MIT license](LICENSE-MIT)**
+  — the lane workflows, `.adlc/scripts/*.sh`, the pre-commit hook, the five agent copies,
+  the project skills, the charter, the RUNBOOK, the CONTEXT-LOG, the host `CLAUDE.md` and the
+  `settings.json` snippets. Those are the files `/adlc-init` copies into your repository, so
+  they carry the permissive license into it, and the wizard puts their notice beside them as
+  `.adlc/LICENSE` (a copy of [`templates/LICENSE`](templates/LICENSE)). Your repo's license
+  stays your own, and the files the wizard *generates* from your answers — the seeded ADR, the
+  version stamp, the scope and metrics files the lanes write — are yours outright.
+
+In short: AGPL where the pipeline itself lives, MIT for every file it copies into yours.
