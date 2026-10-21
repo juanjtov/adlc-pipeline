@@ -3,6 +3,7 @@
   "displayName": "Agentic SDLC (ADLC) Pipeline",
   "description": "A portable four-agent software-delivery pipeline (Analyst → Architect → Builder → QA/Ops) with human gates, plus a dual-mode bootstrap wizard that adapts it to any repo — greenfield PRD or mature codebase.",
   "version": "0.3.0",
+  "license": "AGPL-3.0-only AND MIT",
   "author": { "name": "juanjtov" },
   "keywords": ["sdlc", "agents", "pipeline", "adlc", "code-review", "release"]
 }
