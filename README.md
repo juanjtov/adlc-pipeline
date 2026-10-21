@@ -201,6 +201,21 @@ To work on the plugin itself, load a checkout instead — `claude --plugin-dir
 /path/to/adlc-pipeline` — and `/reload-plugins` picks up edits. That loads your working
 tree, not a release.
 
+### What leaves your machine
+
+The plugin adds no endpoint of its own. Three things talk to the network, and you control each:
+
+- **Claude Code itself**, to Anthropic, as in any session.
+- **`gh`**, to GitHub, about your repository: the scripts in `.adlc/scripts/` and the agents read
+  and write your issues, labels, comments and pull requests through it.
+- **The Actions lanes, when you turn them on:** GitHub's runners fetch the plugin from this
+  repository and run Claude Code with the `CLAUDE_CODE_OAUTH_TOKEN` you stored as a repo secret.
+
+Everything else stays local. Mission Control listens on `127.0.0.1` only, and the hook that feeds
+it posts to that address and exits at once when it is not running. Token and cost telemetry is
+opt-in and points at `localhost` unless you change the endpoint. The guard hook reads the command
+it checks and sends nothing; outside a repo that adopted ADLC it does nothing at all.
+
 ## Use
 
 In the target repository:
