@@ -72,8 +72,8 @@ names the role skill (`adlc:role-<role>`) to load first. A lane copy from 0.2.0 
 working, since its prompt already loads the role's skills and the plugin's agents list that
 skill first.
 
-Covers everything on `main` after the 0.2.0 tag (`04b7ad2`) up to and including this release
-commit: pull requests 31 to 33, the last of them merged as `6292a21` on 2026-10-20.
+Covers everything on `main` after the 0.2.0 tag (`c6dbcd7`) up to and including this release
+commit: pull requests 31 to 33, the last of them merged as `516ee27` on 2026-10-20.
 
 - **The model per agent is yours.** Each role prompt is now a plugin skill
   (`adlc:role-<role>`) and the plugin's agents are thin wrappers that preload it with the
