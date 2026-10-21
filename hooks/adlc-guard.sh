@@ -3,10 +3,13 @@
 # Decides scope cheaply, then hands the hook input (JSON on STDIN) to adlc_guard.py, which
 # blocks merges, pushes to a protected branch, force-pushes, and out-of-role gh/git commands.
 #
-# In scope  = a GitHub Actions run (the lanes), or a repo that adopted ADLC: .adlc/ or
-#             docs/adlc/CHARTER.md at or above the project dir or the session's current dir.
-#             Anywhere else this is a no-op, so enabling the plugin user-wide never touches an
-#             unrelated repo.
+# In scope  = a GitHub Actions run (the lanes), or a repo that adopted ADLC: a marker that only
+#             /adlc-init writes — .adlc/scripts/, .adlc/VERSION or docs/adlc/CHARTER.md — at or
+#             above the project dir or the session's current dir (above, so a session started in
+#             a subdirectory of an adopted repo stays guarded). A bare .adlc/ directory is NOT a
+#             marker: Mission Control keeps its state in ~/.adlc/mission-control, and through
+#             0.3.0 that put every repo under the home directory in scope. Anywhere else this is
+#             a no-op, so enabling the plugin user-wide never touches an unrelated repo.
 # Exit 2 blocks the tool call; exit 0 defers to the normal permission flow. Claude Code treats
 # every other exit code as a non-blocking error and runs the command anyway, so in scope this
 # fails CLOSED: no python3, or a python3 that cannot run the guard, blocks.
@@ -17,7 +20,7 @@ here="${BASH_SOURCE[0]%/*}"
 adopted() { # adopted <dir> — is <dir>, or a directory above it, an ADLC repo?
   local d="$1"
   while [ -n "$d" ]; do
-    if [ -d "$d/.adlc" ] || [ -f "$d/docs/adlc/CHARTER.md" ]; then return 0; fi
+    if [ -d "$d/.adlc/scripts" ] || [ -f "$d/.adlc/VERSION" ] || [ -f "$d/docs/adlc/CHARTER.md" ]; then return 0; fi
     case "$d" in */*) d="${d%/*}" ;; *) d="" ;; esac
   done
   return 1

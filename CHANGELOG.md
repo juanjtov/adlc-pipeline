@@ -12,8 +12,21 @@ it differs from the installed plugin.
 Tooling refresh needed: **yes** — the RUNBOOK copy gains the Gate 2 check below, the
 `adlc-doctor.sh` copy the double-label check, the fast-lane workflow's Action Card a `Base:`
 line, and `.adlc/LICENSE` arrives (the MIT notice for the copies). Until then the copies keep
-working as they did.
+working as they did. The guard fix below needs no refresh of its own: it ships in the
+plugin's hook, which every session loads from the installed plugin, not from a copy in your repo.
 
+- **The guard hook no longer treats every repo under your home directory as adopted.** It
+  decided scope by looking for any `.adlc/` directory at or above the project, and Mission
+  Control keeps its state in `~/.adlc/mission-control`: on a machine that had opened Mission
+  Control once, the guard blocked merges and pushes to `main` in every repository under the
+  home directory, adopted or not. It now looks for a marker only `/adlc-init` writes —
+  `.adlc/scripts/`, `.adlc/VERSION` or `docs/adlc/CHARTER.md` — still at or above the project,
+  so a session started in a subdirectory of an adopted repo stays guarded, and the Actions
+  lanes stay always in scope. A repo set up by hand with a bare `.adlc/` folder and no charter
+  is no longer in scope; the wizard has written the charter since the first release. A repo
+  that was guarded only through an `.adlc/` directory above it (this plugin's own checkout,
+  on a machine that had opened Mission Control) needs one of the three markers, or the deny
+  rules from `templates/settings.deny.json` in its `.claude/settings.json`, to stay guarded.
 - **Gate 2 checks the PR is not behind its base before the merge** (issue 40). Two PRs that
   were each green on their own head made `main` red once both were in: the second was
   behind, and a private Free-plan repo cannot require branches to be up to date. The

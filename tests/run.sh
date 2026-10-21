@@ -1500,11 +1500,16 @@ print(json.dumps(d))' "$@"
   before=$pass; before_fail=$fail
   . "$ROOT/tests/guard-cases.sh"
   [ "$fail" -eq "$before_fail" ] && printf '  ✓ %s command cases (see tests/guard-cases.sh)\n' "$((pass-before))"
-  # scope: a no-op outside CI unless the repo adopted ADLC; fails CLOSED without python3.
+  # scope: a no-op outside CI unless the repo adopted ADLC — a marker only /adlc-init writes
+  # (.adlc/scripts/, .adlc/VERSION, docs/adlc/CHARTER.md) at or above the project dir; a bare
+  # .adlc/ directory is not one, since Mission Control keeps its state in ~/.adlc/mission-control
+  # and the walk-up reaches the home directory. Fails CLOSED without python3.
   # Run from a directory that is NOT an ADLC repo, with the CI marker unset, so the result
   # does not depend on where (or under which runner) this suite itself runs.
   M="$(hook_json - "$GR/feat" 'gh pr merge 5')"
-  mkdir -p "$GR/adopted/.adlc" "$GR/adopted/sub/dir" "$GR/chartered/docs/adlc" "$GR/plain" "$GR/fakepy" "$GR/plug in/hooks"; : > "$GR/chartered/docs/adlc/CHARTER.md"
+  mkdir -p "$GR/adopted/.adlc/scripts" "$GR/adopted/sub/dir" "$GR/chartered/docs/adlc" "$GR/versioned/.adlc" "$GR/bare/.adlc" \
+           "$GR/home/.adlc/mission-control" "$GR/home/plain" "$GR/plain" "$GR/fakepy" "$GR/plug in/hooks"
+  : > "$GR/chartered/docs/adlc/CHARTER.md"; echo 0.3.0 > "$GR/versioned/.adlc/VERSION"
   local_hook() { # <project dir | -> [ENV=val …] — the launcher as a local session runs it, from $GR/plain
     local proj="$1"; shift
     if [ "$proj" = - ]; then ( cd "$GR/plain" && printf '%s' "$M" | env -u GITHUB_ACTIONS -u CLAUDE_PROJECT_DIR "$@" bash "$H" ) >/dev/null 2>&1
@@ -1512,9 +1517,12 @@ print(json.dumps(d))' "$@"
   }
   local_hook "$GR/plain";            check 0 "no-op in a repo that has not adopted ADLC" $?
   local_hook -;                      check 0 "…also with no project dir at all" $?
-  local_hook "$GR/adopted";          check 2 "active locally when .adlc/ exists" $?
+  local_hook "$GR/home/plain";       check 0 "…and under a home directory that holds .adlc/mission-control (Mission Control's state)" $?
+  local_hook "$GR/bare";             check 0 "…and where a bare .adlc/ directory is the only candidate marker" $?
+  local_hook "$GR/adopted";          check 2 "active locally when .adlc/scripts/ exists" $?
   local_hook "$GR/adopted/sub/dir";  check 2 "active from a subdirectory of an ADLC repo" $?
-  local_hook "$GR/chartered";        check 2 "active locally when docs/adlc/CHARTER.md exists" $?
+  local_hook "$GR/versioned";        check 2 "active locally when .adlc/VERSION exists" $?
+  local_hook "$GR/chartered";        check 2 "active locally when only docs/adlc/CHARTER.md exists (an adopter older than 0.2.0)" $?
   ( cd "$GR/adopted/sub/dir" && printf '%s' "$M" | env -u GITHUB_ACTIONS CLAUDE_PROJECT_DIR="$GR/plain" bash "$H" ) >/dev/null 2>&1
   check 2 "active when the session has moved INTO an ADLC repo (its project dir is elsewhere)" $?
   printf '%s' "$M" | env -i GITHUB_ACTIONS=true PATH=/nonexistent /bin/bash "$H" >/dev/null 2>&1;               check 2 "fails closed in scope when python3 is missing" $?
