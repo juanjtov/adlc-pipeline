@@ -183,8 +183,12 @@ jobs:
 
       - name: Advance to Gate 2 or hand to the fix loop
         if: steps.cap.outputs.eligible == 'true'
+        env:
+          BASE_REF: ${{ github.base_ref }}
         run: |
           chmod +x .adlc/scripts/adlc-verdict.sh
+          # The checkout is the PR's merge ref: its first parent is the base tip this review ran on.
+          base_line="$BASE_REF @ $(git rev-parse --short HEAD^1 2>/dev/null || echo unknown) (the base this review ran on)"
           adv=$(gh pr view "$PR" --json comments --jq '.comments[].body' | .adlc/scripts/adlc-verdict.sh ADLC-ADV)
           echo "adversarial=$adv"
           if [ "$adv" = "PASS" ]; then
@@ -192,7 +196,7 @@ jobs:
             if [ -n "${{ steps.link.outputs.issue }}" ]; then
               gh issue edit "${{ steps.link.outputs.issue }}" --remove-label stage:fast --add-label gate:deploy || true
             fi
-            gh pr comment "$PR" --body $'## Proposed Action Card — Gate 2 (fast lane)\nAction:     merge PR #'"$PR"$' to main\nRisk:       low — trivial change, within the fast-lane cap (the ADLC diff-scope check on this PR confirms it from the default branch), adversarial + security review PASS\nEvidence:   see the review comment (PASS) and the CI checks on this PR\nMigrations: none (a migration would have forced the full pipeline)\nRollback:   revert the merge commit\nAwaiting:   Principal approval'
+            gh pr comment "$PR" --body $'## Proposed Action Card — Gate 2 (fast lane)\nAction:     merge PR #'"$PR"$' to main\nRisk:       low — trivial change, within the fast-lane cap (the ADLC diff-scope check on this PR confirms it from the default branch), adversarial + security review PASS\nEvidence:   see the review comment (PASS) and the CI checks on this PR\nBase:       '"$base_line"$'\nMigrations: none (a migration would have forced the full pipeline)\nRollback:   revert the merge commit\nAwaiting:   Principal approval'
           else
             gh pr edit "$PR" --add-label "adlc:changes-requested" || true
             echo "Adversarial review requested changes → fix loop runs (adlc-fix.yml)."
