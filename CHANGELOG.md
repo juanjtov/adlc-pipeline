@@ -23,7 +23,10 @@ plugin's hook, which every session loads from the installed plugin, not from a c
   `.adlc/scripts/`, `.adlc/VERSION` or `docs/adlc/CHARTER.md` — still at or above the project,
   so a session started in a subdirectory of an adopted repo stays guarded, and the Actions
   lanes stay always in scope. A repo set up by hand with a bare `.adlc/` folder and no charter
-  is no longer in scope; the wizard has written the charter since the first release.
+  is no longer in scope; the wizard has written the charter since the first release. A repo
+  that was guarded only through an `.adlc/` directory above it (this plugin's own checkout,
+  on a machine that had opened Mission Control) needs one of the three markers, or the deny
+  rules from `templates/settings.deny.json` in its `.claude/settings.json`, to stay guarded.
 - **Gate 2 checks the PR is not behind its base before the merge** (issue 40). Two PRs that
   were each green on their own head made `main` red once both were in: the second was
   behind, and a private Free-plan repo cannot require branches to be up to date. The
