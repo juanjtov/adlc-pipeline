@@ -9,13 +9,14 @@ it differs from the installed plugin.
 
 ## Unreleased (on `main` after 0.3.0)
 
-Tooling refresh needed: **no**.
+Tooling refresh needed: **no** — a re-run only adds `.adlc/LICENSE`, the MIT notice for the
+copies already in your repo; nothing they do changes.
 
-- **Licensed.** The plugin is under the AGPL v3 (`LICENSE-AGPL`); everything under
-  `templates/` — the files `/adlc-init` copies into a repo — is under the MIT license
-  (`LICENSE-MIT`, with a copy at `templates/LICENSE` so the copies carry the notice). The
-  README's Licensing section draws the line, and `plugin.json` declares
-  `AGPL-3.0-only AND MIT`.
+- **Licensed.** Everything outside `templates/` is under the AGPL v3 (`LICENSE-AGPL`);
+  everything under `templates/` — the files `/adlc-init` copies into a repo — is under the MIT
+  license (`LICENSE-MIT`). `/adlc-init` now copies that notice to `.adlc/LICENSE` beside the
+  scripts, so the copies carry it as MIT requires. The README's Licensing section draws the
+  line, and `plugin.json` declares `AGPL-3.0-only AND MIT`.
 
 ## 0.3.0
 
