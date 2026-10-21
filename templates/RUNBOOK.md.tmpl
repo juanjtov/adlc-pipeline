@@ -40,8 +40,8 @@ directly to a fresh issue (your own triage) or after the Analyst recommends FAST
    is enforced again on the real diff — an over-cap/sensitive diff goes to `stage:design`.
 4. On a PASS verdict, move the issue to `gate:deploy`
    (`gh issue edit <n> --remove-label stage:fast --add-label gate:deploy` — one state at a
-   time, as the fast-lane workflow does). **Gate 2 (you):** the same BEHIND check and merge
-   as the full lane's Gate 2 below. On CHANGES, hand it back to the Builder (the same fix
+   time, as the fast-lane workflow does). **Gate 2 (you):** the same behind-the-base check
+   and merge as the full lane's Gate 2 below. On CHANGES, hand it back to the Builder (the same fix
    cycle as the full lane).
 
 ## Stage 2 — Design (Architect, duty 1)
@@ -83,13 +83,16 @@ directly to a fresh issue (your own triage) or after the Analyst recommends FAST
 
 1. Review the Action Card (its `Base:` line says which commit of the base branch the QA
    battery ran against).
-2. Check the PR is not behind the base branch:
-   `gh pr view <n> --json mergeStateStatus -q .mergeStateStatus`. On `BEHIND`, merge the base
-   branch into the PR branch (or ask the Builder to), wait for the checks to go green on the
-   new head, and only then merge. Two PRs that are each green on their own head can still make
-   the base branch red once both are in, and branch protection's "require branches to be up to
-   date" is not available on a private Free-plan repo — this check is the stand-in. Where you
-   merge several QA-approved PRs in one sitting, it is the second one that this catches.
+2. Check the PR is not behind the base branch — how many base commits its head lacks:
+   `gh api "repos/{owner}/{repo}/compare/$(gh pr view <n> --json baseRefName,headRefName -q '.baseRefName + "..." + .headRefName')" --jq .behind_by`
+   (a head on a fork is `<owner>:<branch>`). On anything but `0`, merge the base branch into
+   the PR branch (or ask the Builder to), wait for the checks to go green on the new head, and
+   only then merge. Two PRs that are each green on their own head can still make the base
+   branch red once both are in, and branch protection's "require branches to be up to date"
+   is not available on a private Free-plan repo — this check is the stand-in. Where you merge
+   several QA-approved PRs in one sitting, it is the second one that this catches. Do not read
+   `gh pr view --json mergeStateStatus` for this: it says `BEHIND` only where that rule is on,
+   and a behind PR without it reads `CLEAN` or `UNSTABLE`.
 3. Merge the PR (agents can't — the plugin's guard hook blocks `gh pr merge`).
 4. Deploy per the `release-ops` skill. Destructive migration? Separate, approved, never
    coupled with the deploy.

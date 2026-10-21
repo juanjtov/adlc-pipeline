@@ -16,12 +16,14 @@ working as they did.
 
 - **Gate 2 checks the PR is not behind its base before the merge** (issue 40). Two PRs that
   were each green on their own head made `main` red once both were in: the second was
-  `BEHIND`, and a private Free-plan repo cannot require branches to be up to date. The
-  RUNBOOK's Gate 2 now runs `gh pr view <n> --json mergeStateStatus -q .mergeStateStatus`
-  first; on `BEHIND` the base is merged into the PR branch and the checks must go green on
-  the new head before the merge. The Action Card format (`release-ops` skill, and the fast
-  lane's card) gains a `Base:` line naming the base-branch commit the QA battery ran against,
-  so the gap is visible when the base has moved. The RUNBOOK's fast lane now moves the issue
+  behind, and a private Free-plan repo cannot require branches to be up to date. The
+  RUNBOOK's Gate 2 now asks the compare API how many base commits the PR lacks
+  (`gh api "repos/{owner}/{repo}/compare/<base>...<head>" --jq .behind_by`) first; on
+  anything but 0 the base is merged into the PR branch and the checks must go green on the
+  new head before the merge. (`mergeStateStatus` is not read: it says `BEHIND` only where the
+  up-to-date rule is on.) The Action Card format (`release-ops` skill, and the fast lane's
+  card) gains a `Base:` line naming the base-branch commit the QA battery ran against, so the
+  gap is visible when the base has moved. The RUNBOOK's fast lane now moves the issue
   from `stage:fast` to `gate:deploy` in one `gh issue edit`, as the fast-lane workflow does.
 - **The doctor lists open issues and PRs carrying two state-machine labels** (issue 38). In
   its gh-backed section, `adlc-doctor.sh` now flags every open issue or PR with more than one

@@ -399,6 +399,7 @@ dl "[$(L 13 bug stage:qa lane:fast)]" "[$(L 30 adlc:changes-requested stage:buil
 check 0 "labels: one stage:/gate: label each (other labels do not count) passes" $?
 eq yes "…and says so" "$(says_gate "no open issue or PR carries more than one stage:/gate: label")"
 eq 2 "…from one issue list and one pr list call" "$(grep -cE '^(issue|pr) list ' "$FIX/fx/calls")"
+eq 2 "…each asking for open ones only (a closed issue is out of the state machine)" "$(grep -cE '^(issue|pr) list --state open ' "$FIX/fx/calls")"
 dl "[$(L 12 stage:qa gate:deploy),$(L 13 bug stage:qa lane:fast),$(L 129 stage:build gate:deploy stage:fast)]" "[$(L 30 stage:build stage:qa)]"
 check 1 "labels: an open issue or PR with two stage:/gate: labels is flagged" $?
 eq yes "…naming the issue with its state labels" "$(says_gate "issue #12: stage:qa gate:deploy")"
@@ -1424,7 +1425,10 @@ eq "$(grep -c 'Invoke the \*\*' "$RB")" "RUNBOOK: every invoke line names one of
 for a in $ROLES; do grep -q "adlc-$a\.md" "$RB" && ok "RUNBOOK says where adlc-$a's model is" || bad "RUNBOOK must name .claude/agents/adlc-$a.md"; done
 grep -q '/adlc-model' "$RB" && ok "RUNBOOK points at /adlc-model" || bad "RUNBOOK: must point at /adlc-model"
 # Gate 2 (issue 40): two PRs each green on their own head made main red; the Principal checks for BEHIND first
-grep -q 'gh pr view <n> --json mergeStateStatus -q .mergeStateStatus' "$RB" && ok "RUNBOOK Gate 2 checks mergeStateStatus before the merge" || bad "RUNBOOK Gate 2 must check mergeStateStatus"
+# mergeStateStatus says BEHIND only where the up-to-date rule is on (a behind PR on a Free-plan private repo reads CLEAN/UNSTABLE), so the recipe asks the compare API
+grep -q 'gh api "repos/{owner}/{repo}/compare/$(gh pr view <n> --json baseRefName,headRefName' "$RB" && ok "RUNBOOK Gate 2 asks the compare API how far behind the PR is, before the merge" || bad "RUNBOOK Gate 2 must ask the compare API (behind_by)"
+grep -q -- '--jq .behind_by' "$RB" && ok "…reading behind_by" || bad "RUNBOOK Gate 2 must read behind_by"
+grep -qE 'On `BEHIND`' "$RB" && bad "RUNBOOK Gate 2 must not key on mergeStateStatus BEHIND" || ok "…and does not key on mergeStateStatus BEHIND"
 grep -q 'wait for the checks to go green on the' "$RB" && ok "…and waits for green checks on the new head" || bad "RUNBOOK Gate 2 must wait for the checks after merging the base"
 grep -q '^Base: ' "$ROOT/templates/skills/release-ops.SKILL.md.tmpl" && ok "Action Card records the base the battery ran against" || bad "release-ops card needs a Base: line"
 grep -q 'remove-label stage:fast --add-label gate:deploy' "$RB" && ok "RUNBOOK fast lane moves the issue to gate:deploy in one call" || bad "RUNBOOK fast lane must remove stage:fast when adding gate:deploy"
