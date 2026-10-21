@@ -217,8 +217,8 @@ each:
 Everything else stays local. Mission Control's page is served on `127.0.0.1` only, and the hook
 that feeds it posts to that address and exits at once when Mission Control's marker file is
 absent. Token and cost telemetry is opt-in and points at `localhost` unless you change the
-endpoint. The guard hook reads the command it checks and sends nothing; it acts only where an
-`.adlc/` directory or `docs/adlc/CHARTER.md` sits at or above your project, and in the Actions
+endpoint. The guard hook reads the command it checks and sends nothing; it acts only in a repo
+that adopted ADLC (one that `/adlc-init` set up, at or above your project) and in the Actions
 lanes. Elsewhere it is a no-op.
 
 ## Use
