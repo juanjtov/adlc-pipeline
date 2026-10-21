@@ -11,7 +11,10 @@ it differs from the installed plugin.
 
 Tooling refresh needed: **yes** — `/adlc-init` now writes this repo's copies of the five
 agents and a RUNBOOK that invokes them; until then the RUNBOOK copy in your repo still names
-the plugin's agents, which keep working.
+the plugin's agents, which keep working. The lane workflows also changed: each prompt now
+names the role skill (`adlc:role-<role>`) to load first. A lane copy from 0.2.0 keeps
+working, since its prompt already loads the role's skills and the plugin's agents list that
+skill first.
 
 Covers everything on `main` after the 0.2.0 tag (`04b7ad2`) up to and including this release
 commit: pull requests 31 to 33, the last of them merged as `6292a21` on 2026-10-20.
