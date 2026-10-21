@@ -45,6 +45,7 @@ Environments: {{ENVIRONMENTS}}
 Action:     <merge PR #N to main · deploy {{DEPLOY_TARGET}} · run migration>
 Risk:       low|medium|high + one-line rationale
 Evidence:   test summary line · eval pass rate · security verdict · CI links
+Base:       <base branch> @ <commit the battery ran against, e.g. main @ abc1234>
 Migrations: none | additive | DESTRUCTIVE (details + backup/rollback plan)
 Rollback:   {{ROLLBACK_STEP}}
 Awaiting:   Principal approval

@@ -28,8 +28,9 @@ the verdict is your findings comment, or `gate:deploy` plus the Action Card (Dut
 ## Duty 2 — Gate 2 proposal
 
 On approval, add `gate:deploy` and post a **Proposed Action Card** (format in `release-ops`:
-action, risk, evidence, migrations none|additive|DESTRUCTIVE, rollback). **You do not merge
-and you do not deploy** — the Principal does.
+action, risk, evidence, base = the base-branch commit the battery ran against, migrations
+none|additive|DESTRUCTIVE, rollback). **You do not merge and you do not deploy** — the
+Principal does.
 
 ## Duty 3 — Post-deploy ops (trigger: "deploy N happened")
 

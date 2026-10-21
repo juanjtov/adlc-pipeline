@@ -192,7 +192,7 @@ jobs:
             if [ -n "${{ steps.link.outputs.issue }}" ]; then
               gh issue edit "${{ steps.link.outputs.issue }}" --remove-label stage:fast --add-label gate:deploy || true
             fi
-            gh pr comment "$PR" --body $'## Proposed Action Card — Gate 2 (fast lane)\nAction:     merge PR #'"$PR"$' to main\nRisk:       low — trivial change, within the fast-lane cap (the ADLC diff-scope check on this PR confirms it from the default branch), adversarial + security review PASS\nEvidence:   see the review comment (PASS) and the CI checks on this PR\nMigrations: none (a migration would have forced the full pipeline)\nRollback:   revert the merge commit\nAwaiting:   Principal approval'
+            gh pr comment "$PR" --body $'## Proposed Action Card — Gate 2 (fast lane)\nAction:     merge PR #'"$PR"$' to main\nRisk:       low — trivial change, within the fast-lane cap (the ADLC diff-scope check on this PR confirms it from the default branch), adversarial + security review PASS\nEvidence:   see the review comment (PASS) and the CI checks on this PR\nBase:       ${{ github.event.pull_request.base.ref }} @ ${{ github.event.pull_request.base.sha }} (the base when this review ran)\nMigrations: none (a migration would have forced the full pipeline)\nRollback:   revert the merge commit\nAwaiting:   Principal approval'
           else
             gh pr edit "$PR" --add-label "adlc:changes-requested" || true
             echo "Adversarial review requested changes → fix loop runs (adlc-fix.yml)."

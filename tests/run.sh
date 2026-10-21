@@ -328,7 +328,9 @@ mkdir -p "$FIX/.adlc/scripts"; : > "$FIX/.adlc/scripts/adlc-verdict.sh"
 doctor; check 0 "…and passes once it is" $?
 lane 'jobs:\n  t:\n    steps:\n      # .adlc/scripts/adlc-gone.sh used to run here\n      - run: echo hi\n'
 doctor; check 0 "a script named only in a comment is not required" $?
-# the merge gate — asked of a stub gh that answers each lookup from a file (no file = that call fails)
+# the merge gate — asked of a stub gh that answers each lookup from a file (no file = that call fails);
+# the double-label check — `issue list` / `pr list` serve $DFX/issues and $DFX/prs (no file = an
+# empty list, a `fail-<name>` file = that call fails) through the call's own --jq, as the real gh does
 mkdir -p "$FIX/bin"
 cat > "$FIX/bin/gh" <<'SH'
 #!/usr/bin/env bash
@@ -339,9 +341,15 @@ echo "$*" >> "$DFX/calls"
 : "${DFX_ROOT:?fake gh needs DFX_ROOT}"
 here() { [ "$(pwd -P)" = "$(cd "$DFX_ROOT" && pwd -P)" ]; }
 case "$*" in
-  "auth status"*) exit 0 ;;
+  "auth status"*) [ -e "$DFX/noauth" ] && exit 1; exit 0 ;;
   "label list"*)  here && printf '%s\n' stage:intake gate:stories stage:design stage:build stage:qa gate:deploy; exit 0 ;;
-  "repo view"*|"api "*) here || { echo "fake gh: asked from $PWD, not the fixture root" >&2; exit 1; } ;;
+  "repo view"*|"api "*|"issue list"*|"pr list"*) here || { echo "fake gh: asked from $PWD, not the fixture root" >&2; exit 1; } ;;
+esac
+case "$1 $2" in
+  "issue list"|"pr list")
+    k="${1}s"; [ -e "$DFX/fail-$k" ] && { echo '{"message":"Server Error"}' >&2; exit 1; }
+    f=.; while [ $# -gt 0 ]; do [ "$1" = "--jq" ] && f="$2"; shift; done
+    if [ -e "$DFX/$k" ]; then jq -r "$f" "$DFX/$k"; else echo '[]' | jq -r "$f"; fi; exit $? ;;
 esac
 case "$*" in
   "repo view"*)                 k=default ;;
@@ -378,6 +386,36 @@ eq yes "…and says what the tripwire cannot do" "$(says_gate "cannot stop a mer
 gate false - none;           check 1 "gate: not protected and no tripwire is flagged" $?
 eq yes "…as no merge gate" "$(says_gate "no merge gate")"
 gate - - -;                  check 1 "gate: a failed lookup is flagged, not passed" $?
+# the double-label check (issue 38): one state per issue — `issue list` and `pr list` through the stub
+dl() { # <issues json | -> <prs json | -> : seeds a sound gate fixture, then the lists
+  gate true 1 none
+  [ "$1" = - ] || printf '%s' "$1" > "$FIX/fx/issues"
+  [ "$2" = - ] || printf '%s' "$2" > "$FIX/fx/prs"
+  : > "$FIX/fx/calls"
+  GATE=$(DFX="$FIX/fx" DFX_ROOT="$FIX" PATH="$FIX/bin:$PATH" bash "$S/adlc-doctor.sh" "$FIX" 2>&1)
+}
+L() { jq -cn --argjson n "$1" '{number: $n, labels: ($ARGS.positional | map({name: .}))}' --args "${@:2}"; }
+dl "[$(L 13 bug stage:qa lane:fast)]" "[$(L 30 adlc:changes-requested stage:build)]"
+check 0 "labels: one stage:/gate: label each (other labels do not count) passes" $?
+eq yes "…and says so" "$(says_gate "no open issue or PR carries more than one stage:/gate: label")"
+eq 2 "…from one issue list and one pr list call" "$(grep -cE '^(issue|pr) list ' "$FIX/fx/calls")"
+dl "[$(L 12 stage:qa gate:deploy),$(L 13 bug stage:qa lane:fast),$(L 129 stage:build gate:deploy stage:fast)]" "[$(L 30 stage:build stage:qa)]"
+check 1 "labels: an open issue or PR with two stage:/gate: labels is flagged" $?
+eq yes "…naming the issue with its state labels" "$(says_gate "issue #12: stage:qa gate:deploy")"
+eq yes "…all three of a triple" "$(says_gate "issue #129: stage:build gate:deploy stage:fast")"
+eq yes "…and the PR" "$(says_gate "pr #30: stage:build stage:qa")"
+eq no  "…not the clean one" "$(says_gate "#13")"
+eq yes "…with the fix: keep the latest, remove the rest" "$(says_gate "keep the label it reached last and remove the rest — gh issue edit <n> --remove-label <label>")"
+dl - -;                      check 0 "labels: no open issue or PR (empty lists) passes" $?
+dl "[$(L 12 stage:qa gate:deploy)]" -; touch "$FIX/fx/fail-issues"
+GATE=$(DFX="$FIX/fx" DFX_ROOT="$FIX" PATH="$FIX/bin:$PATH" bash "$S/adlc-doctor.sh" "$FIX" 2>&1); check 1 "labels: a failed issue listing is flagged, not read as clean" $?
+eq yes "…as incomplete" "$(says_gate "could not list open issues from gh")"
+eq no  "…and claims no pass" "$(says_gate "no open issue or PR carries")"
+dl "[$(L 12 stage:qa gate:deploy)]" -; touch "$FIX/fx/noauth"; : > "$FIX/fx/calls"
+GATE=$(DFX="$FIX/fx" DFX_ROOT="$FIX" PATH="$FIX/bin:$PATH" bash "$S/adlc-doctor.sh" "$FIX" 2>&1); check 0 "labels: gh not authenticated — the check is skipped, not failed" $?
+eq yes "…and says so" "$(says_gate "skipped label check (gh not available/authenticated)")"
+eq 0 "…no listing is made" "$(grep -cE '^(issue|pr) list ' "$FIX/fx/calls")"
+rm -f "$FIX/fx/noauth" "$FIX/fx/fail-issues" "$FIX/fx/issues" "$FIX/fx/prs"
 gate true 1 none; rm "$FIX/fx/default"
 DFX="$FIX/fx" DFX_ROOT="$FIX" PATH="$FIX/bin:$PATH" bash "$S/adlc-doctor.sh" "$FIX" >/dev/null 2>&1; check 1 "gate: an unreadable default branch is flagged" $?
 lane 'jobs:\n  t:\n    steps:\n      - run: echo hi\n'   # no lane runs an agent: nothing to gate
@@ -1385,6 +1423,11 @@ eq "" "RUNBOOK invokes no agent by a bare or plugin name" "$(grep -oE 'Invoke th
 eq "$(grep -c 'Invoke the \*\*' "$RB")" "RUNBOOK: every invoke line names one of the five copies" "$(grep -cE 'Invoke the \*\*adlc-(product-analyst|architect|builder|adversarial-reviewer|qa-release-ops)\*\* ' "$RB")"
 for a in $ROLES; do grep -q "adlc-$a\.md" "$RB" && ok "RUNBOOK says where adlc-$a's model is" || bad "RUNBOOK must name .claude/agents/adlc-$a.md"; done
 grep -q '/adlc-model' "$RB" && ok "RUNBOOK points at /adlc-model" || bad "RUNBOOK: must point at /adlc-model"
+# Gate 2 (issue 40): two PRs each green on their own head made main red; the Principal checks for BEHIND first
+grep -q 'gh pr view <n> --json mergeStateStatus -q .mergeStateStatus' "$RB" && ok "RUNBOOK Gate 2 checks mergeStateStatus before the merge" || bad "RUNBOOK Gate 2 must check mergeStateStatus"
+grep -q 'wait for the checks to go green on the' "$RB" && ok "…and waits for green checks on the new head" || bad "RUNBOOK Gate 2 must wait for the checks after merging the base"
+grep -q '^Base: ' "$ROOT/templates/skills/release-ops.SKILL.md.tmpl" && ok "Action Card records the base the battery ran against" || bad "release-ops card needs a Base: line"
+grep -q 'remove-label stage:fast --add-label gate:deploy' "$RB" && ok "RUNBOOK fast lane moves the issue to gate:deploy in one call" || bad "RUNBOOK fast lane must remove stage:fast when adding gate:deploy"
 # /adlc-model
 CM="$ROOT/commands/adlc-model.md"
 [ -f "$CM" ] && ok "commands/adlc-model.md exists" || bad "commands/adlc-model.md missing"

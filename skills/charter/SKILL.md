@@ -130,6 +130,7 @@ fast:  stage:intake → (triage) → stage:fast ──────────�
 Action:     <merge PR #N to main · deploy · run migration>
 Risk:       low|medium|high + one-line rationale
 Evidence:   test summary line · eval pass rate · security verdict · CI links
+Base:       <base branch> @ <commit the battery ran against>
 Migrations: none | additive | DESTRUCTIVE (details + backup/rollback plan)
 Rollback:   <exact step to restore the previous good state>
 Awaiting:   Principal approval
