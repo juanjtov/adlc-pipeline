@@ -7,7 +7,13 @@ because those are frozen copies that only change on a refresh. Your repo's `.adl
 says which release its copies came from, and `.adlc/scripts/adlc-doctor.sh` tells you when
 it differs from the installed plugin.
 
-## Unreleased (on `main` after 0.3.0)
+## 0.3.1
+
+Covers everything on `main` after the v0.3.0 tag (`a8ddd97`) up to and including this release
+commit, cut on 2026-10-21: pull request 42 (the 0.3.0 marketplace pin) and pull requests 43
+to 49, the last of them merged as `c1a9683` on 2026-10-21. The reason to ship it now is the
+guard fix below: on a machine that had opened Mission Control, 0.3.0's guard blocks merges and
+pushes to `main` in every repository under the home directory.
 
 Tooling refresh needed: **yes** — the RUNBOOK copy gains the Gate 2 check below, the
 `adlc-doctor.sh` copy the double-label check, the fast-lane workflow's Action Card a `Base:`
@@ -51,6 +57,11 @@ plugin's hook, which every session loads from the installed plugin, not from a c
   license (`LICENSE-MIT`). `/adlc-init` now copies that notice to `.adlc/LICENSE` beside the
   scripts, so the copies carry it as MIT requires. The README's Licensing section draws the
   line, and `plugin.json` declares `AGPL-3.0-only AND MIT`.
+- **Docs.** The README's new "What leaves your machine" section says what Claude Code, `gh`
+  and the Actions lanes send out and what stays local, and names the three guard markers and
+  where they may sit. `tests/run.sh` prints a note, not a failure, when the marketplace `ref`
+  is not `v<version>` of `plugin.json`: the release recipe tags before it moves the ref, so the
+  release PR's own CI runs one tag behind by design.
 
 ## 0.3.0
 
