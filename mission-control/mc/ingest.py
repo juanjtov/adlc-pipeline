@@ -36,8 +36,21 @@ def _git(cwd, *args):
     try:
         out = subprocess.run(['git', '-C', cwd] + list(args), capture_output=True, text=True, timeout=5)
         return out.stdout.strip() if out.returncode == 0 else ''
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, subprocess.SubprocessError, ValueError):   # ValueError: a NUL byte in the path
         return ''
+
+
+def adopted(cwd):
+    """Whether a working directory is in a repo /adlc-init set up: the same rule as the guard hook (hooks/adlc-guard.sh),
+    one of the wizard's markers at or above it. A bare .adlc/ folder is not one."""
+    d = os.path.abspath(cwd) if cwd else ''
+    while d:
+        if os.path.isdir(os.path.join(d, '.adlc', 'scripts')) or os.path.isfile(os.path.join(d, '.adlc', 'VERSION')) \
+                or os.path.isfile(os.path.join(d, 'docs', 'adlc', 'CHARTER.md')):
+            return True
+        up = os.path.dirname(d)
+        d = up if up != d else ''
+    return False
 
 
 _REMOTE_RE = re.compile(r'[:/]([^/:@\s]+)/([^/:@\s]+)$')
@@ -85,7 +98,11 @@ class Ingest:
             if child:
                 self.handed.setdefault((session, child), []).append((now, _text(tool_input.get('prompt'))))
         if not station:
-            return self._end_session(session, now) if name == 'SessionEnd' else False
+            if name == 'SessionEnd':
+                return self._end_session(session, now)
+            if name == 'SessionStart':
+                return self._session_started(_text(ev.get('cwd')))
+            return False
 
         agent_id = str(ev['agent_id']) if ev.get('agent_id') else None
         run_id = session + (':' + agent_id if agent_id else '')
@@ -133,6 +150,17 @@ class Ingest:
             self.store.x('UPDATE steps SET ended = ?, ok = 1 WHERE run = ? AND ended IS NULL', (now, run_id))
         elif name == 'SessionEnd':
             self._end_session(session, now)
+        return True
+
+    def _session_started(self, cwd):
+        """A Claude Code session opened somewhere. In an adopted repo that puts the repo on the page's menu, so it is
+        there before any agent has run in it. Anywhere else nothing is kept, not even the path."""
+        if not adopted(cwd):
+            return False
+        repo, _ = self.repos.lookup(cwd)
+        if not repo or repo in self.store.repos():
+            return False
+        self.on_repo(repo)
         return True
 
     def _take_handed(self, session, station, now):
