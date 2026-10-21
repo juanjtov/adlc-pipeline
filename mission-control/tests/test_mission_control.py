@@ -221,6 +221,8 @@ class Intake(unittest.TestCase):
                 open(os.path.join(repo, *marker), 'w').close()
                 self.assertTrue(ingest.adopted(repo), marker)
             self.assertFalse(ingest.adopted(''))
+            # a path git cannot take is refused by the lookup, not raised to the request handler
+            self.assertFalse(ingest.Ingest(Store(), on_repo=self.store.add_repo).hook(fx.hook('SessionStart', agent=None, cwd=inside + '\0x')))
         finally:
             shutil.rmtree(root)
 
@@ -870,6 +872,9 @@ class Launcher(unittest.TestCase):
             demo = self.start(tempfile.mkdtemp(), demo_port, '--demo')
             try:
                 self.wait_for(lambda: server.running_at(demo_port), 'the demo')
+                live = self.start(tempfile.mkdtemp(), demo_port)                     # a live start on the demo's port must not call its data live
+                out, _ = live.communicate(timeout=10)
+                self.assertIn('already running at http://localhost:%d with demo data. Stop it first' % demo_port, out)
             finally:
                 demo.terminate()
                 demo.communicate(timeout=10)

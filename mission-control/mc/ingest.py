@@ -36,7 +36,7 @@ def _git(cwd, *args):
     try:
         out = subprocess.run(['git', '-C', cwd] + list(args), capture_output=True, text=True, timeout=5)
         return out.stdout.strip() if out.returncode == 0 else ''
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, subprocess.SubprocessError, ValueError):   # ValueError: a NUL byte in the path
         return ''
 
 

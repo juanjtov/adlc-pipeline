@@ -242,24 +242,28 @@ def running_at(port):
         return False
 
 
-def shows(port, repo):
-    """Whether the copy at `port` has `repo` on its menu. The page falls back to its default repo for a name it
-    does not know, so a link to one would show the wrong line."""
+def state_at(port, repo):
+    """What the copy at `port` says for `repo`: its 'mode', and 'repo' as the name it will show. The page falls back
+    to its default repo for a name it does not know, so a link to one would show the wrong line."""
     try:
         with urllib.request.urlopen('http://127.0.0.1:%d/api/state?repo=%s' % (port, quote(repo, safe='/')), timeout=3) as res:
-            return json.loads(res.read()).get('repo') == repo
+            doc = json.loads(res.read())
+        return doc if isinstance(doc, dict) else {}
     except (OSError, ValueError):
-        return False
+        return {}
 
 
 def already_running(port, repo, demo, open_page, note=''):
     """Report the copy already running, point at this repo's line on it, and open that if asked."""
     url = 'http://localhost:%d' % port
     tail = '. ' + note if note else ''
+    there = state_at(port, repo)
     if demo:
         url += '/?demo=1'
         print('Mission Control is already running at ' + url + tail)
-    elif repo and shows(port, repo):
+    elif there.get('mode') == 'demo':
+        print('Mission Control is already running at %s with demo data. Stop it first to start a live copy on port %d.' % (url, port))
+    elif repo and there.get('repo') == repo:
         url += '/?repo=' + quote(repo, safe='/')
         print('Mission Control is already running and shows %s too: %s%s' % (repo, url, tail))
     elif repo:
