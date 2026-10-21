@@ -5,8 +5,9 @@
 #         every lane installs the plugin and grants its agent tools · the scripts the lanes
 #         call are installed · the project skills exist · the five project agents the RUNBOOK
 #         invokes exist, each with a model line ·
-#         and, when gh is available: the state-machine labels exist · the default branch has a
-#         merge gate (a required approving review, or at least the tripwire);
+#         and, when gh is available: the state-machine labels exist · no open issue or PR
+#         carries two of them at once · the default branch has a merge gate (a required
+#         approving review, or at least the tripwire);
 #         and, when it can find the plugin, whether .adlc/VERSION (stamped by /adlc-init)
 #         matches the plugin's version — a mismatch is a note, not a failure.
 set -uo pipefail
@@ -159,6 +160,28 @@ if [ -z "${ADLC_DOCTOR_SKIP_LABELS:-}" ] && command -v gh >/dev/null 2>&1 && gh 
   for l in stage:intake gate:stories stage:design stage:build stage:qa gate:deploy; do
     printf '%s\n' "$existing" | grep -qx "$l" || note "missing GitHub label: $l"
   done
+  # One state per issue: an issue or PR carrying two stage:/gate: labels at once is in two
+  # states, and the cycle clock, Mission Control's station view and a lane keyed on the older
+  # label each pick their own. A closed one is out of the machine, so open ones only. gh's
+  # --jq does the filtering; a listing that fails is reported, not read as clean.
+  sm='[.labels[].name | select(startswith("stage:") or startswith("gate:"))]'
+  doubles=""; listed=0
+  for kind in issue pr; do
+    if hit=$(ask "$kind" list --state open --limit 500 --json number,labels --jq ".[] | select(($sm | length) > 1) | \"$kind #\\(.number): \\($sm | join(\" \"))\""); then
+      listed=$((listed + 1))
+      [ -n "$hit" ] && doubles="${doubles}${doubles:+
+}${hit}"
+    else
+      note "could not list open ${kind}s from gh — the double-label check is incomplete"
+    fi
+  done
+  if [ -n "$doubles" ]; then
+    note "an open issue or PR carries more than one stage:/gate: label (the state machine has one state per issue):"
+    printf '%s\n' "$doubles" | sed 's/^/      /'
+    echo "    fix: keep the label it reached last and remove the rest — gh issue edit <n> --remove-label <label> (gh pr edit <n> for a PR; one --remove-label per extra label)"
+  elif [ "$listed" -eq 2 ]; then
+    ok "no open issue or PR carries more than one stage:/gate: label"
+  fi
 else
   echo "  · skipped label check (gh not available/authenticated)"
 fi

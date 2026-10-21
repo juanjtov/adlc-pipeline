@@ -9,9 +9,11 @@ it differs from the installed plugin.
 
 ## Unreleased (on `main` after 0.3.0)
 
-Tooling refresh needed: **no** — a re-run only adds `.adlc/LICENSE`, the MIT notice for the
-copies already in your repo; nothing they do changes. The guard fix below ships in the plugin's
-own hook, which every session loads from the installed plugin, not from a copy in your repo.
+Tooling refresh needed: **yes** — the RUNBOOK copy gains the Gate 2 check below, the
+`adlc-doctor.sh` copy the double-label check, the fast-lane workflow's Action Card a `Base:`
+line, and `.adlc/LICENSE` arrives (the MIT notice for the copies). Until then the copies keep
+working as they did. The guard fix below needs no refresh of its own: it ships in the
+plugin's hook, which every session loads from the installed plugin, not from a copy in your repo.
 
 - **The guard hook no longer treats every repo under your home directory as adopted.** It
   decided scope by looking for any `.adlc/` directory at or above the project, and Mission
@@ -22,7 +24,25 @@ own hook, which every session loads from the installed plugin, not from a copy i
   so a session started in a subdirectory of an adopted repo stays guarded, and the Actions
   lanes stay always in scope. A repo set up by hand with a bare `.adlc/` folder and no charter
   is no longer in scope; the wizard has written the charter since the first release.
-
+- **Gate 2 checks the PR is not behind its base before the merge** (issue 40). Two PRs that
+  were each green on their own head made `main` red once both were in: the second was
+  behind, and a private Free-plan repo cannot require branches to be up to date. The
+  RUNBOOK's Gate 2 now asks the compare API how many base commits the PR lacks
+  (`gh api "repos/{owner}/{repo}/compare/<base>...<head>" --jq .behind_by`) first; on
+  anything but 0 the base is merged into the PR branch and the checks must go green on the
+  new head before the merge. (`mergeStateStatus` is not read: it says `BEHIND` only where the
+  up-to-date rule is on.) The Action Card format (`release-ops` skill, and the fast lane's
+  card) gains a `Base:` line naming the base-branch commit the QA battery ran against, so the
+  gap is visible when the base has moved. The RUNBOOK's fast lane now moves the issue
+  from `stage:fast` to `gate:deploy` in one `gh issue edit`, as the fast-lane workflow does.
+- **The doctor lists open issues and PRs carrying two state-machine labels** (issue 38). In
+  its gh-backed section, `adlc-doctor.sh` now flags every open issue or PR with more than one
+  `stage:`/`gate:` label, prints each with its labels, and says how to fix it (keep the label
+  it reached last; `gh issue edit <n> --remove-label <label>`, `gh pr edit` for a PR). A
+  listing that fails is reported as incomplete, not read as clean. Note: under the current
+  QA role an approved issue carries `stage:qa` + `gate:deploy` until it closes, so the doctor
+  reports it while the PR waits at Gate 2 — the relabel script proposed in issue 38 is what
+  removes that pair at the source.
 - **Licensed.** Everything outside `templates/` is under the AGPL v3 (`LICENSE-AGPL`);
   everything under `templates/` — the files `/adlc-init` copies into a repo — is under the MIT
   license (`LICENSE-MIT`). `/adlc-init` now copies that notice to `.adlc/LICENSE` beside the
