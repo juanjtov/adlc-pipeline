@@ -10,10 +10,20 @@ it differs from the installed plugin.
 ## Unreleased (on `main` after 0.3.1)
 
 Tooling refresh needed: **yes** — the `adlc-log-findings.sh` copy gains the backtick-wrapped
-marker, the per-comment time and the skipped-line report below. The retro's recipe lives in
-the plugin skill, which every session loads from the installed plugin, so that part needs no
-refresh.
+marker, the per-comment time and the skipped-line report below, and the `adlc-cycle.sh` copy
+the verdict-based round count. The retro and cycle-retro recipes live in the plugin skills,
+which every session loads from the installed plugin, so those parts need no refresh.
 
+- **The cycle ledger counts fix rounds from CHANGES review verdicts too** (issue 58).
+  `adlc-cycle.sh` counted a round as an `adlc:changes-requested` label event on the issue's PR.
+  Only the Actions review lane applies that label; a repo that runs the pipeline by hand, with
+  subagents from a Principal's session, never does, and on such a host `cycle.jsonl` read 0
+  rounds for all 55 issues of a month while 7 of its 35 merged PRs drew a CHANGES verdict. A
+  PR's rounds are now the larger of its label events and its `ADLC-ADV: CHANGES` /
+  `ADLC-ARCH: CHANGES` verdict comments counted per marker (a comment's last marker is its
+  verdict, as `adlc-metrics.sh` reads it); the larger, not the sum, because the lane puts the
+  label on the same verdict. The cycle-retro skill says the figure is a floor: a round closed
+  as PASS-with-findings leaves no marker. One `gh pr view` call more per linked PR.
 - **The finding ledger no longer drops a third of the findings** (issue 27). Measured on a host
   with 144 markers in its PR threads, the materialized ledger held 94. Three causes, all fixed:
   `adlc-log-findings.sh` skipped a marker wrapped in code markup

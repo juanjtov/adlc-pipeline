@@ -32,8 +32,11 @@ mkdir -p .adlc/metrics
 - **`cycle.jsonl`** — one row per issue: seconds in each `stage:*` / `gate:*` label,
   `stage_seconds` (queue time plus agent time — an issue can wait at `stage:intake` for days before
   anything runs) vs `gate_seconds` (waiting on the Principal), `intake_to_pr_seconds`, fix `rounds`
-  (the `adlc:changes-requested` labels the PR drew), lane (`full` / `fast`). The agents' own
-  minutes are in `runs.jsonl`; the gap between the two is queue time.
+  (the `adlc:changes-requested` labels the PR drew, or its `ADLC-ADV: CHANGES` / `ADLC-ARCH: CHANGES`
+  verdict comments, whichever is more: a repo that runs the pipeline by hand never applies the
+  label), lane (`full` / `fast`). `rounds` is a **floor**: a round the reviewers close as
+  PASS-with-findings leaves no marker on GitHub. The agents' own minutes are in `runs.jsonl`; the
+  gap between the two is queue time.
 - **`adlc-metrics.sh`** — first-pass acceptance and iterations-to-green from the same window.
 
 ## Step 1 — Rank
@@ -43,7 +46,9 @@ From the report, name the top three of:
 1. **Stage that dominates spend** (usd share) and the stage that dominates **agent time** (sec share).
    They differ often: a cheap stage with a long wall clock is waiting on tools, not thinking.
 2. **Fix rounds**: issues with `rounds > 0`, and what one round costs (the builder + reviewer rows
-   of that issue after its first review). First-pass rate from `adlc-metrics.sh` is the same signal.
+   of that issue after its first review). First-pass rate from `adlc-metrics.sh` is the same signal;
+   when `rounds` reads low against it (few issues with a round, many PRs not accepted first pass),
+   say that rounds is a floor and that the missing rounds left no label and no CHANGES verdict.
 3. **Where the calendar goes**: compare the agents' minutes (`runs.jsonl`) with the stage dwell and
    the gate dwell (`cycle.jsonl`). If gate time or queue time dwarfs agent time, the cycle is the
    human or the trigger, not the pipeline — say so and stop proposing agent changes for latency.

@@ -1629,6 +1629,7 @@ case "$1 $2" in
   "run list")   src="$CY_FX/runs.json" ;;
   "issue list") src="$CY_FX/issues.json" ;;
   "pr list")    src="$CY_FX/prs.json" ;;
+  "pr view")    src="$CY_FX/pr-$3.json"; [ -f "$src" ] || src="$CY_FX/pr-none.json" ;;
   "repo view")  src="$CY_FX/repo.json" ;;
   api*)         n=$(printf '%s' "$2" | sed -nE 's#.*/issues/([0-9]+)/timeline.*#\1#p')
                 [ "$n" = 10 ] && { echo "gh: Not Found (HTTP 404)" >&2; exit 1; }
@@ -1672,6 +1673,16 @@ SH
     xref "$(at 1800)" 9 true; tl "$(at 2000)" unlabeled stage:build; tl "$(at 2000)" labeled stage:qa; tl "$(at 2600)" unlabeled stage:qa; tl "$(at 2600)" labeled gate:deploy
     tl "$(at 3500)" labeled stage:intake; } | jq -s . > "$CY/fx/timeline-7.json"   # re-labeled 500 s AFTER the close: counts 0, not -500
   { tl "$(at 1900)" labeled adlc:changes-requested; tl "$(at 1950)" unlabeled adlc:changes-requested; tl "$(at 1990)" labeled lane:full; } | jq -s . > "$CY/fx/timeline-9.json"
+  # PR 9's comments (issue 58): the label marks one round, the verdict comments two — a reviewer that asked for
+  # changes twice (its third comment only QUOTES "ADLC-ADV: CHANGES" and ends PASS), the other once; a repo
+  # that runs the pipeline by hand never applies the label, so the verdicts count too: max(1, max(2, 1)) = 2
+  jq -n '{comments: [
+    {body: "Found two things.\nADLC-FINDING: High | authz-gap | src/a.py\n\nADLC-ADV: CHANGES"},
+    {body: "Conformance: the ADR says otherwise.\n\n**ADLC-ARCH: CHANGES**"},
+    {body: "Still one left.\n\n`ADLC-ADV: CHANGES`"},
+    {body: "The earlier ADLC-ADV: CHANGES is addressed.\n\nADLC-ADV: PASS"},
+    {body: "ADLC-ARCH: PASS"}]}' > "$CY/fx/pr-9.json"
+  echo '{"comments": []}' > "$CY/fx/pr-none.json"
   # issue 8: fast lane, its PR predates its intake label (filed from the PR) → intake_to_pr null
   { xref "$(at -50)" 500 true other/plugin; xref "$(at 0)" 11 true; tl "$(at 100)" labeled stage:intake; tl "$(at 200)" unlabeled stage:intake; tl "$(at 200)" labeled stage:fast; } | jq -s . > "$CY/fx/timeline-8.json"
   jq -n --arg t1 "$T1" --arg close "$(at 3000)" --arg old "2020-01-01T00:00:00Z" '[
@@ -1687,19 +1698,20 @@ SH
   R7=$(printf '%s\n' "$OUT" | jq -c 'select(.issue == 7)')
   eq "600 300 100 1000 600 400" "cycle: dwell per label from labeled→unlabeled intervals; an open gate runs to the issue's close; a label put on after the close adds 0" \
      "$(printf '%s' "$R7" | jq -r '"\(.dwell["stage:intake"]) \(.dwell["gate:stories"]) \(.dwell["stage:design"]) \(.dwell["stage:build"]) \(.dwell["stage:qa"]) \(.dwell["gate:deploy"])"')"
-  eq "full 9 1800 1 2300 700" "cycle: lane, first PR that references the issue (not the issue xref), intake→PR, rounds from the PR's changes-requested labels, stage vs gate seconds" \
+  eq "full 9 1800 2 2300 700" "cycle: lane, first PR that references the issue (not the issue xref), intake→PR, rounds = max(changes-requested labels, CHANGES verdicts per marker), stage vs gate seconds" \
      "$(printf '%s' "$R7" | jq -r '"\(.lane) \(.pr) \(.intake_to_pr_seconds) \(.rounds) \(.stage_seconds) \(.gate_seconds)"')"
-  eq "fast 11 null 0" "cycle: stage:fast → fast lane; another repo's PR is not this issue's PR; a PR that predates the intake label gives no intake→PR; no changes-requested → 0 rounds" \
+  eq "fast 11 null 0" "cycle: stage:fast → fast lane; another repo's PR is not this issue's PR; a PR that predates the intake label gives no intake→PR; no changes-requested and no verdict → 0 rounds" \
      "$(printf '%s\n' "$OUT" | jq -r 'select(.issue == 8) | "\(.lane) \(.pr) \(.intake_to_pr_seconds) \(.rounds)"')"
   eq 1 "cycle: one issue list call" "$(grep -c '^issue list$' "$CY/calls")"
   eq 1 "cycle: one repo view call, outside the loop" "$(grep -c '^repo view$' "$CY/calls")"
   eq 5 "cycle: one timeline call per issue, plus one per linked PR (none for a skipped issue)" "$(grep -c '^api ' "$CY/calls")"
+  eq 2 "cycle: one pr view call per linked PR, for its verdict comments" "$(grep -c '^pr view$' "$CY/calls")"
   printf '%s\n' "$OUT" > "$CY/repo/.adlc/metrics/cycle.jsonl"
   OUT=$( cd "$CY/repo" && CLAUDE_PROJECT_DIR="$CY/repo" bash "$S/adlc-cycle.sh" report 7 2>&1 ); check 0 "cycle report: runs to the end" $?
   eq "builder          1               1      0.2       100%        60       100%  82%" "report: the per-stage spend table (agent runs only; cached share of the prompt)" "$(printf '%s\n' "$OUT" | grep '^builder ')"
   eq "adlc-ci: runs=2 avg_sec=35 failed=1" "report: guard lanes by name with avg seconds and failures" "$(printf '%s\n' "$OUT" | grep '^adlc-ci:')"
   eq "issues=2  with_pr=2  fast_lane=1" "report: issue counts" "$(printf '%s\n' "$OUT" | grep '^issues=')"
-  eq "rounds: total=1  issues_with_a_fix_round=1" "report: fix rounds" "$(printf '%s\n' "$OUT" | grep '^rounds:')"
+  eq "rounds: total=2  issues_with_a_fix_round=1" "report: fix rounds" "$(printf '%s\n' "$OUT" | grep '^rounds:')"
   rm -f "$CY/repo/.adlc/metrics/runs.jsonl" "$CY/repo/.adlc/metrics/cycle.jsonl"
   OUT=$( cd "$CY/repo" && CLAUDE_PROJECT_DIR="$CY/repo" bash "$S/adlc-cycle.sh" report 7 2>&1 ); check 0 "report with no ledgers: still exits 0" $?
   eq 2 "report with no ledgers: says which to materialize, instead of empty tables" "$(printf '%s\n' "$OUT" | grep -c 'materialize it with')"

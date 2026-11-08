@@ -10,14 +10,16 @@
 #       dwell = seconds the issue wore each label (open intervals run to the issue's close, or now);
 #       stage_seconds = time in stage:* labels — queue time AND agent time (an issue can sit at
 #       stage:intake for days before the Analyst runs; the agent's own minutes are in runs.jsonl);
-#       gate_seconds = time in gate:* labels (waiting on the Principal); rounds = the
-#       `adlc:changes-requested` labels put on the linked PR (fix rounds); pr = the first PR that
+#       gate_seconds = time in gate:* labels (waiting on the Principal); rounds = the fix rounds
+#       of the linked PR: its `adlc:changes-requested` label events or its CHANGES review
+#       verdicts, whichever is more (see rounds_of; a floor, not a count); pr = the first PR that
 #       references the issue; intake_to_pr = first stage:intake → that PR (null when no intake label
 #       precedes the PR, e.g. an issue filed from a PR).
 #   adlc-cycle.sh report [DAYS]   the ranked tables the retro reads, from .adlc/metrics/runs.jsonl
 #       and .adlc/metrics/cycle.jsonl (materialize both first; see the skill). Window filters rows.
 #
-# Cost: one `gh issue list` + one timeline call per issue (+ one per linked PR). Materialize into
+# Cost: one `gh issue list` + one timeline call per issue (+ a timeline and a `pr view` call per
+# linked PR). Materialize into
 # .adlc/metrics/cycle.jsonl the way the finding ledger is, never commit it from CI. An issue whose
 # timeline cannot be read (deleted, transferred, rate-limited) is skipped with a line on stderr and
 # the run goes on; a PR whose timeline fails gives rounds: null. Only cross-references from THIS
@@ -29,6 +31,25 @@ M="${CLAUDE_PROJECT_DIR:-.}/.adlc/metrics"
 NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
 timeline() { gh api "repos/{owner}/{repo}/issues/$1/timeline?per_page=100" --paginate --jq '.[]' | jq -sc .; }
+# Fix rounds of a PR. The Actions review lane marks a round by putting `adlc:changes-requested`
+# on the PR; a repo that runs the pipeline by hand (subagents from a Principal's session) never
+# applies that label, so the label count alone read 0 rounds for every issue on such a host while
+# its merged PRs drew CHANGES verdicts and carried several fix commits. So the review verdict
+# comments that asked for changes count too (`ADLC-ADV: CHANGES` / `ADLC-ARCH: CHANGES`, read as
+# adlc-metrics.sh reads them: a comment's LAST marker is its verdict), per marker, and the result
+# is the largest of the label events and either marker's count: the lane applies the label on the
+# same verdict, so adding them would count one round twice, and both reviewers asking in one round
+# is one round. A round the reviewers close as PASS-with-findings leaves no marker on GitHub at
+# all, so this is a floor on rounds, never a count; the cycle-retro says so when rounds read low.
+rounds_of() {
+  local labels verdicts
+  labels="$(timeline "$1" | jq '[.[] | select(.event == "labeled" and .label.name == "adlc:changes-requested")] | length')" || return 1
+  verdicts="$(gh pr view "$1" --json comments | jq '[.comments[].body
+      | [match("ADLC-(ADV|ARCH):[*`_\\s]*(PASS|CHANGES)(?![A-Za-z0-9_])"; "g") | {m: .captures[0].string, v: .captures[1].string}]
+      | select(length > 0) | last | select(.v == "CHANGES") | .m]
+      | group_by(.) | map(length) | max // 0')" || return 1
+  if [ "$labels" -ge "$verdicts" ]; then echo "$labels"; else echo "$verdicts"; fi
+}
 # A cross-referenced event's source repo, lower-cased, in either shape GitHub sends.
 XREF_REPO='((.source.issue.repository.full_name // (.source.issue.repository_url // "" | sub(".*/repos/"; ""))) | ascii_downcase)'
 
@@ -45,8 +66,8 @@ case "$cmd" in
         pr="$(printf '%s' "$tl" | jq -r --arg repo "$REPO" "[.[] | select(.event == \"cross-referenced\" and .source.issue.pull_request != null and $XREF_REPO == \$repo)] | sort_by(.created_at) | first | .source.issue.number // empty")"
         rounds=0
         if [ -n "$pr" ]; then
-          rounds="$(timeline "$pr" | jq '[.[] | select(.event == "labeled" and .label.name == "adlc:changes-requested")] | length')" \
-            || { echo "adlc-cycle: could not read the timeline of PR #$pr (issue #$n); rounds unknown" >&2; rounds=null; }
+          rounds="$(rounds_of "$pr")" \
+            || { echo "adlc-cycle: could not read the timeline or the comments of PR #$pr (issue #$n); rounds unknown" >&2; rounds=null; }
         fi
         printf '%s' "$tl" | jq -c --argjson issue "$issue" --arg now "$NOW" --arg pr "${pr:-}" --argjson rounds "$rounds" --arg repo "$REPO" '
           def t: fromdate;
