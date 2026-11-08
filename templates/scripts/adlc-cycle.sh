@@ -12,7 +12,7 @@
 #       stage:intake for days before the Analyst runs; the agent's own minutes are in runs.jsonl);
 #       gate_seconds = time in gate:* labels (waiting on the Principal); rounds = the fix rounds
 #       of the linked PR: its `adlc:changes-requested` label events or its CHANGES review
-#       verdicts, whichever is more (see rounds_of; a floor, not a count); pr = the first PR that
+#       verdicts, whichever is more (see rounds_of; an estimate, usually low); pr = the first PR that
 #       references the issue; intake_to_pr = first stage:intake → that PR (null when no intake label
 #       precedes the PR, e.g. an issue filed from a PR).
 #   adlc-cycle.sh report [DAYS]   the ranked tables the retro reads, from .adlc/metrics/runs.jsonl
@@ -22,7 +22,7 @@
 # linked PR). Materialize into
 # .adlc/metrics/cycle.jsonl the way the finding ledger is, never commit it from CI. An issue whose
 # timeline cannot be read (deleted, transferred, rate-limited) is skipped with a line on stderr and
-# the run goes on; a PR whose timeline fails gives rounds: null. Only cross-references from THIS
+# the run goes on; a PR whose timeline or comments cannot be read gives rounds: null. Only cross-references from THIS
 # repo count as the issue's PR (a host repo's issues also cite the plugin repo's PRs).
 set -euo pipefail
 cmd="${1:-}"; days="${2:-30}"
@@ -39,8 +39,11 @@ timeline() { gh api "repos/{owner}/{repo}/issues/$1/timeline?per_page=100" --pag
 # adlc-metrics.sh reads them: a comment's LAST marker is its verdict), per marker, and the result
 # is the largest of the label events and either marker's count: the lane applies the label on the
 # same verdict, so adding them would count one round twice, and both reviewers asking in one round
-# is one round. A round the reviewers close as PASS-with-findings leaves no marker on GitHub at
-# all, so this is a floor on rounds, never a count; the cycle-retro says so when rounds read low.
+# is one round. The figure is an estimate, and usually low: a round the reviewers close as
+# PASS-with-findings leaves no marker on GitHub at all, and two rounds in which a different
+# reviewer asked each time read as one. It reads high when a reviewer re-posts its CHANGES
+# comment within one round, or when a thread's last marker is a quoted CHANGES, which the lane
+# and adlc-metrics.sh read the same way. The cycle-retro says so when rounds read low.
 rounds_of() {
   local labels verdicts
   labels="$(timeline "$1" | jq '[.[] | select(.event == "labeled" and .label.name == "adlc:changes-requested")] | length')" || return 1

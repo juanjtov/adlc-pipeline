@@ -35,8 +35,9 @@ which every session loads from the installed plugin, so those parts need no refr
   PR's rounds are now the larger of its label events and its `ADLC-ADV: CHANGES` /
   `ADLC-ARCH: CHANGES` verdict comments counted per marker (a comment's last marker is its
   verdict, as `adlc-metrics.sh` reads it); the larger, not the sum, because the lane puts the
-  label on the same verdict. The cycle-retro skill says the figure is a floor: a round closed
-  as PASS-with-findings leaves no marker. One `gh pr view` call more per linked PR.
+  label on the same verdict. The cycle-retro skill calls the figure an estimate that usually
+  reads low: a round closed as PASS-with-findings leaves no marker, and two rounds asked for by
+  different reviewers read as one. One `gh pr view` call more per linked PR.
 - **The finding ledger no longer drops a third of the findings** (issue 27). Measured on a host
   with 144 markers in its PR threads, the materialized ledger held 94. Three causes, all fixed:
   `adlc-log-findings.sh` skipped a marker wrapped in code markup
@@ -44,9 +45,10 @@ which every session loads from the installed plugin, so those parts need no refr
   retro's recipe read `gh pr view --json comments` only, so findings posted as a GitHub review
   body never reached the ledger, 29 more; and every row carried the time of the rebuild, so a
   `since` window could not be applied to the ledger. The script now takes the marker after code
-  markup too, takes the comment's own time as an optional third argument, and reports on stderr
-  every finding-shaped line it still could not read, so a marker shape it does not know is a
-  visible skip. The recipe in the `retro` skill reads comments and review bodies, stamps each
+  markup too (prose after the closing backtick stays out of the file field), takes the comment's
+  own time as an optional third argument, and reports on stderr every line it still could not
+  read that carries `ADLC-FINDING:` and three `|`-separated fields, so a marker placed where the
+  script does not look is a visible skip. The recipe in the `retro` skill reads comments and review bodies, stamps each
   row with its comment's time, and lists 500 PRs instead of 50: on a repo past 50 PRs the older
   ones fell off the end without a word (349 markers, 220 read, on the same host).
 
