@@ -1145,7 +1145,7 @@ if command -v jq >/dev/null 2>&1; then
 echo "$1 $2" >> "$MX_CALLS"
 case "$1 $2" in "pr list") src="$MX_PRS" ;; "run list") src="$MX_RUNS" ;; "run view") src="$MX_JOBS/$3.json"; [ -f "$src" ] || { echo "run 1 not found" >&2; exit 1; } ;; "issue list") src=/dev/null ;; *) exit 2 ;; esac
 f=.; while [ $# -gt 0 ]; do [ "$1" = "--jq" ] && f="$2"; shift; done
-[ "$src" = /dev/null ] && echo '[]' | jq "$f" || jq "$f" "$src"
+[ "$src" = /dev/null ] && echo '[]' | jq -r "$f" || jq -r "$f" "$src"   # -r: gh --jq prints a string result raw
 SH
   chmod +x "$MX/bin/gh"
   now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -1167,11 +1167,13 @@ ADLC-ADV: PASS' 'ADLC-ARCH: PASS'
     mxpr 7 "$now" '**ADLC-ADV:** CHANGES' 'ADLC-ARCH: PASS'
     mxpr 8 "$now" 'ADLC-ADV: PASSED' 'ADLC-ARCH: CHANGESET pending'
     mxpr 9 "$now"
+    mxpr 10 "$now"
   } | jq -s . > "$MX/prs.json"
   # CI runs: PR 1's branch went green first time, PR 2's took a red run then a green one; another workflow's
   # run is ignored, and so is a red run on PR 1's branch name from BEFORE that PR was opened (a reused name).
   # Issue 56: PR 3's first run died creating an ephemeral database, before any test ran — an infra failure,
-  # not a red test run; PR 9's red run cannot be looked up (gh fails) and stays a plain failure.
+  # not a red test run; PR 9's red run cannot be looked up (gh fails) and stays a plain failure; PR 10's first
+  # run is a fail-fast matrix whose cancelled leg is listed before the leg that died in "Set up job".
   jq -n --arg at "$now" '[
     {databaseId: 11, workflowName: "ADLC CI", headBranch: "feat/1", status: "completed", conclusion: "success", createdAt: $at},
     {databaseId: 10, workflowName: "ADLC CI", headBranch: "feat/1", status: "completed", conclusion: "failure", createdAt: ($at | fromdate - 7200 | todate)},
@@ -1181,23 +1183,35 @@ ADLC-ADV: PASS' 'ADLC-ARCH: PASS'
     {databaseId: 31, workflowName: "ADLC CI", headBranch: "feat/3", status: "completed", conclusion: "failure", createdAt: $at},
     {databaseId: 32, workflowName: "ADLC CI", headBranch: "feat/3", status: "completed", conclusion: "success", createdAt: $at},
     {databaseId: 91, workflowName: "ADLC CI", headBranch: "feat/9", status: "completed", conclusion: "failure", createdAt: $at},
-    {databaseId: 92, workflowName: "ADLC CI", headBranch: "feat/9", status: "completed", conclusion: "success", createdAt: $at}]' > "$MX/runs.json"
+    {databaseId: 92, workflowName: "ADLC CI", headBranch: "feat/9", status: "completed", conclusion: "success", createdAt: $at},
+    {databaseId: 101, workflowName: "ADLC CI", headBranch: "feat/10", status: "completed", conclusion: "failure", createdAt: $at},
+    {databaseId: 102, workflowName: "ADLC CI", headBranch: "feat/10", status: "completed", conclusion: "success", createdAt: $at}]' > "$MX/runs.json"
   mkdir -p "$MX/jobs"
   jq -n '{jobs: [{name: "backend", conclusion: "failure", steps: [{name: "Set up job", conclusion: "success"}, {name: "Checkout", conclusion: "success"}, {name: "Run tests", conclusion: "failure"}, {name: "Upload coverage", conclusion: "skipped"}]}]}' > "$MX/jobs/21.json"
   jq -n '{jobs: [{name: "lint", conclusion: "success", steps: [{name: "Lint", conclusion: "success"}]},
                  {name: "backend", conclusion: "failure", steps: [{name: "Set up job", conclusion: "success"}, {name: "Create ephemeral Neon branch", conclusion: "failure"}, {name: "Run tests", conclusion: "skipped"}]}]}' > "$MX/jobs/31.json"
+  jq -n '{jobs: [{name: "test (3.11)", conclusion: "cancelled", steps: [{name: "Set up job", conclusion: "success"}, {name: "Checkout", conclusion: "success"}, {name: "Run tests", conclusion: "cancelled"}]},
+                 {name: "test (3.12)", conclusion: "failure", steps: [{name: "Set up job", conclusion: "failure"}, {name: "Checkout", conclusion: "skipped"}]}]}' > "$MX/jobs/101.json"
   : > "$MX/calls"
   OUT=$( cd "$MX/repo" && env PATH="$MX/bin:$PATH" MX_PRS="$MX/prs.json" MX_RUNS="$MX/runs.json" MX_JOBS="$MX/jobs" MX_CALLS="$MX/calls" bash "$S/adlc-metrics.sh" 30 2>&1 ); check 0 "the script runs to the end" $?
-  eq "iterations_to_green: avg 1.5 CI runs per merged PR; failed_first: 2 / 4" "iterations-to-green: CI runs per merged PR branch since the PR opened, from one run list call; other lanes and older runs on a reused branch name do not count; a run that died in a setup step is left out, a red run gh cannot describe stays red" "$(printf '%s\n' "$OUT" | grep '^iterations_to_green:')"
-  eq "infra_failed: 1 / 7 CI runs died in a setup step (ADLC_SETUP_STEPS), before any test ran; not counted above" "infra_failed: the setup-step failures, against every CI run of the merged PRs" "$(printf '%s\n' "$OUT" | grep '^infra_failed:')"
+  eq "iterations_to_green: avg 1.4 CI runs per merged PR; failed_first: 2 / 5" "iterations-to-green: CI runs per merged PR branch since the PR opened, from one run list call; other lanes and older runs on a reused branch name do not count; a run that died in a setup step is left out (also when a cancelled matrix leg is listed before the failed one, and when the step is the runner's own 'Set up job'), a red run gh cannot describe stays red" "$(printf '%s\n' "$OUT" | grep '^iterations_to_green:')"
+  eq "infra_failed: 2 / 9 CI runs died in a setup step (ADLC_SETUP_STEPS), before any test ran; not counted above" "infra_failed: the setup-step failures, against every CI run of the merged PRs" "$(printf '%s\n' "$OUT" | grep '^infra_failed:')"
   eq 1 "…from one gh run list call" "$(grep -c '^run list$' "$MX/calls")"
-  eq 3 "…and one gh run view call per red run on a merged PR's branch (none for green runs, none for the pre-PR red run)" "$(grep -c '^run view$' "$MX/calls")"
-  eq "merged_prs: 8"             "merged PRs: those in the window"                                   "$(printf '%s\n' "$OUT" | grep '^merged_prs:')"
-  eq "first_pass_approved: 5 / 8" "first pass: no comment whose last verdict is CHANGES (a later PASS comment does not undo one; a PR with no verdict counts; a CHANGES quoted in the prose of a PASS comment is not one; a bold **ADLC-ADV:** CHANGES is one, as adlc-verdict.sh reads it; PASSED and CHANGESET are no verdict)" "$(printf '%s\n' "$OUT" | grep '^first_pass_approved:')"
+  eq 4 "…and one gh run view call per red run on a merged PR's branch (none for green runs, none for the pre-PR red run)" "$(grep -c '^run view$' "$MX/calls")"
+  eq "merged_prs: 9"             "merged PRs: those in the window"                                   "$(printf '%s\n' "$OUT" | grep '^merged_prs:')"
+  eq "first_pass_approved: 6 / 9" "first pass: no comment whose last verdict is CHANGES (a later PASS comment does not undo one; a PR with no verdict counts; a CHANGES quoted in the prose of a PASS comment is not one; a bold **ADLC-ADV:** CHANGES is one, as adlc-verdict.sh reads it; PASSED and CHANGESET are no verdict)" "$(printf '%s\n' "$OUT" | grep '^first_pass_approved:')"
   eq 1 "…from one gh pr list call, whatever the number of PRs" "$(grep -c '^pr list$' "$MX/calls")"
   OUT=$( cd "$MX/repo" && env PATH="$MX/bin:$PATH" MX_PRS="$MX/prs.json" MX_RUNS="$MX/runs.json" MX_JOBS="$MX/jobs" MX_CALLS="$MX/calls" ADLC_SETUP_STEPS='^nothing matches$' bash "$S/adlc-metrics.sh" 30 2>&1 )
-  eq "iterations_to_green: avg 1.8 CI runs per merged PR; failed_first: 3 / 4" "ADLC_SETUP_STEPS is the rule: a regex that matches no step counts every red run as a test failure" "$(printf '%s\n' "$OUT" | grep '^iterations_to_green:')"
-  eq "infra_failed: 0 / 7 CI runs died in a setup step (ADLC_SETUP_STEPS), before any test ran; not counted above" "…and reports 0 setup failures" "$(printf '%s\n' "$OUT" | grep '^infra_failed:')"
+  eq "iterations_to_green: avg 1.8 CI runs per merged PR; failed_first: 4 / 5" "ADLC_SETUP_STEPS is the rule: a regex that matches no step counts every red run as a test failure" "$(printf '%s\n' "$OUT" | grep '^iterations_to_green:')"
+  eq "infra_failed: 0 / 9 CI runs died in a setup step (ADLC_SETUP_STEPS), before any test ran; not counted above" "…and reports 0 setup failures" "$(printf '%s\n' "$OUT" | grep '^infra_failed:')"
+  # the default regex: setup-shaped names match, test steps that merely contain one of its words do not
+  DEF=$(sed -n 's/^ADLC_SETUP_STEPS="${ADLC_SETUP_STEPS:-\(.*\)}"$/\1/p' "$S/adlc-metrics.sh"); [ -n "$DEF" ] && ok "the default ADLC_SETUP_STEPS is read off the script" || bad "the default ADLC_SETUP_STEPS could not be read off the script"
+  for st in "Set up job" "Post Run actions/checkout@v4" "Checkout" "Install dependencies" "Setup Python" "Restore cache" "Cache node modules" "Docker login" "Log in to the registry" "Provision database" "Create ephemeral Neon branch" "Install and test"; do
+    printf '%s' "$st" | grep -qiE "$DEF" && ok "default ADLC_SETUP_STEPS matches '$st'" || bad "default ADLC_SETUP_STEPS must match '$st'"
+  done
+  for st in "Run tests" "Run pytest" "Login flow tests" "Test cache invalidation" "Run installer tests" "Run setup tests" "Test create branch flow" "Set upstream" "Build"; do
+    printf '%s' "$st" | grep -qiE "$DEF" && bad "default ADLC_SETUP_STEPS must not match '$st'" || ok "default ADLC_SETUP_STEPS does not match '$st'"
+  done
   jq -n --arg at "$now" '[{databaseId: 31, workflowName: "ADLC CI", headBranch: "feat/3", status: "completed", conclusion: "failure", createdAt: $at}]' > "$MX/only-infra.json"
   OUT=$( cd "$MX/repo" && env PATH="$MX/bin:$PATH" MX_PRS="$MX/prs.json" MX_RUNS="$MX/only-infra.json" MX_JOBS="$MX/jobs" MX_CALLS="$MX/calls" bash "$S/adlc-metrics.sh" 30 2>&1 )
   eq "iterations_to_green: every CI run of the window's merged PRs failed in a setup step (1 runs); no test signal" "only setup failures: says there is no test signal instead of dividing by zero" "$(printf '%s\n' "$OUT" | grep '^iterations_to_green:')"

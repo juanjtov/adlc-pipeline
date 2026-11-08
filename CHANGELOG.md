@@ -19,13 +19,16 @@ which every session loads from the installed plugin, so those parts need no refr
   PR's branch; on one host five of eighteen first-run reds had died creating an ephemeral
   database, before any test ran, and the retro read a provisioning problem as a test-quality
   one. For each red run on a merged PR's branch the script now asks `gh run view --json jobs`
-  for the first failed step of the first failed job; a step whose name matches
-  `ADLC_SETUP_STEPS` (a case-insensitive regex; the default covers the runner's own "Set up
-  job", checkout, installs, caches, logins and ephemeral database or branch provisioning) makes
-  the run `infra_failed`, which leaves the iterations count and does not make its PR
-  `failed_first`. A new `infra_failed: N / M` line reports them against every CI run of those
+  for the first failed step across the run's failed jobs (a fail-fast matrix lists cancelled
+  legs too; they have no failed step and are passed over); a step whose name matches
+  `ADLC_SETUP_STEPS` (a case-insensitive regex; the default is a heuristic on step names,
+  anchored at the start where a word is common in test steps too: the runner's own "Set up
+  job", checkout, installs, setup actions, caches, registry logins, provisioning, and an
+  ephemeral database or branch anywhere in the name) makes the run `infra_failed`, which leaves
+  the iterations count and does not make its PR `failed_first`. A host whose test step starts
+  with one of those words sets its own regex. A new `infra_failed: N / M` line reports them against every CI run of those
   PRs, so the cycle-retro sees the provisioning reds and the retro the test reds. A run whose
-  jobs cannot be read, or whose failed job names no failed step, stays a plain failure. Green
+  jobs cannot be read, or none of whose failed jobs names a failed step, stays a plain failure. Green
   runs are never looked up; one call more per red run.
 - **The cycle ledger counts fix rounds from CHANGES review verdicts too** (issue 58).
   `adlc-cycle.sh` counted a round as an `adlc:changes-requested` label event on the issue's PR.

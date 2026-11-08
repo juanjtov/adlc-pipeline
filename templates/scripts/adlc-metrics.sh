@@ -37,15 +37,20 @@ echo "first_pass_approved: $firstpass / $merged"
 # business, not a code finding). Two merged PRs that reused one branch name share its runs.
 #
 # A run that failed before any test ran is not a test signal. One `gh run view --json jobs` call
-# per red run (green runs need none) finds the first failed step of its first failed job; when that
-# step's name matches ADLC_SETUP_STEPS (a regex, case-insensitive; the default covers the runner's
-# own "Set up job", checkout, dependency installs, caches, logins and ephemeral-database or branch
-# provisioning), the run is `infra_failed` and leaves the iterations count: it neither adds a run
-# nor makes its PR failed_first. Both numbers are printed, so the retro sees the test reds and the
-# cycle-retro the provisioning reds. A run whose jobs cannot be read, or whose failed job names no
-# failed step (a cancelled or timed-out run), stays a plain failure. Runs are matched to a PR by
-# branch and date, so a red run on no merged PR's branch is never looked up.
-ADLC_SETUP_STEPS="${ADLC_SETUP_STEPS:-^set up |checkout|install|setup|provision|ephemeral|cache|login|create .*(branch|database|db)}"
+# per red run (green runs need none) finds the first failed step across the run's failed jobs, in
+# the API's order (a fail-fast matrix lists cancelled legs beside the one that failed; those have
+# no failed step and are passed over); when that step's name matches ADLC_SETUP_STEPS (a regex,
+# case-insensitive) the run is `infra_failed` and leaves the iterations count: it neither adds a
+# run nor makes its PR failed_first. Both numbers are printed, so the retro sees the test reds and
+# the cycle-retro the provisioning reds. A run whose jobs cannot be read, or none of whose failed
+# jobs names a failed step (cancelled, timed out), stays a plain failure. Runs are matched to a PR
+# by branch and date, so a red run on no merged PR's branch is never looked up.
+# The default regex is a heuristic on step names, anchored at the start of the name where a word
+# is common in test steps too: the runner's own "Set up job" and "Post Run actions/…", checkout,
+# installs, setup actions, caches, registry logins, provisioning, and creating an ephemeral
+# database or branch anywhere in the name. "Login flow tests" or "Test cache invalidation" are not
+# matched; a host whose test step starts with one of those words ("Install and test") sets its own.
+ADLC_SETUP_STEPS="${ADLC_SETUP_STEPS:-^(set up |post run |run actions/|checkout|install|setup|provision|(restore |save )?cache|docker log ?in|log ?in to |create .*(branch|database|db))|ephemeral}"
 oldest=$(echo "$prs" | jq -r '[.[].createdAt] | min // empty')
 runs=$(gh run list --limit 500 --json databaseId,workflowName,headBranch,status,conclusion,createdAt \
         --jq "[.[] | select(.status == \"completed\" and .createdAt >= \"${oldest:-$SINCE}\" and (.workflowName | test(\"CI\"; \"i\")))]")
@@ -55,8 +60,8 @@ red_ids=$(jq -rn --slurpfile runs <(echo "$runs") --slurpfile prs <(echo "$prs")
   | [$prs[] as $p | $runs[] | select(.headBranch == $p.headRefName and .createdAt >= $p.createdAt and .conclusion != "success") | .databaseId] | unique[]')
 infra='[]'
 for id in $red_ids; do
-  step=$(gh run view "$id" --json jobs --jq '[.jobs[] | select(.conclusion != "success" and .conclusion != "skipped")] | first
-           | [.steps[]? | select(.conclusion == "failure")] | first | .name // empty' 2>/dev/null) || step=""
+  step=$(gh run view "$id" --json jobs --jq '[.jobs[] | select(.conclusion == "failure" or .conclusion == "timed_out")
+           | .steps[]? | select(.conclusion == "failure")] | first | .name // empty' 2>/dev/null) || step=""
   if [ -n "$step" ] && printf '%s' "$step" | grep -qiE "$ADLC_SETUP_STEPS"; then
     infra=$(jq -cn --argjson a "$infra" --argjson id "$id" '$a + [$id]')
   fi
