@@ -22,8 +22,9 @@ which every session loads from the installed plugin, so those parts need no refr
   PR's rounds are now the larger of its label events and its `ADLC-ADV: CHANGES` /
   `ADLC-ARCH: CHANGES` verdict comments counted per marker (a comment's last marker is its
   verdict, as `adlc-metrics.sh` reads it); the larger, not the sum, because the lane puts the
-  label on the same verdict. The cycle-retro skill says the figure is a floor: a round closed
-  as PASS-with-findings leaves no marker. One `gh pr view` call more per linked PR.
+  label on the same verdict. The cycle-retro skill calls the figure an estimate that usually
+  reads low: a round closed as PASS-with-findings leaves no marker, and two rounds asked for by
+  different reviewers read as one. One `gh pr view` call more per linked PR.
 - **The finding ledger no longer drops a third of the findings** (issue 27). Measured on a host
   with 144 markers in its PR threads, the materialized ledger held 94. Three causes, all fixed:
   `adlc-log-findings.sh` skipped a marker wrapped in code markup

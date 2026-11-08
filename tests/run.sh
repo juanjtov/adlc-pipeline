@@ -1679,13 +1679,15 @@ SH
     xref "$(at 1800)" 9 true; tl "$(at 2000)" unlabeled stage:build; tl "$(at 2000)" labeled stage:qa; tl "$(at 2600)" unlabeled stage:qa; tl "$(at 2600)" labeled gate:deploy
     tl "$(at 3500)" labeled stage:intake; } | jq -s . > "$CY/fx/timeline-7.json"   # re-labeled 500 s AFTER the close: counts 0, not -500
   { tl "$(at 1900)" labeled adlc:changes-requested; tl "$(at 1950)" unlabeled adlc:changes-requested; tl "$(at 1990)" labeled lane:full; } | jq -s . > "$CY/fx/timeline-9.json"
-  # PR 9's comments (issue 58): the label marks one round, the verdict comments two — a reviewer that asked for
-  # changes twice (its third comment only QUOTES "ADLC-ADV: CHANGES" and ends PASS), the other once; a repo
-  # that runs the pipeline by hand never applies the label, so the verdicts count too: max(1, max(2, 1)) = 2
+  # PR 9's comments (issue 58): the label marks one round, the verdict comments three — a reviewer that asked for
+  # changes three times (its fourth comment only QUOTES "ADLC-ADV: CHANGES" and ends PASS), the other once; a repo
+  # that runs the pipeline by hand never applies the label, so the verdicts count too: max(1, max(3, 1)) = 3
+  # (not 2 distinct markers, not 4 CHANGES comments, not 1 + 3)
   jq -n '{comments: [
     {body: "Found two things.\nADLC-FINDING: High | authz-gap | src/a.py\n\nADLC-ADV: CHANGES"},
     {body: "Conformance: the ADR says otherwise.\n\n**ADLC-ARCH: CHANGES**"},
     {body: "Still one left.\n\n`ADLC-ADV: CHANGES`"},
+    {body: "And the test for it.\n\nADLC-ADV: CHANGES"},
     {body: "The earlier ADLC-ADV: CHANGES is addressed.\n\nADLC-ADV: PASS"},
     {body: "ADLC-ARCH: PASS"}]}' > "$CY/fx/pr-9.json"
   echo '{"comments": []}' > "$CY/fx/pr-none.json"
@@ -1704,7 +1706,7 @@ SH
   R7=$(printf '%s\n' "$OUT" | jq -c 'select(.issue == 7)')
   eq "600 300 100 1000 600 400" "cycle: dwell per label from labeled→unlabeled intervals; an open gate runs to the issue's close; a label put on after the close adds 0" \
      "$(printf '%s' "$R7" | jq -r '"\(.dwell["stage:intake"]) \(.dwell["gate:stories"]) \(.dwell["stage:design"]) \(.dwell["stage:build"]) \(.dwell["stage:qa"]) \(.dwell["gate:deploy"])"')"
-  eq "full 9 1800 2 2300 700" "cycle: lane, first PR that references the issue (not the issue xref), intake→PR, rounds = max(changes-requested labels, CHANGES verdicts per marker), stage vs gate seconds" \
+  eq "full 9 1800 3 2300 700" "cycle: lane, first PR that references the issue (not the issue xref), intake→PR, rounds = max(changes-requested labels, CHANGES verdicts per marker), stage vs gate seconds" \
      "$(printf '%s' "$R7" | jq -r '"\(.lane) \(.pr) \(.intake_to_pr_seconds) \(.rounds) \(.stage_seconds) \(.gate_seconds)"')"
   eq "fast 11 null 0" "cycle: stage:fast → fast lane; another repo's PR is not this issue's PR; a PR that predates the intake label gives no intake→PR; no changes-requested and no verdict → 0 rounds" \
      "$(printf '%s\n' "$OUT" | jq -r 'select(.issue == 8) | "\(.lane) \(.pr) \(.intake_to_pr_seconds) \(.rounds)"')"
@@ -1717,7 +1719,7 @@ SH
   eq "builder          1               1      0.2       100%        60       100%  82%" "report: the per-stage spend table (agent runs only; cached share of the prompt)" "$(printf '%s\n' "$OUT" | grep '^builder ')"
   eq "adlc-ci: runs=2 avg_sec=35 failed=1" "report: guard lanes by name with avg seconds and failures" "$(printf '%s\n' "$OUT" | grep '^adlc-ci:')"
   eq "issues=2  with_pr=2  fast_lane=1" "report: issue counts" "$(printf '%s\n' "$OUT" | grep '^issues=')"
-  eq "rounds: total=2  issues_with_a_fix_round=1" "report: fix rounds" "$(printf '%s\n' "$OUT" | grep '^rounds:')"
+  eq "rounds: total=3  issues_with_a_fix_round=1" "report: fix rounds" "$(printf '%s\n' "$OUT" | grep '^rounds:')"
   rm -f "$CY/repo/.adlc/metrics/runs.jsonl" "$CY/repo/.adlc/metrics/cycle.jsonl"
   OUT=$( cd "$CY/repo" && CLAUDE_PROJECT_DIR="$CY/repo" bash "$S/adlc-cycle.sh" report 7 2>&1 ); check 0 "report with no ledgers: still exits 0" $?
   eq 2 "report with no ledgers: says which to materialize, instead of empty tables" "$(printf '%s\n' "$OUT" | grep -c 'materialize it with')"
