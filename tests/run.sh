@@ -479,6 +479,12 @@ eq 1 "a bullet with a code-wrapped marker is a finding" "$(printf -- '- `ADLC-FI
 eq '2026-10-08T14:03:00Z' "a third argument is the row's ts" "$(printf 'ADLC-FINDING: High | x | y.py\n' | bash "$S/adlc-log-findings.sh" 1 review 2026-10-08T14:03:00Z | jq -r .ts)"
 printf 'ADLC-FINDING: High | x | y.py\n' | bash "$S/adlc-log-findings.sh" 1 review 2>/dev/null | jq -e '.ts | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")' >/dev/null 2>&1 && ok "no third argument: ts is now, ISO 8601" || bad "no third argument: ts is now, ISO 8601"
 printf 'ADLC-FINDING: High | x | y.py\n' | bash "$S/adlc-log-findings.sh" 1 review yesterday >/dev/null 2>&1; check 2 "a ts that is not ISO 8601 is an error, not a row" $?
+printf 'ADLC-FINDING: High | x | y.py\n' | bash "$S/adlc-log-findings.sh" 1 review 2026-10-08T14:03:00+02:00 >/dev/null 2>&1; check 2 "a ts with an offset instead of Z is an error (GitHub prints Z; the window compares text)" $?
+case "$(printf 'ADLC-FINDING: High | x | y.py\n' | bash "$S/adlc-log-findings.sh" 31 review null 2>&1 >/dev/null)" in *"PR 31"*) ok "the ts error names the PR" ;; *) bad "the ts error must name the PR" ;; esac
+eq 1 "…but an empty ts means now (a pending review has none), not an error" "$(printf 'ADLC-FINDING: High | x | y.py\n' | bash "$S/adlc-log-findings.sh" 1 review "" 2>/dev/null | grep -c '"class"')"
+printf -- '- `ADLC-FINDING: High | injection | src/db.py` fixed in abc123\n' | bash "$S/adlc-log-findings.sh" 1 review 2>/dev/null | jq -e '.file == "src/db.py"' >/dev/null 2>&1 && ok "prose after a code-wrapped marker's closing backtick is not part of the file" || bad "prose after a code-wrapped marker's closing backtick is not part of the file"
+SK2=$(printf 'see ADLC-FINDING: High | injection | templates/<name>.html above\n' | bash "$S/adlc-log-findings.sh" 32 review 2>&1 >/dev/null)
+case "$SK2" in *"PR 32"*skipped*) ok "a < in the file field does not hide a skipped line (only a <placeholder> severity is the format line)" ;; *) bad "a < in the file field must not hide a skipped line" ;; esac
 # a finding-shaped line the script cannot read is reported, never silently dropped
 SK=$(printf 'see ADLC-FINDING: High | x | y above\n' | bash "$S/adlc-log-findings.sh" 31 review 2>&1 >/dev/null)
 case "$SK" in *"PR 31"*"skipped"*"see ADLC-FINDING: High | x | y above"*) ok "a mid-line marker with three fields is reported on stderr, with the PR and the line" ;; *) bad "a mid-line marker with three fields must be reported on stderr (got '$SK')" ;; esac
@@ -488,7 +494,7 @@ eq "" "a plain finding writes nothing to stderr"      "$(printf 'ADLC-FINDING: H
 eq 1 "a last line with no newline is still a finding" "$(printf 'ADLC-FINDING: High | x | y.py' | bash "$S/adlc-log-findings.sh" 1 review 2>/dev/null | grep -c '"class"')"
 # the retro's recipe must read both comment kinds, stamp each row with its comment's time, and not stop at 50 PRs
 RR="$ROOT/skills/retro/SKILL.md"
-grep -q -- '--json comments,reviews' "$RR" && grep -q 'submittedAt' "$RR" && grep -q 'createdAt' "$RR" && ok "retro recipe: reads comments and review bodies, with each one's time" || bad "retro recipe: must read comments and review bodies, with each one's time"
+grep -q -- '--json comments,reviews' "$RR" && grep -q 'ts: (.submittedAt // "")' "$RR" && grep -q 'ts: .createdAt' "$RR" && ok "retro recipe: reads comments and review bodies, with each one's time; a pending review's missing time falls back to now" || bad "retro recipe: must read comments and review bodies, with each one's time, and a null submittedAt must become empty"
 grep -q -- 'adlc-log-findings.sh "$pr" review "$(jq -r .ts <<<"$c")"' "$RR" && ok "retro recipe: passes the comment's time to the logger" || bad "retro recipe: must pass the comment's time to the logger"
 grep -q -- 'gh pr list --state all --limit 500' "$RR" && ok "retro recipe: lists 500 PRs, not 50" || bad "retro recipe: must list 500 PRs, not 50"
 
