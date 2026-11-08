@@ -21,9 +21,10 @@ refresh.
   retro's recipe read `gh pr view --json comments` only, so findings posted as a GitHub review
   body never reached the ledger, 29 more; and every row carried the time of the rebuild, so a
   `since` window could not be applied to the ledger. The script now takes the marker after code
-  markup too, takes the comment's own time as an optional third argument, and reports on stderr
-  every finding-shaped line it still could not read, so a marker shape it does not know is a
-  visible skip. The recipe in the `retro` skill reads comments and review bodies, stamps each
+  markup too (prose after the closing backtick stays out of the file field), takes the comment's
+  own time as an optional third argument, and reports on stderr every line it still could not
+  read that carries `ADLC-FINDING:` and three `|`-separated fields, so a marker placed where the
+  script does not look is a visible skip. The recipe in the `retro` skill reads comments and review bodies, stamps each
   row with its comment's time, and lists 500 PRs instead of 50: on a repo past 50 PRs the older
   ones fell off the end without a word (349 markers, 220 read, on the same host).
 
