@@ -10,10 +10,23 @@ it differs from the installed plugin.
 ## Unreleased (on `main` after 0.3.1)
 
 Tooling refresh needed: **yes** — the `adlc-log-findings.sh` copy gains the backtick-wrapped
-marker, the per-comment time and the skipped-line report below, and the `adlc-cycle.sh` copy
-the verdict-based round count. The retro and cycle-retro recipes live in the plugin skills,
+marker, the per-comment time and the skipped-line report below, the `adlc-cycle.sh` copy the
+verdict-based round count, and the `adlc-metrics.sh` copy the `infra_failed` line. The retro and cycle-retro recipes live in the plugin skills,
 which every session loads from the installed plugin, so those parts need no refresh.
 
+- **`adlc-metrics.sh` sets CI runs that died in a setup step apart from red test runs**
+  (issue 56). `iterations_to_green` and `failed_first` counted every failed run of a merged
+  PR's branch; on one host five of eighteen first-run reds had died creating an ephemeral
+  database, before any test ran, and the retro read a provisioning problem as a test-quality
+  one. For each red run on a merged PR's branch the script now asks `gh run view --json jobs`
+  for the first failed step of the first failed job; a step whose name matches
+  `ADLC_SETUP_STEPS` (a case-insensitive regex; the default covers the runner's own "Set up
+  job", checkout, installs, caches, logins and ephemeral database or branch provisioning) makes
+  the run `infra_failed`, which leaves the iterations count and does not make its PR
+  `failed_first`. A new `infra_failed: N / M` line reports them against every CI run of those
+  PRs, so the cycle-retro sees the provisioning reds and the retro the test reds. A run whose
+  jobs cannot be read, or whose failed job names no failed step, stays a plain failure. Green
+  runs are never looked up; one call more per red run.
 - **The cycle ledger counts fix rounds from CHANGES review verdicts too** (issue 58).
   `adlc-cycle.sh` counted a round as an `adlc:changes-requested` label event on the issue's PR.
   Only the Actions review lane applies that label; a repo that runs the pipeline by hand, with
