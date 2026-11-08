@@ -17,12 +17,24 @@ Inputs (all deterministic — never agent self-report):
 - **Finding ledger** — **materialize it first** from the PR comments (the durable store):
   ```
   : > .adlc/metrics/findings.jsonl
-  for pr in $(gh pr list --state all --limit 50 --json number --jq '.[].number'); do
-    gh pr view "$pr" --json comments --jq '.comments[].body' \
-      | .adlc/scripts/adlc-log-findings.sh "$pr" review >> .adlc/metrics/findings.jsonl
+  for pr in $(gh pr list --state all --limit 500 --json number --jq '.[].number'); do
+    gh pr view "$pr" --json comments,reviews \
+      --jq '(.comments[] | {ts: .createdAt, body}), (.reviews[] | {ts: .submittedAt, body})
+            | select((.body // "") | test("ADLC-FINDING:")) | @json' \
+    | while IFS= read -r c; do
+        jq -r .body <<<"$c" | .adlc/scripts/adlc-log-findings.sh "$pr" review "$(jq -r .ts <<<"$c")"
+      done >> .adlc/metrics/findings.jsonl
   done
+  wc -l < .adlc/metrics/findings.jsonl    # findings in the ledger
   ```
-  This reads every `ADLC-FINDING: <severity> | <class> | <file>` line the reviewers left.
+  This reads every `ADLC-FINDING: <severity> | <class> | <file>` line the reviewers left, in
+  plain comments **and in review bodies** (a reviewer that submits a GitHub review leaves its
+  findings there, and `--json comments` alone never returns them). Each row carries its own
+  comment's time, so the `since` window applies to the ledger (`adlc-metrics.sh` keeps the rows
+  whose `ts` falls in its window). `--limit 500`: a repo past 50 PRs otherwise loses its older
+  ones without a word. The script reports on stderr every finding-shaped line it could not read;
+  look at those before ranking, since a marker shape it does not know is a finding the retro
+  never sees.
 - **`CONTEXT-LOG.md`** — what's already been added and why.
 
 ## Step 1 — Rank
