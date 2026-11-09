@@ -36,7 +36,7 @@ jobs:
       - name: Loop cap (count this PR's fix rounds)
         id: cap
         env:
-          GH_TOKEN: ${{ github.token }}   # two reads (the PR's timeline and comments); no write
+          GH_TOKEN: ${{ github.token }}   # used for two reads: the PR's timeline and its comments
           PR: ${{ github.event.pull_request.number }}
         run: |
           chmod +x .adlc/scripts/adlc-fix-cap.sh
@@ -63,7 +63,7 @@ jobs:
           GH_TOKEN: ${{ secrets.ADLC_DISPATCH_TOKEN }}
           PR: ${{ github.event.pull_request.number }}
         run: |
-          gh pr comment "$PR" --body "⚠️ The fix-loop cap could not count this PR's fix rounds, so the Builder did not run. Nothing changed: the PR keeps \`adlc:changes-requested\`. Fix the cause, then re-run the failed job: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          gh pr comment "$PR" --body "⚠️ The fix-loop cap could not count this PR's fix rounds, so the Builder did not run. Nothing changed: the PR keeps \`adlc:changes-requested\`. Fix the cause (if this branch is from before a tooling refresh it still holds the older scripts: merge the base branch into this PR), then re-run the failed job: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
 
       - name: Escalate to a human (cap reached)
         if: steps.cap.outputs.stop == 'true'

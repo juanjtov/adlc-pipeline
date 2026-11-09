@@ -7,7 +7,8 @@
 #
 # Usage:  adlc-local-ci.sh <pr> [--dry-run] [commands-file]     (default .adlc/local-ci.txt)
 #
-# The commands file is the host's own (the plugin ships none). One check per line:
+# The commands file is the host's own (the plugin ships none; a PR that changes the default one is
+# never fast-lane eligible, see adlc-triage.sh). One check per line:
 #     <name>: <command>
 #   The name is what comes before the FIRST colon: letters, digits, space, `.`, `_`, `-`. The
 #   command is the rest of the line, so it may hold colons itself (`db: psql postgres://…`). Blank
@@ -19,10 +20,14 @@
 #   it needs one.
 #
 # Refuses to run (exit 2, nothing posted) unless the working tree is clean (`git status
-# --porcelain` prints nothing: untracked files count, so commit the commands file or keep it
-# outside the repo) and HEAD is the PR's head commit (`gh pr view <pr> --json headRefOid`), so the
-# SHA in the marker is the commit that was checked out when the battery ran. HEAD is compared
-# again after the battery: a check that moved it means no comment.
+# --porcelain --untracked-files=normal` prints nothing: untracked files count whatever the repo's
+# status.showUntrackedFiles says, so commit the commands file or keep it outside the repo) and
+# HEAD is the PR's head commit (`gh pr view <pr> --json headRefOid`), so the SHA in the marker is
+# the commit that was checked out when the battery ran. Both are checked again after the battery:
+# a check that moved HEAD, rewrote a tracked file or left an untracked one (a formatter that
+# fixes, a code generator, a snapshot update) means exit 2 and no comment, because the checks
+# after it ran on something that is not that commit. Ignored files do not count: build output
+# belongs in .gitignore, and a formatter runs in its check mode here.
 #
 # The comment (`gh pr comment`, one call; --dry-run prints it instead) is a small table (check,
 # result, exit code, seconds) whose LAST line is the marker:
@@ -63,7 +68,9 @@ while IFS= read -r line || [ -n "$line" ]; do
 done < "$file"
 [ "${#names[@]}" -gt 0 ] || { echo "adlc-local-ci: ${file} names no check" >&2; exit 2; }
 
-dirty="$(git -C "$root" status --porcelain)" || { echo "adlc-local-ci: git status failed" >&2; exit 2; }
+# --untracked-files=normal: a repo with status.showUntrackedFiles=no would otherwise hide them
+tree() { git -C "$root" status --porcelain --untracked-files=normal; }
+dirty="$(tree)" || { echo "adlc-local-ci: git status failed" >&2; exit 2; }
 [ -z "$dirty" ] || { echo "adlc-local-ci: the working tree is not clean (untracked files count); commit or stash first, so the marker names the code that was tested" >&2; exit 2; }
 head="$(git -C "$root" rev-parse HEAD)" || { echo "adlc-local-ci: cannot read HEAD" >&2; exit 2; }
 want="$(gh pr view "$pr" --json headRefOid --jq .headRefOid)" || { echo "adlc-local-ci: could not read the head commit of PR #${pr}" >&2; exit 2; }
@@ -83,6 +90,9 @@ while [ "$i" -lt "${#names[@]}" ]; do
 done
 after="$(git -C "$root" rev-parse HEAD)" || after=""
 [ "$after" = "$head" ] || { echo "adlc-local-ci: HEAD moved during the battery (${head} → ${after:-unknown}); nothing posted" >&2; exit 2; }
+dirty="$(tree)" || { echo "adlc-local-ci: git status failed after the battery; nothing posted" >&2; exit 2; }
+[ -z "$dirty" ] || { echo "adlc-local-ci: the battery changed the working tree, so the checks after that did not run on ${head}; nothing posted. Make the checks read-only (a formatter in check mode) and put build output in .gitignore:" >&2
+                     printf '%s\n' "$dirty" | head -10 >&2; exit 2; }
 
 body="Local CI on \`${head}\`, run on a local machine by \`adlc-local-ci.sh\`, not by GitHub Actions. A record, not a gate.
 

@@ -11,10 +11,10 @@
 #         depth=4  #34 → #67 → #85 → #116  (issues: 6, open: 1)
 #       A chain is a ROOT issue (one that follows no other) and every issue that follows from it,
 #       so a parent with three follow-ups is one chain, not three: the line shows its longest
-#       path (a tie goes to the lower numbers) and counts every issue under the root, with how
-#       many are still open. depth = issues on that path, the root included. A chain whose root
-#       carries the label `adlc:accepted-risk` is decided: it is listed after the others on a
-#       line that starts `decided`, so `grep '^depth='` gives the chains still to decide.
+#       path (a tie goes to the lower numbers) and counts the issues in the chain, the root
+#       included, with how many are still open. depth = issues on that path, root included.
+#       A chain whose root carries `adlc:accepted-risk` is decided: it is listed after the
+#       others on a line that starts `decided`, so `grep '^depth='` gives those still to decide.
 #   adlc-chains.sh root <issue>
 #       One line, `root=#34 depth=4 open` or `root=#34 depth=4 accepted-risk`: the root of that
 #       issue's chain, the chain's depth as `report` counts it, and whether the root carries
@@ -32,6 +32,13 @@
 # issue linked to the PR by hand only is not found). A parent must be OLDER than its follow-up
 # (a lower number): a reference to itself or to a newer issue is dropped, so two issues that
 # name each other cannot loop. `report` names on stderr every reference that gave no parent.
+#
+# Limits: every issue read counts, whatever its author or label. Whoever can open an issue in
+# the repo (anyone, on a public one) can file issues whose marker lines name an existing issue
+# and each other, and so deepen its chain: `report` and QA's `root` then read the greater
+# depth. They cannot change what an existing issue names as its parent, and cannot make a
+# chain read decided (that takes the label on the root). The phrase reading is a heuristic: a
+# title or body that says "QA of #N" about an unrelated issue links to it.
 #
 # Cost: one `gh issue list --state all --limit $ADLC_CHAINS_LIMIT` call (default 1000, newest
 # first), plus the one `gh pr list` call above with the same limit. When the list comes back
@@ -113,7 +120,7 @@ case "$cmd" in
       ($min | tonumber) as $min |
       def line: "depth=\(.depth)  \(.path | map("#\(.)") | join(" → "))  (issues: \(.issues), open: \(.open))";
       ([.trees[] | select(.depth >= $min)] | sort_by([-.depth, .root])) as $deep
-      | "# ADLC follow-up chains — depth >= \($min) (\($n) issues read; one line per root issue: its longest path, every issue under it counted)",
+      | "# ADLC follow-up chains — depth >= \($min) (\($n) issues read; one line per root issue: its longest path; issues = the issues in the chain, the root included)",
         ($deep[] | select(.decided | not) | line),
         (if ([$deep[] | select(.decided | not)] | length) == 0 then "no undecided chain of depth >= \($min)" else empty end),
         ($deep[] | select(.decided) | "decided  " + line + "  root carries adlc:accepted-risk"),

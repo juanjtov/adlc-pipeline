@@ -92,8 +92,8 @@ issue. Put every such line in the PR body (with no PR, in your summary) as a **d
 as further follow-up work: **accept the risk** — the Principal labels the chain's root issue
 `adlc:accepted-risk`, and QA is then told to file no more follow-ups in that chain — or
 **redesign** — one issue that replaces the approach. A line that starts `decided` already
-carries the label: leave it out. `follow_ups_filed` in the metrics is the follow-ups' share of
-the issues opened.
+carries the label: leave it out. `follow_ups_filed` in the metrics counts only the issues
+labelled `adlc:follow-up`, so an older follow-up without the label is in this report, not there.
 
 ## Step 4 — Propose
 
