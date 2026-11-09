@@ -325,6 +325,8 @@ steps arrive through the plugin's hooks, and tokens/cost arrive as telemetry sen
 on GitHub's runners show their GitHub state only. Details and limits: `mission-control/README.md`.
 Try it with made-up data: `adlc-mission-control --demo --open`.
 
+![Mission Control with made-up data: the assembly line, the work list, and one agent's live steps with time and tokens](docs/mission-control-demo.png)
+
 ### Commands
 
 | Command | What it does |

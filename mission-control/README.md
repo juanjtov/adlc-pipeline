@@ -6,6 +6,10 @@ stations (one per agent, plus the two human gates), every request as a crate mov
 them, and for each station: what the agent is doing right now, what went in, what came out,
 and what it cost.
 
+![Mission Control showing made-up data: the assembly line with one station per agent and the two gates, the work list, and the Builder's live steps with time and tokens](../docs/mission-control-demo.png)
+
+*The page with `--demo` data: nothing in this picture is a real repo.*
+
 It is **read-only**. It never changes a label, posts a comment or merges. Phase 1 observes;
 acting on gates from the page is a later phase.
 
@@ -17,7 +21,10 @@ adlc-mission-control --demo --open     # made-up data, no GitHub needed
 ```
 
 Inside Claude Code, `/adlc-mission-control` does the same. The page is at
-`http://localhost:4319`. Options: `--repo owner/name`, `--port N`.
+`http://localhost:4319`. Options: `--repo owner/name`, `--port N`. `ADLC_MC_PORT` sets the port
+when `--port` is not given. On another port, change `OTEL_EXPORTER_OTLP_ENDPOINT` in the
+telemetry block below to match: tokens and cost are sent to that address, while the hook finds
+the port by itself.
 
 One copy serves every repo on the machine. Run the same command in another adopted repo while
 it is running and it prints that repo's address on the running copy
@@ -84,6 +91,24 @@ page still shows the line and every step; the token and cost figures stay empty.
   remainder of a request (tool definitions, the environment block, the conversation so far)
   is measured, but its text is not exported by Claude Code, so it cannot be shown.
 - **Epics are GitHub milestones.** The work list groups requests by milestone.
+
+## What it keeps, and how to clear it
+
+- **Where.** One SQLite file, `mc.sqlite`, and the marker `server.json`, both in
+  `~/.adlc/mission-control/` (or the folder `ADLC_MC_HOME` names). Nothing is stored anywhere
+  else, and `--demo` stores nothing at all.
+- **What.** The runs, steps and model replies described above, the names of the repos on the
+  menu, and a mirror of what was last read from GitHub (issues, pull requests, label history,
+  comments).
+- **For how long.** Nothing expires. Runs, steps and replies are never removed by age, and no
+  command removes them. The mirror's issues and pull requests are replaced on every read; its
+  label history and comments only grow.
+- **An upgrade can empty it.** When a new version changes the database layout, the first start
+  drops every table and rebuilds them; what was recorded before is gone. No release has
+  migrated data yet.
+- **To clear it yourself:** stop Mission Control (Ctrl+C), then delete the folder:
+  `rm -r ~/.adlc/mission-control` (or your `ADLC_MC_HOME`). The next start creates it again,
+  empty. Stop it first: the running copy holds the file open and would go on writing to it.
 
 ## How it is built
 
