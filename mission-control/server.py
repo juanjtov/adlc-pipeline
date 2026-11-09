@@ -18,7 +18,7 @@ import urllib.request
 import webbrowser
 import zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, quote, urlparse
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -242,6 +242,40 @@ def running_at(port):
         return False
 
 
+def state_at(port, repo):
+    """What the copy at `port` says for `repo`: its 'mode', and 'repo' as the name it will show. The page falls back
+    to its default repo for a name it does not know, so a link to one would show the wrong line."""
+    try:
+        with urllib.request.urlopen('http://127.0.0.1:%d/api/state?repo=%s' % (port, quote(repo, safe='/')), timeout=3) as res:
+            doc = json.loads(res.read())
+        return doc if isinstance(doc, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def already_running(port, repo, demo, open_page, note=''):
+    """Report the copy already running, point at this repo's line on it, and open that if asked."""
+    url = 'http://localhost:%d' % port
+    tail = '. ' + note if note else ''
+    there = state_at(port, repo)
+    if demo:
+        url += '/?demo=1'
+        print('Mission Control is already running at ' + url + tail)
+    elif there.get('mode') == 'demo':
+        print('Mission Control is already running at %s with demo data. Stop it first to start a live copy on port %d.' % (url, port))
+    elif repo and there.get('repo') == repo:
+        url += '/?repo=' + quote(repo, safe='/')
+        print('Mission Control is already running and shows %s too: %s%s' % (repo, url, tail))
+    elif repo:
+        print('Mission Control is already running at %s.%s %s is not on its menu yet: it appears once a Claude Code session '
+              'opens in this repo, or a pipeline agent runs here.' % (url, ' ' + note if note else '', repo))
+    else:
+        print('Mission Control is already running at ' + url + tail)
+    if open_page:
+        webbrowser.open(url)
+    return 0
+
+
 def marked(marker):
     """What the marker file says about a running copy: {'port', 'pid', ...}, or {} when there is none."""
     try:
@@ -264,20 +298,15 @@ def main(argv=None):
     home = ingest.data_home()
     marker = os.path.join(home, 'server.json')
     url = 'http://localhost:%d' % args.port + ('/?demo=1' if args.demo else '')
+    repo = (args.repo or ingest.Repos().lookup(os.getcwd())[0] or '').lower()
+    # One copy serves every repo on this machine; a start from another repo points at that repo's line on it.
     if running_at(args.port):
-        print('Mission Control is already running at ' + url)
-        if args.open:
-            webbrowser.open(url)
-        return 0
+        return already_running(args.port, repo, args.demo, args.open)
     other = marked(marker).get('port')
     if not args.demo and isinstance(other, int) and running_at(other):
         # A second copy on the same data would take over the marker, and agents would stop reporting to the first.
-        print('Mission Control is already running at http://localhost:%d. Stop it first to move it to port %d.' % (other, args.port))
-        if args.open:
-            webbrowser.open('http://localhost:%d' % other)
-        return 0
+        return already_running(other, repo, False, args.open, note='Stop it first to move it to port %d.' % args.port)
 
-    repo = (args.repo or ingest.Repos().lookup(os.getcwd())[0] or '').lower()
     if args.demo:
         store = Store()
     else:

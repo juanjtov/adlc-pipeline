@@ -1,6 +1,7 @@
 # ADLC Mission Control
 
-A live view of the pipeline for one repo, on your own machine. It shows the line as a row of
+A live view of the pipeline, on your own machine, for every repo you have adopted: one copy,
+one page, a repo menu at the top to switch between them. It shows the line as a row of
 stations (one per agent, plus the two human gates), every request as a crate moving between
 them, and for each station: what the agent is doing right now, what went in, what came out,
 and what it cost.
@@ -17,6 +18,13 @@ adlc-mission-control --demo --open     # made-up data, no GitHub needed
 
 Inside Claude Code, `/adlc-mission-control` does the same. The page is at
 `http://localhost:4319`. Options: `--repo owner/name`, `--port N`.
+
+One copy serves every repo on the machine. Run the same command in another adopted repo while
+it is running and it prints that repo's address on the running copy
+(`http://localhost:4319/?repo=owner/name`), and `--open` opens it there. A repo is on the menu
+once a Claude Code session has opened in it (the plugin's hook says so), once a pipeline agent
+has run in it, or when it is the repo you started from. If `?repo=` names a repo the copy does
+not know, the page falls back to one it knows.
 
 Requirements: Python 3.9 or newer (the one that ships with macOS developer tools is enough),
 `gh` signed in, `git`, `curl`. Nothing to install: no packages, no Docker, no build step.
@@ -86,8 +94,11 @@ neither read the state nor post events.
 
 The database and a small marker file, `server.json`, live in `~/.adlc/mission-control/`. Set
 `ADLC_MC_HOME` to move both; `hook.sh` reads the same variable, so set it for Claude Code too.
-The marker tells the hook which port to send to. One copy runs per folder: a second one points
-you at the first. The marker is removed when Mission Control stops (Ctrl+C, a closed terminal,
+The marker tells the hook which port to send to. One copy runs per data folder, and it serves
+every repo: a second start points you at the first copy, on the repo you started from. A copy
+per repo is possible with a different `ADLC_MC_HOME` and `--port` for each, but its runs land
+there only from sessions that have that `ADLC_MC_HOME` set; any other session reports to the
+copy of the default folder. The marker is removed when Mission Control stops (Ctrl+C, a closed terminal,
 or `kill`). If the process is killed outright the marker stays; the hook then finds nothing
 listening and stays silent, and the next start replaces it. `--demo` writes no marker and keeps
 nothing, so agents never report to made-up data.
