@@ -21,7 +21,8 @@ copy `adlc-<role>` alike. A role whose contract is missing or unreadable is bloc
     or git subcommand outside the role's list. Agent `tools:` frontmatter takes tool NAMES
     only, so these per-command limits live here.
   * `labels.may_add`, for the same roles: `gh issue edit --add-label X` and
-    `adlc-relabel.sh <issue> X` when X is not on the list, or is computed.
+    `adlc-relabel.sh <issue> X` when X is not on the list, or cannot be read as one written
+    word (computed, "$@", an unquoted variable, a command that sets IFS).
   * `write_paths` (WRITE_PATHS): an Edit, Write, MultiEdit or NotebookEdit call whose file is
     outside the role's globs, taken from the top level of the repository the session is in.
     The path is resolved as the tool would resolve it (the session's directory, `..`, `~`,
@@ -41,6 +42,7 @@ It reads command TEXT. A script written to disk, or code handed to an interprete
 (`python -c`, `node -e`), is invisible to it. This is a guardrail, not a sandbox — the hard
 gate stays server-side (branch protection or the tripwire) and with the human Gate 2.
 """
+import fnmatch
 import json
 import os
 import re
@@ -191,6 +193,8 @@ RAW_MERGE = re.compile(r"(?<![\w.-])gh\b[^\n;|&]*?\bpr\b[^\n;|&]*?\bmerge\b")  #
 RAW_API = re.compile(r"(?<![\w.-])gh\b[^\n;|&]*?\bapi\b")
 RAW_HTTP = re.compile(r"^(?=.*(?<![\w.-])(?:curl|wget)\b)(?=.*(?:(?:api|uploads)\.github\.com|GITHUB_(?:API|GRAPHQL)_URL))",
                       re.I | re.M)  # one line naming both, in either order
+NOEXEC_SWITCHES = re.compile(r"-[nevxu]+")  # shell options that take no value in any of SHELLS
+IFS_NAME = re.compile(r"(?<![A-Za-z0-9_])IFS(?![A-Za-z0-9_])")
 MAX_DEPTH = 12
 
 
@@ -798,6 +802,9 @@ class Guard:
         self.data = []
         self.pending = []  # opaque constructs seen, checked once all the data is collected
         self.ids = [0]
+        # The command sets IFS (an assignment, or the name anywhere in its text: `read IFS`,
+        # `for IFS in`): how an unquoted variable splits into words is then unknown.
+        self.ifs = bool(IFS_NAME.search(raw))
 
     def cwd_of(self, scope):
         for k in range(len(scope), -1, -1):
@@ -920,6 +927,7 @@ class Guard:
         name, value = word.text.split("=", 1)
         append = name.endswith("+")
         name = name.rstrip("+")
+        self.ifs = self.ifs or name == "IFS"
         if word.dynamic or (append and name not in self.vars):
             self.vars.pop(name, None)
         else:
@@ -939,6 +947,7 @@ class Guard:
             env.append(words.pop(0))
         for word in env:
             self.data.append(word.text.split("=", 1)[1])
+            self.ifs = self.ifs or word.text.startswith(("IFS=", "IFS+="))
         if not words:
             for word in env:  # `NAME=value` on its own sets a shell variable
                 self.assign(word)
@@ -947,6 +956,11 @@ class Guard:
         head, args = words[0], words[1:]
         prog = base(head)
 
+        if self.role and prog not in ("[", "[[") and (any(c in prog for c in "*?[{") or prog.startswith("=")):
+            # `adlc-relabel.s[h]`, `g?`, `{gh,x}`, zsh's `=gh`: the shell makes another program's name of it
+            raise Block("a program name the shell expands (a glob, a brace, a leading `=`: `%s`) can't be checked "
+                        "against the %s role's limits. Write the program name out."
+                        % (head.text, self.role))
         if head.dynamic and any(mark in head.text.rsplit("/", 1)[-1] for mark in EXPANSIONS):
             # The program's NAME is computed ("$GIT", $(command -v gh)): it may be git, gh or
             # curl. ("$HOME/bin/gh" is not this case: its last part is literal, so it is gh.)
@@ -1111,23 +1125,21 @@ class Guard:
                     self.check_text(args[k + 1].text, depth + 1, self.child_scope(scope))
                 return
         # `bash .adlc/scripts/adlc-relabel.sh 12 stage:qa` is the relabel script all the same (a
-        # script file's contents are not read here; this one is known by name). The script is the
-        # first word that is not an option (`-x`, `+x`, `--norc`) or an option's value (`-o pipefail`);
+        # script file's contents are not read here; this one is known by name). The first word
+        # that names it counts, wherever it stands: which options of which shell take a value
+        # (`-euo pipefail`, `--rcfile f`, zsh's `--emulate sh`) is not the guard's to guess. The
+        # name is read as the shell reads it: a glob that matches it is it, and so may a brace be.
         # "$S/adlc-relabel.sh" is that script too, as a computed prefix with a literal last part is
-        # read everywhere else here. `bash -n script` parses and runs nothing.
-        takes_value = ("-o", "+o", "-O", "+O", "--rcfile", "--init-file")
-        skip = False
+        # read everywhere else here. Only `bash -n script` parses and runs nothing — when all that
+        # stands before the script is plain switches, with nothing to turn -n off again (`+n`).
         for k, a in enumerate(args):
-            if skip:
-                skip = False
+            last = a.text.rsplit("/", 1)[-1]
+            if any(mark in last for mark in EXPANSIONS) or not (
+                    fnmatch.fnmatchcase("adlc-relabel.sh", last) or ("{" in last and "}" in last)):
                 continue
-            if a.text.startswith(("-", "+")):
-                if a.text in takes_value:
-                    skip = True
-                elif a.text.startswith("-") and not a.text.startswith("--") and "n" in a.text[1:]:
-                    return
-                continue
-            if base(a) == "adlc-relabel.sh" and not any(mark in a.text.rsplit("/", 1)[-1] for mark in EXPANSIONS):
+            before = args[:k]
+            if not (any("n" in b.text for b in before)
+                    and all(not b.dynamic and NOEXEC_SWITCHES.fullmatch(b.text) for b in before)):
                 self.check_relabel(args[k + 1:], scope)
             break
         if cmd.fed or any("<(…)" in a.text for a in args):
@@ -1567,22 +1579,39 @@ class Guard:
             self.check_gh_api(args[args.index(positional[0]) + 1:])
 
     def check_relabel(self, args, scope):
-        """`adlc-relabel.sh <issue> <label>` is `gh issue edit` by another name, and <label> is
-        the one label it puts on the issue."""
+        """`adlc-relabel.sh <issue> <label>` is `gh issue edit` by another name, and its second
+        word is the one label it puts on the issue. For a role with a label list each of the two
+        must be ONE word for certain: the issue a number written out or one quoted variable
+        ("$N"), the label written out. "$@", "${a[@]}", an unquoted variable, or any variable
+        once the command sets IFS, can carry the label in the issue's place."""
         self.check_gh([Word("issue"), Word("edit")], scope)
         allowed = ROLE_RULES[self.role]["labels"] if self.role else None
-        if allowed is None:
+        if allowed is None or not args:
             return
-        if args and args[0].splits:  # unquoted: it may hold the issue AND the label
-            self.check_label(args[0], allowed)
+        self.check_ifs()
+        issue = args[0]
+        if issue.dynamic:
+            if issue.splits or not VAR_REF.fullmatch(issue.text) or len(args) < 2:
+                self.check_label(issue, allowed)  # computed: this raises
+        elif not issue.text.isdigit():
+            raise Block("the issue of this relabel (`%s`) is not a number written out, so the "
+                        "label it puts on can't be checked against the %s role's list. Write "
+                        "`adlc-relabel.sh <number> <label>`." % (issue.text, self.role))
         if len(args) > 1:
             self.check_label(args[1], allowed)
+
+    def check_ifs(self):
+        if self.ifs:
+            raise Block("this command names IFS, which decides how a variable splits into "
+                        "words, so the labels it adds can't be checked against the %s role's "
+                        "list. Run the label change as a command of its own." % self.role)
 
     def check_labels(self, args, allowed):
         """`gh issue edit` by a role whose contract lists the labels it may put on an issue:
         every `--add-label` value must be written out and on that list. A computed word that
         could hold the option itself blocks too: an unquoted one anywhere, or a quoted one that
         is not the value of another option."""
+        self.check_ifs()
         k = 0
         while k < len(args):
             word = args[k]

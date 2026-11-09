@@ -15,6 +15,9 @@ Checked only (a drift here needs a person):
   * the contract files are the guard's five roles, no more and no fewer
   * every agent step names a role and has one lane entry in that role's contract, and every
     lane entry has its step
+  * an agent step's `claude_args` is one block that holds its `--agent`, `--permission-mode
+    dontAsk` and one `--allowedTools "…"` line and nothing else: a second grant under the CLI's
+    other spelling (`--allowed-tools`), or any other flag, is refused
   * no lane grant goes past the role's own contract: a gh or git command outside `shell`, a
     bare Bash for a narrowed role, an Edit or Write outside `write_paths`
 
@@ -37,7 +40,9 @@ OUTPUTS = "templates/scripts/adlc-outputs.sh"
 TABLE_START = "# >>> rendered by contracts/render.py"
 TABLE_END = "# <<< rendered"
 AGENT_ACTION = re.compile(r"uses:\s*anthropics/claude-code-action\b")
-GRANT_LINE = re.compile(r'^(\s*--allowedTools\s+")([^"]*)(".*)$')
+GRANT_LINE = re.compile(r'^(\s*--allowedTools\s+")([^"]*)("\s*)$')
+AGENT_LINE = re.compile(r"--agent\s+(\S+)")
+FLAG_ELSEWHERE = re.compile(r"--allowed-?[Tt]ools|--agent\b|--permission-mode|--dangerously")
 
 
 def text_ok(value):
@@ -182,15 +187,32 @@ def load(problems):
 
 
 def agent_steps(lines):
-    """The steps that run claude-code-action: {name, agent, grant: [line indexes]} in file order.
-    A step is a list item at the indent of the first one under a `steps:` key; a deeper `- ` (a
-    bullet in a prompt) is not one."""
-    steps, item, step, expect = [], None, None, False
+    """The steps that run claude-code-action, in file order: {name, agent, grant: [line indexes],
+    flaws: [what is wrong with how the step passes its flags]}. A step is a list item at the
+    indent of the first one under a `steps:` key; a deeper `- ` (a bullet in a prompt) is not one.
+    The flags are read from the step's `claude_args: |` block and nowhere else, so a flag that
+    sits anywhere else in the step, or a line of the block that is not one of the three a step
+    passes, is a flaw: which of two grants the CLI honours must never be a guess."""
+    steps, item, step, expect, block = [], None, None, False, None
     for i, line in enumerate(lines):
         body = line.strip()
+        indent = len(line) - len(line.lstrip(" "))
+        if block is not None and body:  # inside the step's claude_args block (a `#` line is text there)
+            if indent > block:
+                m = AGENT_LINE.fullmatch(body)
+                if m:
+                    step["agents"].append(m.group(1))
+                elif GRANT_LINE.match(line):
+                    step["grant"].append(i)
+                elif body == "--permission-mode dontAsk":
+                    step["modes"] += 1
+                else:
+                    step["flaws"].append("line %d of its claude_args (`%s`) is not `--agent …`, "
+                                         "`--permission-mode dontAsk` or `--allowedTools \"…\"`" % (i + 1, body))
+                continue
+            block = None
         if not body or body.startswith("#"):
             continue
-        indent = len(line) - len(line.lstrip(" "))
         if item is not None and indent < item:
             item = step = None  # the job's step list ended
         if re.fullmatch(r"steps:", body) and (item is None or indent < item):
@@ -203,7 +225,7 @@ def agent_steps(lines):
         if item is None:
             continue
         if indent == item and body.startswith("- "):
-            step = {"name": None, "agent": None, "grant": [], "action": False}
+            step = {"name": None, "agents": [], "grant": [], "modes": 0, "blocks": 0, "flaws": [], "action": False}
             body, indent = body[2:].lstrip(), item + 2
             key = True
         else:
@@ -215,12 +237,21 @@ def agent_steps(lines):
         elif key and AGENT_ACTION.match(body):
             step["action"] = True
             steps.append(step)
-        elif step["action"]:
-            m = re.fullmatch(r"--agent\s+(\S+)", body)
-            if m:
-                step["agent"] = step["agent"] or m.group(1)
-            elif GRANT_LINE.match(line):
-                step["grant"].append(i)
+        elif body == "claude_args: |":
+            step["blocks"] += 1
+            block = indent
+        elif body.startswith("claude_args:") or FLAG_ELSEWHERE.search(body):
+            step["flaws"].append("line %d (`%s`) passes a flag outside a `claude_args: |` block" % (i + 1, body[:60]))
+    for step in steps:
+        if step["blocks"] != 1:
+            step["flaws"].append("must have exactly one `claude_args: |` block (found %d)" % step["blocks"])
+        if len(step["agents"]) > 1:
+            step["flaws"].append("names more than one `--agent`")
+        if step["modes"] != 1:
+            step["flaws"].append("must have exactly one `--permission-mode dontAsk` line (found %d)" % step["modes"])
+        if len(step["grant"]) != 1:
+            step["flaws"].append("must have exactly one `--allowedTools \"…\"` line (found %d)" % len(step["grant"]))
+        step["agent"] = step["agents"][0] if step["agents"] else None
     return steps
 
 
@@ -261,9 +292,10 @@ def derive(problems):
         text = read(rel)
         lines = text.split("\n")
         for step in agent_steps(lines):
-            if step["agent"] is None:
-                continue  # a skill run on the main thread: no role, not derived here
             where = "%s, step \"%s\"" % (rel, step["name"])
+            problems.extend("%s: %s" % (where, flaw) for flaw in step["flaws"])
+            if step["agent"] is None:
+                continue  # a skill run on the main thread has no role: its grant is not derived here
             role = step["agent"][len("adlc:"):] if step["agent"].startswith("adlc:") else None
             if role not in adlc_guard.ROLES:
                 problems.append("%s: runs `--agent %s`, which is not one of the plugin's roles" % (where, step["agent"]))
@@ -277,10 +309,8 @@ def derive(problems):
                                 % (where, role, len(entries)))
                 continue
             used.add((role, entries[0]))
-            if len(step["grant"]) != 1:
-                problems.append("%s: must have exactly one `--allowedTools \"…\"` line (found %d)"
-                                % (where, len(step["grant"])))
-                continue
+            if step["flaws"]:
+                continue  # which grant line counts is not clear: render nothing into it
             grant = ",".join(contracts[role]["lanes"][entries[0]]["allowedTools"])
             m = GRANT_LINE.match(lines[step["grant"][0]])
             if m.group(2) != grant:

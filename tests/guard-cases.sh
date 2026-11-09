@@ -632,6 +632,44 @@ g D adlc-product-analyst feat 'gh issue edit 5 --add-label stage:design'
 g A adlc-qa-release-ops feat 'gh issue edit 5 --add-label needs:human'          # not a narrow role: its labels are not limited here
 g A adlc:builder feat 'gh pr edit 5 --add-label lane:fast'
 g A - feat 'gh issue edit 5 --add-label stage:design'                           # the Principal's own session
+# the relabel script's two words must each be ONE word for certain
+g D $AN feat 'set -- 5 stage:fast; .adlc/scripts/adlc-relabel.sh "$@"'           # "$@" is as many words as it holds
+g D $AN feat 'a=(5 stage:fast); .adlc/scripts/adlc-relabel.sh "${a[@]}"'
+g D $AN feat $'bash -c \'.adlc/scripts/adlc-relabel.sh "$@"\' _ 5 stage:fast'
+g D $AN feat 'f() { .adlc/scripts/adlc-relabel.sh "$@"; }; f 5 stage:fast'
+g D $AN feat '.adlc/scripts/adlc-relabel.sh "$1" "$2"'
+g D $AN feat '.adlc/scripts/adlc-relabel.sh "$N"'                                # one computed word and no label: not readable as <issue> <label>
+g D $AN feat '.adlc/scripts/adlc-relabel.sh "${N:-5}" gate:stories'              # only a plain "$N" is taken as the issue
+g D $AN feat '.adlc/scripts/adlc-relabel.sh five gate:stories'
+g A $AN feat '.adlc/scripts/adlc-relabel.sh 5'                                   # no label at all: the script refuses that itself
+g D $AN feat 'IFS=,; X=5,stage:fast; .adlc/scripts/adlc-relabel.sh $X'           # IFS decides how $X splits, and the guard can't know it
+g D $AN feat 'IFS=,; X=5,--add-label,stage:fast; gh issue edit $X'
+g D $AN feat 'read IFS <<< ,; X=5,--add-label,stage:fast; gh issue edit $X'
+g D $AN feat 'I""FS=,; X=5,--add-label,stage:fast; gh issue edit $X'
+g A $AN feat 'gh issue comment 5 --body "IFS is a shell variable" && git status' # the name alone blocks nothing but a label change
+# the relabel script behind a shell: any option spelling, and a name the shell expands
+g D $AN feat 'bash -euo pipefail .adlc/scripts/adlc-relabel.sh 5 stage:fast'     # `pipefail` is -o's value, not the script
+g D $AN feat 'bash -xo pipefail .adlc/scripts/adlc-relabel.sh 5 stage:fast'
+g D $AN feat 'bash -n +n .adlc/scripts/adlc-relabel.sh 5 stage:fast'             # +n turns -n off again: the script runs
+g D $AN feat 'bash -n -o pipefail +o noexec .adlc/scripts/adlc-relabel.sh 5 stage:fast'
+g D $AN feat 'zsh --emulate sh .adlc/scripts/adlc-relabel.sh 5 stage:fast'       # an option's value the guard does not know
+g D $AN feat 'bash .adlc/scripts/adlc-relabel.s[h] 5 stage:fast'                 # a glob that matches the script's name
+g D $AN feat 'bash .adlc/scripts/adlc-rel* 5 stage:fast'
+g D $AN feat 'bash .adlc/scripts/{adlc-relabel.sh,5} stage:fast'                 # a brace that may hold it
+g D $RV feat 'bash -euo pipefail .adlc/scripts/adlc-relabel.sh 12 stage:qa'
+g D $RV feat 'bash -n +n .adlc/scripts/adlc-relabel.sh 12 stage:qa'
+g A $AN feat 'bash -euo pipefail .adlc/scripts/adlc-relabel.sh 5 gate:stories'
+g A $AN feat 'bash -xn .adlc/scripts/adlc-relabel.sh 5 stage:fast'               # -n with plain switches only: nothing runs
+g D $AN feat '.adlc/scripts/adlc-relabel.s[h] 5 stage:fast'                      # a narrow role's program name: nothing the shell expands
+g D $AN feat '.adlc/scripts/{adlc-relabel.sh,5} stage:fast'
+g D $AN feat '/opt/homebrew/bin/g[h] issue close 7'
+g D $AN feat '=gh issue close 7'                                                 # zsh: `=gh` is the path of gh
+g A $AN feat '[ -f README.md ] && gh issue view 5'                               # `[` is a program, not a glob
+g A - feat './scripts/build-*.sh && ls'                                          # not a narrow role: untouched
+# a flag before the gh subcommand: the label rule cannot be reached around it
+g D $AN feat 'gh issue --title view edit 5 --add-label stage:fast'               # gh reads this as `gh issue edit`
+g D $AR feat 'gh issue --body view edit 5 --add-label gate:deploy'
+g A $AN feat 'gh -R o/r issue edit 5 --add-label gate:stories'
 
 # ── file writes: a role whose contract limits its paths (architect: docs/**; analyst, reviewer: none) ──
 w A $AR wr Write "$GR/wr/docs/adr/0002-login.md"                 # an absolute path into the repo's docs/

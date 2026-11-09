@@ -1882,6 +1882,7 @@ for f in "$T"/adlc-*.yml; do
   eq "$n" "$b: installs the plugin"        "$(count '^[[:space:]]*plugins:[[:space:]]*"adlc@')"
   eq "$n" "$b: names the marketplace"      "$(count '^[[:space:]]*plugin_marketplaces:[[:space:]]*"https://.*\.git"')"
   eq "$n" "$b: grants tools"               "$(count '--allowedTools "')"
+  eq "$n" "$b: …once per step, and not a second time under the CLI's other spelling (--allowed-tools)" "$(count '--allowed-?[Tt]ools')"
   eq "$n" "$b: denies everything else"     "$(count '--permission-mode dontAsk')"
   eq "$n" "$b: lists the dispatch bot"     "$(count '^[[:space:]]*allowed_bots:')"
   eq "$n" "$b: runs a named agent or skill" "$(count '--agent adlc:[a-z-]+$|prompt: "/adlc:[a-z-]+"')"
@@ -3194,6 +3195,25 @@ print(" ".join(sorted(g.ROLES)) + " ", end="")' "$ROOT/hooks" 2>/dev/null)"
   ctree; csed templates/github/adlc-qa.yml 's/^\( *\)--permission-mode dontAsk$/&\
 \1--allowedTools "Read"/'
   caught "two grant lines in one step are refused (which one counts must not be a guess)" "must have exactly one \`--allowedTools"
+  # a step's claude_args holds its agent, the permission mode and the one grant line: a grant the CLI
+  # would also take, spelt so that the derived line never sees it, is refused
+  cargs() { csed templates/github/adlc-intake.yml "s/^\\( *\\)--permission-mode dontAsk\$/&\\
+\\1$1/"; }   # <a line to add to the Analyst step's claude_args>
+  ctree; cargs '--allowed-tools "Bash"';         caught "a second grant under the CLI's other spelling is refused" 'claude_args (`--allowed-tools "Bash"`) is not'
+  ctree; cargs '--allowedTools=Bash';            caught "…and one written with =" 'claude_args (`--allowedTools=Bash`) is not'
+  ctree; cargs '--dangerously-skip-permissions'; caught "…and any other flag" 'claude_args (`--dangerously-skip-permissions`) is not'
+  ctree; cargs '--permission-mode bypassPermissions'; caught "…a second permission mode included" 'claude_args (`--permission-mode bypassPermissions`) is not'
+  rwrite; check 1 "--write does not make any of these pass" $?
+  ctree; csed templates/github/adlc-intake.yml 's/--allowedTools "\(Skill[^"]*\)"$/--allowedTools "\1" --allowedTools "Bash"/'
+  caught "a second grant after the first, on the same line, is refused" "must have exactly one \`--allowedTools"
+  ctree; csed templates/github/adlc-intake.yml 's/^\( *\)claude_args: |$/\1claude_args: --agent adlc:product-analyst --allowedTools "Bash"/'
+  caught "flags on the claude_args line itself are refused: the derived line would not be the grant" 'passes a flag outside a `claude_args: |` block'
+  ctree; csed templates/github/adlc-intake.yml 's/^\( *\)prompt: |$/\1claude_args: --allowed-tools "Bash"\
+&/'
+  caught "a second claude_args key is refused" 'passes a flag outside a `claude_args: |` block'
+  ctree; csed templates/github/adlc-retro.yml 's/^\( *\)--permission-mode dontAsk$/&\
+\1--allowed-tools "Bash(rm:*)"/'
+  caught "the agent-less retro steps are held to the same shape" 'step "Run the retro (opens a proposal PR)": line'
   # the contract's own shape
   ctree; cjq architect 'del(.write_paths)';                      caught "a missing enforced key is refused, as the guard refuses it" "contracts/architect.json: the guard cannot read it"
   ctree; cjq architect '.write_path = .write_paths';             caught "an unknown key is refused" "the keys must be exactly"

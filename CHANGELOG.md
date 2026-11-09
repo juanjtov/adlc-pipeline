@@ -49,12 +49,18 @@ the installed plugin, so those parts need no refresh.
   (`contracts/README.md` says which fields are enforced, by what, and which are documentation).
   `contracts/render.py --write` renders the `tools:` lines, the role steps' `--allowedTools`
   lines and the marker table of the new `adlc-outputs.sh` from them (every existing line came
-  out unchanged); `--check`, run by `tests/run.sh`, fails on a difference and on a lane grant
-  that goes past the role's own contract. The guard hook builds `ROLE_RULES` from the contracts
+  out unchanged); `--check`, run by `tests/run.sh`, fails on a difference, on a lane grant
+  that goes past the role's own contract, and on any flag in a step's `claude_args` besides its
+  agent, `--permission-mode dontAsk` and that one grant (a second grant spelt `--allowed-tools`
+  would otherwise never be compared). The guard hook builds `ROLE_RULES` from the contracts
   when it starts, and blocks a role whose contract is missing or unreadable. It gains two
   blocks, in the lanes and in a local session in an adopted repo alike. For the Analyst and
   the Architect: a `gh issue edit --add-label` or `adlc-relabel.sh` call whose label is not on
-  the role's list (`gate:stories`; `stage:build`) or is computed. And, through a second
+  the role's list (`gate:stories`; `stage:build`), or is not one written word (computed, `"$@"`,
+  in a command that sets `IFS`); the script is recognised behind any shell option spelling
+  (`bash -euo pipefail …`), and a narrow role's program name may hold no glob or brace. This
+  stops a role that types the call: `contracts/README.md` lists what still gets past (a script
+  on disk, text piped into a shell, a brace expansion). And, through a second
   `PreToolUse` entry on Edit, Write, MultiEdit and NotebookEdit: a file outside the role's
   write paths, with `..` and symbolic links resolved (the Architect: `docs/**`; the Analyst
   and the reviewer: no file). Mission Control's permissions panel reads the same table and

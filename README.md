@@ -433,9 +433,11 @@ nothing about this plugin. So every agent step in the lane templates does three 
   Anything else that would need approval is denied; file reads and read-only commands (`ls`,
   `grep`, read-only `git`) still run. A role step's grant is written in the role's contract
   (`contracts/<role>.json`) and the workflow line is rendered from it; `tests/run.sh` fails when
-  the two differ and pins which agent each lane runs, so widening a grant is a visible change
-  to a contract. (The retro's two steps run a skill as no role; their grant is pinned in
-  `tests/run.sh` itself.)
+  the two differ, or when a step's `claude_args` holds any flag besides its agent,
+  `--permission-mode dontAsk` and that one grant line, and it pins which agent each lane runs.
+  So a wider grant in `claude_args` is a visible change to a contract; the action's other
+  inputs are not checked. (The retro's two steps run a skill as no role; their grant is pinned
+  in `tests/run.sh` itself.)
 
 **The design lane hands its ADR over on a branch.** The Architect cannot commit or push, so
 after it runs the workflow commits its `docs/` changes to `adlc/design-<issue>` and only then
@@ -474,7 +476,10 @@ starts in, or moves into, a repo that adopted ADLC. The same hook holds, from ea
 contract, the per-command limits of the three narrow roles (an agent's `tools:` field takes tool
 *names*, so `Bash(gh issue:*)` there limits nothing) and the labels each may put on an issue
 with `gh issue edit --add-label` or `adlc-relabel.sh`: the Analyst `gate:stories`, the Architect
-`stage:build`, the reviewer none. A role whose contract is missing or unreadable is blocked.
+`stage:build`, the reviewer none. Like the rest of the guard, that holds for a call it can
+read: [`contracts/README.md`](contracts/README.md) lists the spellings that still get past it
+(a script, text piped into a shell, a brace expansion). A role whose contract is missing or
+unreadable is blocked.
 The same launcher also runs on Edit, Write, MultiEdit and NotebookEdit, and there it blocks a
 file outside the role's write paths: the Architect writes under `docs/` only, the Analyst and
 the reviewer write no file, in a lane and in a local session alike (a `..`, or a symbolic link

@@ -16,10 +16,10 @@ keeps them apart:
 | `tools` | The agent's tools, by name. | **Derived** into the `tools:` line of `agents/<role>.md` and `templates/agents/adlc-<role>.md.tmpl`. Claude Code applies that line. |
 | `shell` | `null` when the role is not narrowed. Otherwise the `gh` command groups it may use, each with its subcommands (`null` = every subcommand of the group), and the `git` subcommands. | **Enforced** by the guard hook on every Bash call the role makes. A `gh` or `git` subcommand outside the lists is blocked. For `git branch`, `git remote` and `--output` the guard adds its own read-only rules. |
 | `write_paths` | `null` when not limited. Otherwise the globs, from the repository's top level, that the role may write; `[]` means it writes no file. `**` spans directories, `*` and `?` stay inside one name. | **Enforced** by the guard hook on Edit, Write, MultiEdit and NotebookEdit calls. |
-| `labels.may_add` | `null` when not limited. Otherwise the labels the role may put on an issue. It can be a list only where `shell` is set. | **Enforced** by the guard hook on `gh issue edit --add-label` and on `adlc-relabel.sh <issue> <label>`: a label off the list, or a computed one, is blocked. |
+| `labels.may_add` | `null` when not limited. Otherwise the labels the role may put on an issue. It can be a list only where `shell` is set. | **Enforced** by the guard hook on `gh issue edit --add-label` and on `adlc-relabel.sh <issue> <label>`, as far as it can read the command: a label off the list is blocked, and so is a call whose label is not one written word (a computed one, `"$@"`, an unquoted variable, a command that sets `IFS`). What still gets past is listed under "What is not covered". |
 | `labels.moves` | The `stage:`/`gate:` moves the role owns: from, to, and who makes the move where. | **Documentation.** `render.py --check` only checks that each `to` is on `may_add` when that is a list. |
 | `outputs` | Per duty, the marker lines its comment carries: the form, whether it is required, and which code reads it. A required marker has a `check`: the extended regex of its form, and whether `any` line or the `last` line that carries the marker must match. | The required markers are **derived** into the table inside `templates/scripts/adlc-outputs.sh`. An optional marker is **documentation**. |
-| `lanes` | Each Actions step that runs the role: workflow, step name, and the exact tool grant. | **Derived** into that step's `--allowedTools "…"` line in `templates/github/`. Claude Code applies it in the lane, with `--permission-mode dontAsk`. `render.py --check` also refuses a grant that goes past the same contract: a `gh`/`git` command outside `shell`, a bare `Bash` for a narrowed role, an edit grant outside `write_paths`. |
+| `lanes` | Each Actions step that runs the role: workflow, step name, and the exact tool grant. | **Derived** into that step's `--allowedTools "…"` line in `templates/github/`. Claude Code applies it in the lane, with `--permission-mode dontAsk`. `render.py --check` also refuses a grant that goes past the same contract (a `gh`/`git` command outside `shell`, a bare `Bash` for a narrowed role, an edit grant outside `write_paths`), and a step whose `claude_args` holds anything but its `--agent`, `--permission-mode dontAsk` and that one grant line: a second grant under the CLI's other spelling (`--allowed-tools`) would otherwise never be compared. Other inputs of the action are not looked at. |
 | `inputs` | What the role reads. | **Documentation.** Nothing limits what an agent reads. |
 
 The guard requires `shell`, `write_paths` and `labels.may_add` to be written out, `null`
@@ -52,11 +52,21 @@ is in, at a path one of the globs matches. With no git work tree there, the writ
   held by the prompt.
 - **Taking a label off.** Only `--add-label` and the label `adlc-relabel.sh` puts on are checked.
 - **The limits of reading command text.** `shell` and `labels.may_add` are checked on the text
-  of a Bash command. What the main README says under "It still reads command *text*" applies:
-  a script on disk, or code handed to another program, is not read. Text piped into a shell
-  (`echo "…" | bash`) is scanned for the blocks that hold for everyone, not against a role's
-  lists. And the label check looks for `--add-label` as written: the guard does not expand
-  braces, so `{--add-label,x}` is not seen.
+  of a Bash command, so they stop a role that types the call, not one that hides it. What the
+  main README says under "It still reads command *text*" applies. Known ways past a role's
+  command list and its label list, none of them closed:
+  - a script on disk, a copy of `adlc-relabel.sh` under another name included, and code handed
+    to another program (`python3 -c …`);
+  - text fed to a shell that the guard cannot read (`echo "…" | bash`, `source <(…)`): it is
+    scanned for the blocks that hold for everyone, not against a role's lists;
+  - a brace expansion that produces the option, `{--add-label,x}`: the guard does not expand
+    braces. (In a program's name it refuses them for a narrow role, as it refuses a glob and
+    zsh's `=name`.)
+  - a filename glob that expands to the option (`--add-labe?`, with a file of that name in the
+    directory);
+  - an `IFS` change the guard does not recognise. It blocks a label change in a command that
+    assigns `IFS` or names it anywhere in its text; a name built at run time is not seen;
+  - a `gh` alias or extension set up outside the commands the guard reads.
 - **Outputs before a handoff.** `adlc-outputs.sh` checks a text against the table, and no lane
   calls it yet. Each lane still reads its marker in its own step: `adlc-verdict.sh` for
   `ADLC-ADV` and `ADLC-ARCH`, the intake lane's handoff for `ADLC-TRIAGE`, the design lane's
