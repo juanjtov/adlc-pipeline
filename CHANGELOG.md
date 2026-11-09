@@ -22,12 +22,13 @@ which every session loads from the installed plugin, so those parts need no refr
   Control's station view and any lane keyed on the older label. New `adlc-relabel.sh <issue>
   <stage:…|gate:…>` reads the issue's labels and, in one `gh issue edit`, removes every other
   `stage:`/`gate:` label and adds the new one; the intake, design, review and fast lanes, the
-  RUNBOOK's fast lane and the Analyst, Architect and QA prompts call it instead of a pair, and
-  the doctor's fix line names it. The guard hook judges the script as the `gh issue edit` it is,
+  RUNBOOK's fast lane and QA step, and the Analyst, Architect and QA prompts (role skills and
+  lane prompts alike) call it instead of a pair, and the doctor's fix line names it. The guard hook judges the script as the `gh issue edit` it is,
   so the adversarial reviewer, which may not move labels, may not run it either. `adlc-cycle.sh`
   now ends a label's dwell when the next `stage:`/`gate:` label is put on, not only when the old
   one is removed, so an issue left with two labels no longer reads as a stage that ran to its
-  close; a close is also never counted past the issue's close.
+  close; a label superseded that way is the state again from the moment the newer one is taken
+  off (a Gate 2 rejection), and a close is never counted past the issue's close.
 
 - **The doctor and Mission Control say when GitHub has stopped running the workflows** (issue
   34, the detection half). When a private repo's included Actions minutes or its spending limit

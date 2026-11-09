@@ -77,7 +77,8 @@ directly to a fresh issue (your own triage) or after the Analyst recommends FAST
 2. It verifies AC coverage, writes missing tests, runs the full battery, and runs the
    **adversarial security gate**. For UI changes it runs browser verification.
 3. You run `/security-review` on the PR branch and post findings.
-4. On a clean verdict it adds `gate:deploy` and posts a **Proposed Action Card**.
+4. On a clean verdict it moves the issue to `gate:deploy` (`.adlc/scripts/adlc-relabel.sh <n> gate:deploy`,
+   one call, which takes `stage:qa` off) and posts a **Proposed Action Card**.
 
 ## Gate 2 — Merge + deploy (you)
 

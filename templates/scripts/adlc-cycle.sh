@@ -7,10 +7,12 @@
 #   adlc-cycle.sh issues [DAYS]   one JSONL row per issue created in the window (default 30 days):
 #       {"issue","title","created","closed","lane":"full|fast","pr","pr_opened",
 #        "intake_to_pr_seconds","rounds","dwell":{"stage:intake":s,…},"stage_seconds","gate_seconds"}
-#       dwell = seconds the issue wore each label: from its labeled event to its unlabeled event OR
-#         to the next stage:/gate: label put on (QA adds gate:deploy without taking stage:qa off;
-#         one host had 32 issues wearing two states), whichever comes first; an interval still open
-#         runs to the issue's close, or now, and never past the close;
+#       dwell = seconds the issue wore each label as its state: from its labeled event to its
+#         unlabeled event OR to the next stage:/gate: label put on (QA adds gate:deploy without
+#         taking stage:qa off; one host had 32 issues wearing two states), whichever comes first;
+#         a label still on the issue when the one that superseded it is taken off (gate:deploy
+#         removed at Gate 2, say) is the state again from that moment; an interval still open runs
+#         to the issue's close, or now, and never past the close;
 #       stage_seconds = time in stage:* labels — queue time AND agent time (an issue can sit at
 #       stage:intake for days before the Analyst runs; the agent's own minutes are in runs.jsonl);
 #       gate_seconds = time in gate:* labels (waiting on the Principal); rounds = the fix rounds
@@ -83,16 +85,24 @@ case "$cmd" in
                  | {e: .event, l: .label.name, t: (.created_at | t)}] as $ev
           | ($ev | map(.l) | unique) as $labels
           # dwell per label: each labeled→(its unlabeled, or the NEXT stage:/gate: label put on) interval,
-          # in time order across labels; a close never runs past $end, an interval still open runs to
-          # $end, and one that opens after $end (a label put on a closed issue) counts 0, never negative.
+          # in time order across labels; a label superseded that way is still on the issue (.worn, with
+          # the time it was put on), and when the last open label is taken off the most recently put-on
+          # worn label is the state again from that moment. A close never runs past $end, an interval
+          # still open runs to $end, and one that opens after $end (a label put on a closed issue)
+          # counts 0, never negative.
           | ($ev | sort_by(.t)
-             | reduce .[] as $x ({open: {}, sum: {}};
+             | reduce .[] as $x ({open: {}, worn: {}, sum: {}};
                  if $x.e == "labeled" then
                    (reduce (.open | to_entries[] | select(.key != $x.l)) as $o (.;
-                      .sum[$o.key] += ([([$x.t, $end] | min) - $o.value, 0] | max) | del(.open[$o.key])))
+                      .sum[$o.key] += ([([$x.t, $end] | min) - $o.value, 0] | max) | .worn[$o.key] = $o.value | del(.open[$o.key])))
+                   | del(.worn[$x.l])
                    | (if .open[$x.l] == null then .open[$x.l] = $x.t else . end)
                  else
                    (if .open[$x.l] != null then .sum[$x.l] += ([([$x.t, $end] | min) - .open[$x.l], 0] | max) | del(.open[$x.l]) else . end)
+                   | del(.worn[$x.l])
+                   | (if (.open | length) == 0 and (.worn | length) > 0 then
+                        (.worn | to_entries | max_by(.value) | .key) as $back | .open[$back] = $x.t | del(.worn[$back])
+                      else . end)
                  end)) as $st
           | ($labels | map({(.): (($st.sum[.] // 0) + (if $st.open[.] != null then ([$end - $st.open[.], 0] | max) else 0 end))}) | add // {}) as $dwell
           | ([$ev[] | select(.e == "labeled" and .l == "stage:intake")] | sort_by(.t) | first | .t) as $intake

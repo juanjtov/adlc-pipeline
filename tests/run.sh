@@ -1606,6 +1606,11 @@ for f in "$ROOT"/templates/github/adlc-*.yml; do
   hits=$(grep -nE 'gh issue edit .*--(add|remove)-label (stage|gate):' "$f" || true)
   eq "" "$(basename "$f"): moves state labels through adlc-relabel.sh, never a hand-spelled pair" "$hits"
 done
+# the prose an agent reads counts too: "add gate:deploy" in the QA prompt was the wording behind the 25 double-labelled issues
+for f in "$ROOT"/templates/github/adlc-*.yml "$RB"; do
+  hits=$(grep -nE '\badds? `?(stage|gate):[a-z]+' "$f" || true)
+  eq "" "$(basename "$f"): no prompt or step tells anyone to \"add\" a state label" "$hits"
+done
 # /adlc-model
 CM="$ROOT/commands/adlc-model.md"
 [ -f "$CM" ] && ok "commands/adlc-model.md exists" || bad "commands/adlc-model.md missing"
@@ -1839,19 +1844,23 @@ SH
   # issue 12 (issue 38): QA put gate:deploy on and never took stage:qa off; closed at 1000. The stage ends at the
   # next state label (600), not at the close (1000); the gate runs from 600 to the close (400).
   { tl "$(at 0)" labeled stage:qa; tl "$(at 600)" labeled gate:deploy; } | jq -s . > "$CY/fx/timeline-12.json"
+  # issue 13: as 12, then gate:deploy taken off at 700 (a Gate 2 rejection): stage:qa, still on the issue, is the
+  # state again from 700 to the close at 1000 — 600 + 300, not 600 with 300 s in no bucket
+  { tl "$(at 0)" labeled stage:qa; tl "$(at 600)" labeled gate:deploy; tl "$(at 700)" unlabeled gate:deploy; } | jq -s . > "$CY/fx/timeline-13.json"
   jq -n --arg t1 "$T1" --arg close "$(at 3000)" --arg close12 "$(at 1000)" --arg old "2020-01-01T00:00:00Z" '[
     {number: 7, title: "thing", createdAt: $t1, closedAt: $close, labels: []},
     {number: 8, title: "small", createdAt: $t1, closedAt: $close, labels: []},
     {number: 12, title: "two labels", createdAt: $t1, closedAt: $close12, labels: []},
+    {number: 13, title: "gate taken off again", createdAt: $t1, closedAt: $close12, labels: []},
     {number: 10, title: "transferred away (timeline 404)", createdAt: $t1, closedAt: $close, labels: []},
     {number: 3, title: "ancient", createdAt: $old, closedAt: $old, labels: []}]' > "$CY/fx/issues.json"
   : > "$CY/calls"
   OUT=$( cd "$CY/repo" && env PATH="$CY/bin:$PATH" CY_FX="$CY/fx" CY_CALLS="$CY/calls" bash "$S/adlc-cycle.sh" issues 7 2>"$CY/err" ); check 0 "cycle issues: runs to the end although one timeline read failed" $?
-  eq 3 "cycle issues: one row per readable issue created in the window" "$(printf '%s\n' "$OUT" | wc -l | tr -d ' ')"
+  eq 4 "cycle issues: one row per readable issue created in the window" "$(printf '%s\n' "$OUT" | wc -l | tr -d ' ')"
   eq 1 "cycle issues: the unreadable issue is named on stderr and skipped, not silently dropped" "$(grep -c 'timeline of #10; skipped' "$CY/err")"
   eq 1 "…and gh's own error is kept" "$(grep -c 'HTTP 404' "$CY/err")"
   R7=$(printf '%s\n' "$OUT" | jq -c 'select(.issue == 7)')
-  eq "600 300 100 1000 600 400" "cycle: dwell per label from labeled→unlabeled intervals; an open gate runs to the issue's close; a label put on after the close adds 0" \
+  eq "600 300 100 1000 600 400" "cycle: dwell per label from labeled→unlabeled intervals; the open gate ends at the next label put on, capped at the close (3500 → 3000); that label, put on after the close, adds 0" \
      "$(printf '%s' "$R7" | jq -r '"\(.dwell["stage:intake"]) \(.dwell["gate:stories"]) \(.dwell["stage:design"]) \(.dwell["stage:build"]) \(.dwell["stage:qa"]) \(.dwell["gate:deploy"])"')"
   eq "full 9 1800 3 2300 700" "cycle: lane, first PR that references the issue (not the issue xref), intake→PR, rounds = max(changes-requested labels, CHANGES verdicts per marker), stage vs gate seconds" \
      "$(printf '%s' "$R7" | jq -r '"\(.lane) \(.pr) \(.intake_to_pr_seconds) \(.rounds) \(.stage_seconds) \(.gate_seconds)"')"
@@ -1859,15 +1868,17 @@ SH
      "$(printf '%s\n' "$OUT" | jq -r 'select(.issue == 8) | "\(.lane) \(.pr) \(.intake_to_pr_seconds) \(.rounds)"')"
   eq "600 400 600 400 full" "cycle: a stage left on when the next state label is put on ends there, not at the close; the gate runs to the close" \
      "$(printf '%s\n' "$OUT" | jq -r 'select(.issue == 12) | "\(.dwell["stage:qa"]) \(.dwell["gate:deploy"]) \(.stage_seconds) \(.gate_seconds) \(.lane)"')"
+  eq "900 100 900 100" "cycle: a superseded stage is the state again when the gate that superseded it is taken off, until the close" \
+     "$(printf '%s\n' "$OUT" | jq -r 'select(.issue == 13) | "\(.dwell["stage:qa"]) \(.dwell["gate:deploy"]) \(.stage_seconds) \(.gate_seconds)"')"
   eq 1 "cycle: one issue list call" "$(grep -c '^issue list$' "$CY/calls")"
   eq 1 "cycle: one repo view call, outside the loop" "$(grep -c '^repo view$' "$CY/calls")"
-  eq 6 "cycle: one timeline call per issue, plus one per linked PR (none for a skipped issue)" "$(grep -c '^api ' "$CY/calls")"
+  eq 7 "cycle: one timeline call per issue, plus one per linked PR (none for a skipped issue)" "$(grep -c '^api ' "$CY/calls")"
   eq 2 "cycle: one pr view call per linked PR, for its verdict comments" "$(grep -c '^pr view$' "$CY/calls")"
   printf '%s\n' "$OUT" > "$CY/repo/.adlc/metrics/cycle.jsonl"
   OUT=$( cd "$CY/repo" && CLAUDE_PROJECT_DIR="$CY/repo" bash "$S/adlc-cycle.sh" report 7 2>&1 ); check 0 "cycle report: runs to the end" $?
   eq "builder          1               1      0.2       100%        60       100%  82%" "report: the per-stage spend table (agent runs only; cached share of the prompt)" "$(printf '%s\n' "$OUT" | grep '^builder ')"
   eq "adlc-ci: runs=2 avg_sec=35 failed=1" "report: guard lanes by name with avg seconds and failures" "$(printf '%s\n' "$OUT" | grep '^adlc-ci:')"
-  eq "issues=3  with_pr=2  fast_lane=1" "report: issue counts" "$(printf '%s\n' "$OUT" | grep '^issues=')"
+  eq "issues=4  with_pr=2  fast_lane=1" "report: issue counts" "$(printf '%s\n' "$OUT" | grep '^issues=')"
   eq "rounds: total=3  issues_with_a_fix_round=1" "report: fix rounds" "$(printf '%s\n' "$OUT" | grep '^rounds:')"
   rm -f "$CY/repo/.adlc/metrics/runs.jsonl" "$CY/repo/.adlc/metrics/cycle.jsonl"
   OUT=$( cd "$CY/repo" && CLAUDE_PROJECT_DIR="$CY/repo" bash "$S/adlc-cycle.sh" report 7 2>&1 ); check 0 "report with no ledgers: still exits 0" $?

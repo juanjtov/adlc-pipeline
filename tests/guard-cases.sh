@@ -505,6 +505,12 @@ g D $RV feat 'gh issue edit 12 --add-label stage:qa'
 g D $RV feat '.adlc/scripts/adlc-relabel.sh 12 stage:qa'                      # …so the reviewer may not run it either
 g D $RV feat '/w/.adlc/scripts/adlc-relabel.sh 12 stage:qa'
 g D $RV feat 'bash .adlc/scripts/adlc-relabel.sh 12 stage:qa'
+g D $RV feat 'bash -o pipefail .adlc/scripts/adlc-relabel.sh 12 stage:qa'      # an option's value is not the script
+g D $RV feat 'bash +x .adlc/scripts/adlc-relabel.sh 12 stage:qa'               # `+x` is an option too
+g D $RV feat 'bash "$S/adlc-relabel.sh" 12 stage:qa'                           # a computed prefix, a literal script name
+g D $RV feat 'bash $S/adlc-relabel.sh 12 stage:qa'
+g D $RV feat 'bash "$PWD/.adlc/scripts/adlc-relabel.sh" 12 stage:qa'
+g A $RV feat 'bash -n .adlc/scripts/adlc-relabel.sh'                           # a syntax check runs nothing
 g D $RV feat 'git stash'
 g D $RV feat 'git checkout main'
 
