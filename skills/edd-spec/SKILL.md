@@ -97,14 +97,14 @@ note in the finding's prose saying what it is, so a recurring `other` can become
 
 | Class | Meaning |
 |---|---|
-| `tenant-leak` | data or an action crosses a tenant / scope boundary |
+| `tenant-leak` | data or an action crosses a tenant / scope boundary (`idor`, the security gate's tenant probe, maps here) |
 | `authz-gap` | a role or user can do what it must not (authn bypass included) |
 | `injection` | untrusted text reaches an interpreter: SQL, shell, HTML, a prompt |
 | `secret-in-code` | a credential, key or token in the tree or the diff |
 | `hallucinated-api` | a call to a symbol, endpoint, option or library that does not exist |
 | `missing-edge-case` | a realistic input the code does not handle (empty, null, boundary, error path) |
 | `logic-contradiction` | the code does the wrong thing on an input it does handle (wrong branch, off-by-one, race) |
-| `contract-violation` | the change breaks what the ADR, the spec, the declared diff scope or an AC says |
+| `contract-violation` | the change breaks what a current ADR, the spec, the declared diff scope or an AC says (an ADR whose text went stale is `doc-drift`; `adr-drift` and `drift` are not mapped, since the name alone cannot tell the two apart) |
 | `test-gap` | a behaviour with no test, or a test that cannot fail (vacuous, asserts nothing) |
 | `flaky-test` | a test whose result depends on timing, order or the environment |
 | `perf-regression` | slower or heavier than before on a realistic size (N+1, unbounded scan) |

@@ -449,6 +449,13 @@ eq 0 "…no run view is made" "$(grep -c '^run view ' "$FIX/fx/calls")"
 ac "$({ ten | jq '.[]'; R 200 failure 300; } | jq -s .)" "$(J "")"; check 0 "actions: one run that took five minutes breaks the pattern" $?
 ac "$({ ten | jq '.[]'; R 200 success 3; } | jq -s .)" "$(J "")"; check 0 "actions: one green run breaks the pattern" $?
 eq yes "…and says Actions runs" "$(says_gate "Actions runs workflows")"
+# a lane whose job-level if: did not match concludes skipped before a runner is asked for; it says nothing either way
+ac "$({ R 200 skipped 2; ten | jq '.[]'; R 201 cancelled 2; } | jq -s .)" "$(J "")"; check 1 "actions: skipped and cancelled runs among the fast failures do not hide the block" $?
+eq yes "…counting only the runs that ran" "$(says_gate "the last 10 completed runs (skipped")"
+eq 1 "…and reading the latest run that ran, not the skipped one" "$(grep -c '^run view 101 ' "$FIX/fx/calls")"
+ac "$({ R 1 skipped 2; R 2 skipped 2; R 3 skipped 2; } | jq -s .)" "$(J "")"; check 0 "actions: only skipped runs say nothing (no completed run that ran)" $?
+eq yes "…read as no completed run yet" "$(says_gate "no completed run yet")"
+ac "$(ten)" '{"jobs":[{"name":"test","conclusion":"failure","steps":[{"name":"Set up job","conclusion":""}]}]}'; check 1 "actions: a step whose conclusion gh renders as the empty string did not run" $?
 ac '[]' -;                                check 0 "actions: no completed run yet passes" $?
 ac "$(ten)" -;                            check 1 "actions: fast failures whose latest run cannot be read are flagged as possibly blocked" $?
 eq yes "…as unknown" "$(says_gate "may be blocked")"
@@ -536,8 +543,11 @@ grep -q -- '--json comments,reviews' "$RR" && grep -q 'ts: (.submittedAt // "")'
 grep -q -- 'adlc-log-findings.sh "$pr" review "$(jq -r .ts <<<"$c")"' "$RR" && ok "retro recipe: passes the comment's time to the logger" || bad "retro recipe: must pass the comment's time to the logger"
 grep -q -- 'gh pr list --state all --limit 500' "$RR" && ok "retro recipe: lists 500 PRs, not 50" || bad "retro recipe: must list 500 PRs, not 50"
 # issue 28: the class is a closed vocabulary — synonyms map onto it, a name outside it is logged as written and reported once
-eq "logic-contradiction test-gap contract-violation doc-drift tenant-leak" "classes: known synonyms are written as their canonical name" \
-   "$(printf 'ADLC-FINDING: High | logic-bug | a.py\nADLC-FINDING: Low | test-coverage | b.py\nADLC-FINDING: Low | spec-drift | c.py\nADLC-FINDING: Low | docs | d.py\nADLC-FINDING: High | Tenant_Leak | e.py\n' | bash "$S/adlc-log-findings.sh" 3 review 2>/dev/null | jq -r .class | tr '\n' ' ' | sed 's/ $//')"
+eq "logic-contradiction test-gap contract-violation doc-drift tenant-leak tenant-leak" "classes: known synonyms are written as their canonical name (idor is the tenant probe)" \
+   "$(printf 'ADLC-FINDING: High | logic-bug | a.py\nADLC-FINDING: Low | test-coverage | b.py\nADLC-FINDING: Low | spec-drift | c.py\nADLC-FINDING: Low | docs | d.py\nADLC-FINDING: High | Tenant_Leak | e.py\nADLC-FINDING: Critical | idor | f.py\n' | bash "$S/adlc-log-findings.sh" 3 review 2>/dev/null | jq -r .class | tr '\n' ' ' | sed 's/ $//')"
+eq "adr-drift drift" "classes: a name that could be contract-violation or doc-drift (adr-drift, drift) is not guessed: kept as written and reported" \
+   "$(printf 'ADLC-FINDING: Low | adr-drift | a.md\nADLC-FINDING: Low | drift | b.md\n' | bash "$S/adlc-log-findings.sh" 3 review 2>/dev/null | jq -r .class | tr '\n' ' ' | sed 's/ $//')"
+for c in test-gap doc-drift; do grep -q "^| $c |" "$ROOT/skills/retro/SKILL.md" && ok "retro Step 2 has a durable-fix row for $c" || bad "retro Step 2 needs a durable-fix row for $c"; done
 eq "missing-edge-case" "classes: case, spaces and underscores do not make a new class" "$(printf 'ADLC-FINDING: Low | Missing Edge_Case | a.py\n' | bash "$S/adlc-log-findings.sh" 3 review 2>/dev/null | jq -r .class)"
 UKD="$(mktemp -d)"; UK=$(printf 'ADLC-FINDING: Low | weird-thing | a.py\nADLC-FINDING: Low | Weird Thing | b.py\n' | bash "$S/adlc-log-findings.sh" 33 review 2>"$UKD/uk.err")
 eq "weird-thing weird-thing" "classes: a name outside the list is logged as written (normalized), not dropped and not forced to other" "$(printf '%s\n' "$UK" | jq -r .class | tr '\n' ' ' | sed 's/ $//')"

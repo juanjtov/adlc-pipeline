@@ -32,15 +32,17 @@ which every session loads from the installed plugin, so those parts need no refr
 
 - **The doctor and Mission Control say when GitHub has stopped running the workflows** (issue
   34, the detection half). When a private repo's included Actions minutes or its spending limit
-  run out, or Actions is turned off, GitHub still creates a run for every trigger and fails it
+  run out, GitHub still creates a run for every trigger and fails it
   within seconds with no step executed, for every workflow at once, the tripwire that watches
   the default branch included; the checks on a PR just read red. One host ran that way for
   three days (about 180 dead runs, eight PRs merged with every check red) before anyone looked.
   `adlc-doctor.sh` (gh-backed section, repos with adlc workflows only) reads the last ten
-  completed runs: when at least three exist, all failed within 60 s of being created, and the
-  latest ran no step, it reports Actions as blocked and says the tripwire is not watching;
-  steps that ran mean a failing workflow, not a block, and a run it cannot read is reported as
-  possibly blocked. Mission Control reads the same signal over REST about every two minutes
+  completed runs, skipped and cancelled ones left out (a lane whose job-level `if:` did not
+  match concludes `skipped` before a runner is asked for, so it says nothing either way): when
+  at least three remain, all failed within 60 s of being created, and the latest ran no step,
+  it reports Actions as blocked and says the tripwire is not watching; steps that ran mean a
+  failing workflow, not a block, and a run it cannot read is reported as possibly blocked.
+  Actions turned off for the repo creates no run at all, so neither reader sees that. Mission Control reads the same signal over REST about every two minutes
   while a page is open and shows a banner. Not in this change, still on the issue: the
   bootstrap's minutes sizing step, a local-CI marker recipe, and a `blocked` run outcome in
   `adlc-run-log.sh`.

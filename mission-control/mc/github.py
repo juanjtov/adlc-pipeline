@@ -86,19 +86,23 @@ def fetch(repo, run=subprocess.run):
     return data
 
 
-# A run that GitHub refused to start (the account's included Actions minutes or spending limit are used up, or
-# Actions is turned off for the repo) still appears as a completed run: `failure`, within seconds of its creation,
-# no job step executed. Every workflow goes that way at once, the tripwire that watches the default branch included,
-# and nothing on GitHub says so. The last few runs are read as blocked when at least this many have completed, all
+# A run that GitHub refused to start (the account's included Actions minutes or spending limit are used up) still
+# appears as a completed run: `failure`, within seconds of its creation, no job step executed. Every workflow goes
+# that way at once, the tripwire that watches the default branch included, and nothing on GitHub says so. The last
+# few runs are read as blocked when, skipped and cancelled runs left out (a lane whose job-level `if:` did not match
+# concludes `skipped` before a runner is asked for, so it says nothing either way), at least this many remain, all
 # of them failed within FAST_SECONDS of being created, and the latest ran no step. A test that fails fast runs steps.
+# Actions turned off for the repo creates no run at all, so it is not seen here.
 BLOCKED_MIN_RUNS = 3
 FAST_SECONDS = 60
+SAYS_NOTHING = ('skipped', 'cancelled', 'neutral')   # a run with this conclusion never asked for a runner
 
 
 def actions_health(repo, run=subprocess.run):
     """Whether GitHub is still running this repo's workflows. {'blocked', 'runs', 'latest', 'since'}; raises GhError."""
     doc = _gh(['gh', 'api', 'repos/%s/actions/runs?per_page=10&status=completed' % repo], run)
-    runs = [r for r in ((doc.get('workflow_runs') if isinstance(doc, dict) else None) or []) if r.get('status') == 'completed']
+    runs = [r for r in ((doc.get('workflow_runs') if isinstance(doc, dict) else None) or [])
+            if r.get('status') == 'completed' and r.get('conclusion') not in SAYS_NOTHING]
     out = {'blocked': False, 'runs': len(runs), 'latest': runs[0].get('id') if runs else None, 'since': None}
     if len(runs) < BLOCKED_MIN_RUNS:
         return out

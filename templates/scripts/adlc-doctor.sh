@@ -188,34 +188,37 @@ else
 fi
 
 # 5b) Is GitHub still running the workflows? When the account's included Actions minutes or its
-#     spending limit run out, or Actions is turned off for the repo, GitHub still creates a run for
-#     every trigger and fails it at once: every workflow concludes `failure` within seconds, with no
-#     job step executed. Nothing says so. The checks on a PR just read red, and the tripwire, which
-#     the bootstrap names as the Free-plan stand-in for branch protection, stops watching the
-#     default branch. One host ran that way for three days (about 180 runs) before anyone looked.
-#     Read as: the last N completed runs, N at least 3, all failed within 60 s of their creation,
-#     and the latest of them ran no step. Fewer than three, one that passed, one that took longer,
-#     or steps that ran (a workflow that fails fast on purpose) are not this. Only where this repo
-#     has adlc workflows; in local-recipe mode there is nothing to run.
+#     spending limit run out, GitHub still creates a run for every trigger and fails it at once:
+#     every workflow concludes `failure` within seconds, with no job step executed. Nothing says so.
+#     The checks on a PR just read red, and the tripwire, which the bootstrap names as the Free-plan
+#     stand-in for branch protection, stops watching the default branch. One host ran that way for
+#     three days (about 180 runs) before anyone looked. Read as: of the last ten completed runs,
+#     those that were skipped or cancelled left out (a lane whose job-level `if:` did not match
+#     concludes `skipped` before any runner is asked for, so it says nothing either way), N at
+#     least 3 remain, all failed within 60 s of their creation, and the latest of them ran no step.
+#     Fewer than three, one that passed, one that took longer, or steps that ran (a workflow that
+#     fails fast on purpose) are not this. Actions turned off for the repo creates no run at all,
+#     so this check does not see it. Only where this repo has adlc workflows; in local-recipe mode
+#     there is nothing to run.
 if ls "${root}"/.github/workflows/adlc-*.yml >/dev/null 2>&1; then
   if [ -z "${ADLC_DOCTOR_SKIP_LABELS:-}" ] && command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
     if runs=$(ask run list --limit 10 --json databaseId,status,conclusion,createdAt,updatedAt \
-                --jq '[.[] | select(.status == "completed")] | {n: length, latest: (.[0].databaseId // null), fast_fail: (length >= 3 and all(.conclusion == "failure" and ((.updatedAt | fromdate) - (.createdAt | fromdate)) <= 60))}') \
+                --jq '[.[] | select(.status == "completed" and .conclusion != "skipped" and .conclusion != "cancelled" and .conclusion != "neutral")] | {n: length, latest: (.[0].databaseId // null), fast_fail: (length >= 3 and all(.conclusion == "failure" and ((.updatedAt | fromdate) - (.createdAt | fromdate)) <= 60))}') \
        && [ -n "$runs" ]; then
       n=$(jq -r .n <<<"$runs"); latest=$(jq -r .latest <<<"$runs"); fast=$(jq -r .fast_fail <<<"$runs")
       if [ "$fast" = true ]; then
-        steps=$(ask run view "$latest" --json jobs --jq '[.jobs[]?.steps[]? | select(.conclusion != null and .conclusion != "skipped")] | length') || steps=""
+        steps=$(ask run view "$latest" --json jobs --jq '[.jobs[]?.steps[]? | select(.conclusion != null and .conclusion != "" and .conclusion != "skipped")] | length') || steps=""
         if [ "$steps" = 0 ]; then
-          note "GitHub Actions looks blocked: the last ${n} completed runs all failed within 60 s of being created, and the latest (run ${latest}) ran no step. That is what an exhausted Actions budget (included minutes, or the spending limit) or Actions turned off for the repo looks like; a failing test is not it. Every workflow is dead, the tripwire included: nothing watches the default branch until it is fixed (Settings → Billing and plans → Actions; Settings → Actions → General)."
+          note "GitHub Actions looks blocked: the last ${n} completed runs (skipped and cancelled ones left out) all failed within 60 s of being created, and the latest (run ${latest}) ran no step. That is what an exhausted Actions budget (included minutes, or the spending limit) looks like; a failing test is not it. Every workflow is dead, the tripwire included: nothing watches the default branch until it is fixed (Settings → Billing and plans → Actions)."
         elif [ -z "$steps" ]; then
-          note "GitHub Actions may be blocked: the last ${n} completed runs all failed within 60 s of being created; the latest (run ${latest}) could not be read, so whether a step ran is unknown. Check Settings → Billing and plans → Actions."
+          note "GitHub Actions may be blocked: the last ${n} completed runs (skipped and cancelled ones left out) all failed within 60 s of being created; the latest (run ${latest}) could not be read, so whether a step ran is unknown. Check Settings → Billing and plans → Actions."
         else
           ok "Actions runs workflows (the last ${n} runs failed fast, but their steps ran: a workflow that fails, not a blocked account)"
         fi
       elif [ "$n" = 0 ]; then
         ok "Actions: no completed run yet"
       else
-        ok "Actions runs workflows (the last ${n} completed runs are not all fast failures)"
+        ok "Actions runs workflows (the last ${n} completed runs that ran are not all fast failures)"
       fi
     else
       note "could not list workflow runs from gh — whether Actions is blocked is unchecked"
