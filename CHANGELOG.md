@@ -10,10 +10,23 @@ it differs from the installed plugin.
 ## Unreleased (on `main` after 0.3.1)
 
 Tooling refresh needed: **yes** — the `adlc-log-findings.sh` copy gains the backtick-wrapped
-marker, the per-comment time and the skipped-line report below, the `adlc-cycle.sh` copy the
+marker, the per-comment time, the skipped-line report and the closed class list below, the `adlc-cycle.sh` copy the
 verdict-based round count, and the `adlc-metrics.sh` copy the `infra_failed` line. The retro and cycle-retro recipes live in the plugin skills,
 which every session loads from the installed plugin, so those parts need no refresh.
 
+- **The finding class is a closed list** (issue 28). Reviewers named classes freely, so the
+  retro, which ranks by class × frequency, saw one failure under five names as five small
+  classes: on one host 144 findings carried 53 class names (78 four days later), 30 of them
+  used once, and the ADR/code drift pattern was visible only after merging names by hand. The
+  `edd-spec` skill now holds a table of thirteen classes with a one-line meaning each
+  (`test-gap` and `doc-drift` are new; `other` only with a note), and the review skills name
+  the list where the reviewer writes the marker. `adlc-log-findings.sh` lower-cases the class,
+  turns `_` and spaces into `-`, writes a known synonym as its canonical name (`logic-bug` →
+  `logic-contradiction`, `test-coverage` → `test-gap`, `spec-drift` → `contract-violation`,
+  `docs` → `doc-drift`, …), and reports once per run on stderr a name outside the list, which
+  it logs as written rather than forcing it to `other`. `adlc-log-findings.sh classes` prints
+  the list; the retro's Step 1 ranks on the canonical class and lists the names outside the
+  list apart. Rows already in a ledger are not rewritten: rebuild the ledger (the recipe does).
 - **`adlc-metrics.sh` sets CI runs that died in a setup step apart from red test runs**
   (issue 56). `iterations_to_green` and `failed_first` counted every failed run of a merged
   PR's branch; on one host five of eighteen first-run reds had died creating an ephemeral

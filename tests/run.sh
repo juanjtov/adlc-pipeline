@@ -490,13 +490,34 @@ SK=$(printf 'see ADLC-FINDING: High | x | y above\n' | bash "$S/adlc-log-finding
 case "$SK" in *"PR 31"*"skipped"*"see ADLC-FINDING: High | x | y above"*) ok "a mid-line marker with three fields is reported on stderr, with the PR and the line" ;; *) bad "a mid-line marker with three fields must be reported on stderr (got '$SK')" ;; esac
 eq "" "the quoted format line is not reported"      "$(printf 'Use: ADLC-FINDING: <severity> | <class> | <file>\n' | bash "$S/adlc-log-findings.sh" 1 review 2>&1 >/dev/null)"
 eq "" "a prose mention with no fields is not reported" "$(printf 'each ADLC-FINDING: line counts\n' | bash "$S/adlc-log-findings.sh" 1 review 2>&1 >/dev/null)"
-eq "" "a plain finding writes nothing to stderr"      "$(printf 'ADLC-FINDING: High | x | y.py\n' | bash "$S/adlc-log-findings.sh" 1 review 2>&1 >/dev/null)"
+eq "" "a plain finding writes nothing to stderr"      "$(printf 'ADLC-FINDING: High | injection | y.py\n' | bash "$S/adlc-log-findings.sh" 1 review 2>&1 >/dev/null)"
 eq 1 "a last line with no newline is still a finding" "$(printf 'ADLC-FINDING: High | x | y.py' | bash "$S/adlc-log-findings.sh" 1 review 2>/dev/null | grep -c '"class"')"
 # the retro's recipe must read both comment kinds, stamp each row with its comment's time, and not stop at 50 PRs
 RR="$ROOT/skills/retro/SKILL.md"
 grep -q -- '--json comments,reviews' "$RR" && grep -q 'ts: (.submittedAt // "")' "$RR" && grep -q 'ts: .createdAt' "$RR" && ok "retro recipe: reads comments and review bodies, with each one's time; a pending review's missing time falls back to now" || bad "retro recipe: must read comments and review bodies, with each one's time, and a null submittedAt must become empty"
 grep -q -- 'adlc-log-findings.sh "$pr" review "$(jq -r .ts <<<"$c")"' "$RR" && ok "retro recipe: passes the comment's time to the logger" || bad "retro recipe: must pass the comment's time to the logger"
 grep -q -- 'gh pr list --state all --limit 500' "$RR" && ok "retro recipe: lists 500 PRs, not 50" || bad "retro recipe: must list 500 PRs, not 50"
+# issue 28: the class is a closed vocabulary — synonyms map onto it, a name outside it is logged as written and reported once
+eq "logic-contradiction test-gap contract-violation doc-drift tenant-leak" "classes: known synonyms are written as their canonical name" \
+   "$(printf 'ADLC-FINDING: High | logic-bug | a.py\nADLC-FINDING: Low | test-coverage | b.py\nADLC-FINDING: Low | spec-drift | c.py\nADLC-FINDING: Low | docs | d.py\nADLC-FINDING: High | Tenant_Leak | e.py\n' | bash "$S/adlc-log-findings.sh" 3 review 2>/dev/null | jq -r .class | tr '\n' ' ' | sed 's/ $//')"
+eq "missing-edge-case" "classes: case, spaces and underscores do not make a new class" "$(printf 'ADLC-FINDING: Low | Missing Edge_Case | a.py\n' | bash "$S/adlc-log-findings.sh" 3 review 2>/dev/null | jq -r .class)"
+UKD="$(mktemp -d)"; UK=$(printf 'ADLC-FINDING: Low | weird-thing | a.py\nADLC-FINDING: Low | Weird Thing | b.py\n' | bash "$S/adlc-log-findings.sh" 33 review 2>"$UKD/uk.err")
+eq "weird-thing weird-thing" "classes: a name outside the list is logged as written (normalized), not dropped and not forced to other" "$(printf '%s\n' "$UK" | jq -r .class | tr '\n' ' ' | sed 's/ $//')"
+eq 1 "classes: …and reported on stderr once per run, with the PR" "$(grep -c "PR 33: class 'weird-thing' is not in the list" "$UKD/uk.err")"; rm -rf "$UKD"
+eq "" "classes: a canonical name writes nothing to stderr" "$(printf 'ADLC-FINDING: Low | doc-drift | a.py\n' | bash "$S/adlc-log-findings.sh" 3 review 2>&1 >/dev/null)"
+eq 13 "classes: the subcommand prints the list, other last" "$(bash "$S/adlc-log-findings.sh" classes | wc -l | tr -d ' ')"
+eq other "…other last" "$(bash "$S/adlc-log-findings.sh" classes | tail -1)"
+# the list in the script and the table in the edd-spec skill are the same list (the reviewers read the skill, the ledger the script)
+ES="$ROOT/skills/edd-spec/SKILL.md"
+eq "$(bash "$S/adlc-log-findings.sh" classes | sort | tr '\n' ' ')" "classes: the edd-spec table names exactly the script's classes" \
+   "$(sed -n '/^| Class | Meaning |/,/^$/p' "$ES" | sed -nE 's/^\| `([a-z-]+)` \|.*/\1/p' | sort | tr '\n' ' ')"
+for c in $(bash "$S/adlc-log-findings.sh" classes); do
+  eq "$c" "classes: '$c' is canonical (maps to itself)" "$(printf 'ADLC-FINDING: Low | %s | a.py\n' "$c" | bash "$S/adlc-log-findings.sh" 3 review 2>/dev/null | jq -r .class)"
+done
+for f in "$ROOT/skills/code-review/SKILL.md" "$ROOT/skills/role-adversarial-reviewer/SKILL.md"; do
+  miss=""; for c in $(bash "$S/adlc-log-findings.sh" classes); do grep -q "\`$c\`" "$f" || miss="$miss $c"; done
+  eq "" "classes: $(basename "$(dirname "$f")") names every class of the list" "$miss"
+done
 
 echo "cost/latency:"
 CO=$(printf 'adlc-builder 120 5000 0.10\nadlc-qa 80 3000 0.06\nadlc-builder 60 2000 0.04\n' | bash "$S/adlc-cost.sh")

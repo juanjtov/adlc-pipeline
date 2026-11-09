@@ -46,8 +46,12 @@ Principal with rationale.
 
 Verdict (**PASS** / **CHANGES REQUESTED**), then per finding:
 `severity · class · file:line · failing input→result · pillar · required fix`
-(class from the `adlc:edd-spec` vocabulary), then a **structured-disagreement note**: the
-strongest counter-case you tested and what the evidence showed. Post it as a single PR comment
-that includes a machine-readable line per finding — `ADLC-FINDING: <severity> | <class> | <file>`
-(class from `adlc:edd-spec`). The comments are the durable store; the `retro` loop materializes
-the findings ledger (`.adlc/metrics/findings.jsonl`) from these lines to compound recurring classes.
+(class from the **closed list** in `adlc:edd-spec`: `tenant-leak` `authz-gap` `injection`
+`secret-in-code` `hallucinated-api` `missing-edge-case` `logic-contradiction` `contract-violation`
+`test-gap` `flaky-test` `perf-regression` `doc-drift`, or `other` with a note saying what it is —
+never a name of your own: the retro counts recurrence by class, and a new name hides a repeat),
+then a **structured-disagreement note**: the strongest counter-case you tested and what the
+evidence showed. Post it as a single PR comment that includes a machine-readable line per finding —
+`ADLC-FINDING: <severity> | <class> | <file>`. The comments are the durable store; the `retro`
+loop materializes the findings ledger (`.adlc/metrics/findings.jsonl`) from these lines to
+compound recurring classes.
