@@ -5,18 +5,25 @@
 #         every lane installs the plugin and grants its agent tools · the scripts the lanes
 #         call are installed · the project skills exist · the five project agents the RUNBOOK
 #         invokes exist, each with a model line ·
-#         and, when gh is available: the state-machine labels exist · no open issue or PR
-#         carries two of them at once · GitHub is still running this repo's workflows (an
+#         and, when gh is available: the state-machine labels exist, and the two a script
+#         filters on (adlc:change-failure, adlc:tripwire) · no open issue or PR
+#         carries two state labels at once · GitHub is still running this repo's workflows (an
 #         exhausted Actions budget fails every run at once, the tripwire's included) · the
 #         default branch has a merge gate (a required approving review, or at least the tripwire);
 #         and, when it can find the plugin, whether .adlc/VERSION (stamped by /adlc-init)
 #         matches the plugin's version — a mismatch is a note, not a failure.
+# It never compares an installed copy with the plugin's, so a copy the host changed is not a
+# problem for differing. A copy the host marked as its own (`adlc: host-owned` in one of its
+# first five lines; the refresh skips those) is listed on one line, and named as such where a
+# check points at it.
 set -uo pipefail
 root="${1:-.}"
 probs=0
 note() { echo "  ✗ $1"; probs=$((probs + 1)); }
 ok()   { echo "  ✓ $1"; }
 echo "adlc doctor — ${root}"
+# A copied file the host took over: the refresh (the plugin's adlc-refresh.sh) leaves it alone.
+host_owned() { awk 'NR <= 5 && index($0, "adlc: host-owned") { f = 1 } NR > 5 { exit } END { exit !f }' "$1" 2>/dev/null; }
 
 # 1) Harness deny rules (no push-to-main / no self-merge)
 denied() { jq -e --arg re "$1" '[.permissions.deny[]? | select(test($re))] | length > 0' \
@@ -74,7 +81,9 @@ for f in "${root}"/.github/workflows/adlc-*.yml; do
 done
 if [ -n "$inert" ]; then
   note "an agent step runs without the plugin (plugin_marketplaces + plugins: adlc@…) or without tools (--allowedTools) — re-copy the lane from the plugin's templates/github/:"
-  printf '      %s\n' $inert
+  for f in $inert; do
+    if host_owned "$f"; then printf '      %s (host-owned: a refresh will not re-copy it; port the wiring into it by hand)\n' "$f"; else printf '      %s\n' "$f"; fi
+  done
 elif [ "$agent_steps" -gt 0 ]; then
   ok "all ${agent_steps} agent steps install the plugin and grant tools"
 fi
@@ -161,6 +170,15 @@ if [ -z "${ADLC_DOCTOR_SKIP_LABELS:-}" ] && command -v gh >/dev/null 2>&1 && gh 
   for l in stage:intake gate:stories stage:design stage:build stage:qa gate:deploy; do
     printf '%s\n' "$existing" | grep -qx "$l" || note "missing GitHub label: $l"
   done
+  # Two labels outside the state machine that a script filters on. Without the first, Ops cannot
+  # label a defect it traced to a deploy and adlc-metrics.sh has nothing to count; without the
+  # second, the tripwire files its alerts unlabelled. A repo set up before they existed lacks both.
+  printf '%s\n' "$existing" | grep -qx "adlc:change-failure" \
+    || note "missing GitHub label: adlc:change-failure (the change-failure metric counts issues that carry it) — re-run the plugin's templates/github/labels.sh"
+  if [ -f "${root}/.github/workflows/adlc-main-tripwire.yml" ]; then
+    printf '%s\n' "$existing" | grep -qx "adlc:tripwire" \
+      || note "missing GitHub label: adlc:tripwire (the tripwire files its alerts under it; without it they are filed unlabelled) — re-run the plugin's templates/github/labels.sh"
+  fi
   # One state per issue: an issue or PR carrying two stage:/gate: labels at once is in two
   # states, and the cycle clock, Mission Control's station view and a lane keyed on the older
   # label each pick their own. A closed one is out of the machine, so open ones only. gh's
@@ -306,5 +324,13 @@ if plugin_v=$(plugin_version) && [ -n "$plugin_v" ]; then
 else
   echo "  · skipped tooling-version check (could not find the plugin's version)"
 fi
+# Copies the host marked as its own. The refresh skips them, so the stamp above says nothing about
+# them: keeping them current with the plugin is this repo's job. A line, not a problem.
+owned=""
+for f in "${root}"/.adlc/scripts/*.sh "${root}/.adlc/LICENSE" "${root}"/.github/workflows/adlc-*.yml \
+         "${root}/.github/ISSUE_TEMPLATE/requirement.yml" "${root}"/.claude/agents/adlc-*.md "${root}/.git/hooks/pre-commit"; do
+  [ -f "$f" ] && host_owned "$f" && owned="${owned} ${f#"${root}"/}"
+done
+[ -z "$owned" ] || echo "  · host-owned (a refresh skips these; keeping them current with the plugin is this repo's job):${owned}"
 
 if [ "$probs" -eq 0 ]; then echo "OK — setup looks intact."; exit 0; else echo "${probs} problem(s) found."; exit 1; fi

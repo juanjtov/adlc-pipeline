@@ -22,7 +22,9 @@ create "gate:deploy"   "FBCA04" "GATE 2 — Principal: merge · deploy · migrat
 # Pipeline control
 create "adlc:auto"     "C5DEF5" "Auto-run the Analyst while at stage:intake; add it back to re-run (you still approve Gate 1)"
 create "adlc:autopilot" "5319E7" "Full autopilot: also auto-approve Gate 1 — only Gate 2 (merge/deploy) is human"
-create "bug"           "D73A4A" "Defect filed by Ops — lands at stage:intake with telemetry"
+create "bug"           "D73A4A" "A defect, however it was reported — enters at stage:intake"
+create "adlc:change-failure" "B60205" "A defect Ops traced to a deploy, beside bug — what the change-failure metric counts"
+create "adlc:tripwire" "D93F0B" "Tripwire alert: a direct push or a force-push reached the default branch"
 create "adlc:changes-requested" "FBCA04" "A review flagged the PR — the fix loop returns it to the Builder"
 create "needs:human"   "E99695" "Fix loop capped out (3 rounds) — a human must step in on this PR"
 create "lane:fast"     "0FB889" "Marks a fast-lane PR so the full review lane defers to adlc-fast.yml (no collision)"

@@ -220,6 +220,112 @@ printf 'sha1 1\nsha2 0'    | bash "$S/adlc-tripwire-check.sh" >/dev/null 2>&1; c
 eq "DIRECT: sha2" "…and names the commit" "$(printf 'sha1 1\nsha2 0' | bash "$S/adlc-tripwire-check.sh" 2>/dev/null)"
 grep -q '^  pull-requests: read' "$ROOT/templates/github/adlc-main-tripwire.yml" && ok "adlc-main-tripwire.yml grants pull-requests: read (the commit→PR lookup is a 403 without it on a private repo)" || bad "adlc-main-tripwire.yml: needs pull-requests: read"
 grep -qE '^\s+commits=\$\(git rev-list --no-merges \$range\)$' "$ROOT/templates/github/adlc-main-tripwire.yml" && ok "…and a failed rev-list fails the step instead of reading as no commits" || bad "adlc-main-tripwire.yml: rev-list must be its own statement with no 2>/dev/null"
+# which commits a push asks about (issue 39): the range decision is the script's, not inline YAML
+TWC() { bash "$S/adlc-tripwire-check.sh" range "$@" 2>/dev/null; }
+eq "abc123..def456" "range: an ordinary push walks before..after" "$(TWC false abc123 def456)"
+eq "def456 -n 1" "range: a new branch (all-zero before) asks about the new commit alone" "$(TWC false 0000000000 def456)"
+eq "FORCED" "range: a force-push has no range to walk (before is no longer on the branch)" "$(TWC true abc123 def456)"
+TWC true abc123 def456 >/dev/null;  check 0 "…and says so with exit 0: the workflow alerts, the script only decides" $?
+TWC "" abc123 def456 >/dev/null;    check 2 "range: an event with no forced field is an error, not an ordinary push" $?
+TWC false abc123 "" >/dev/null;     check 2 "range: a missing commit id is an error" $?
+TWC false 'abc; rm' def456 >/dev/null; check 2 "range: a commit id that is not hexadecimal is an error" $?
+TWY="$ROOT/templates/github/adlc-main-tripwire.yml"
+grep -q 'FORCED: \${{ github.event.forced }}' "$TWY" && ok "adlc-main-tripwire.yml reads github.event.forced" || bad "adlc-main-tripwire.yml: must pass github.event.forced to the step"
+grep -qE '^\s+range=\$\(\.adlc/scripts/adlc-tripwire-check\.sh range "\$FORCED" "\$BEFORE" "\$AFTER"\)$' "$TWY" && ok "…and asks the script for the range, in a statement of its own" || bad "adlc-main-tripwire.yml: the range must come from adlc-tripwire-check.sh range"
+eq 1 "…alerts on a force-push before any rev-list" "$(awk '/adlc-tripwire-alert.sh forced "\$BEFORE" "\$AFTER"/ { f = NR } /git rev-list/ { r = NR } END { print (f && r && f < r) ? 1 : 0 }' "$TWY")"
+grep -q 'adlc-tripwire-alert.sh direct \$shas' "$TWY" && ok "…and files a direct push through the alert script" || bad "adlc-main-tripwire.yml: a direct push must be filed by adlc-tripwire-alert.sh"
+grep -q 'gh issue create\|--label "bug"' "$TWY" && bad "adlc-main-tripwire.yml must not file the issue inline, nor as a bug (issue 21)" || ok "…with no inline gh issue create and no bug label (issue 21: a direct push is not a defect)"
+eq "contents: read|issues: write|pull-requests: read|" "…with the permissions it had (the alert listing needs no more than issues: write)" "$(sed -n '/^permissions:/,/^jobs:/p' "$TWY" | grep -E '^  [a-z-]+: ' | sed 's/^  //' | tr '\n' '|')"
+
+echo "tripwire-alert (the alert issue, against a stub gh):"
+# Issue 39: the tripwire filed the same four commits twice, a minute apart. The alert's body now
+# ends with a machine-readable line and the script files nothing while an open adlc:tripwire issue
+# carries the same line. Issue 21: the label is adlc:tripwire, not bug, and a repo without that
+# label still gets the alert. The stub serves `issue list` from $TW/labelled.json (a --label
+# filter was passed) or $TW/all.json (none), and `issue create` prints a URL; a fail-* or no-label
+# file makes that call fail as the real gh does.
+if command -v jq >/dev/null 2>&1; then
+  TW="$(mktemp -d)"; mkdir -p "$TW/bin"
+  cat > "$TW/bin/gh" <<'SH'
+#!/usr/bin/env bash
+echo "$*" >> "$TW/calls"
+case "$1 $2" in
+  "issue list")
+    src=all; for a in "$@"; do [ "$a" = "--label" ] && src=labelled; done
+    [ -e "$TW/fail-list-$src" ] && { echo "HTTP 502: Server Error" >&2; exit 1; }
+    cat "$TW/$src.json" ;;
+  "issue create")
+    label=""; body=""; title=""
+    while [ $# -gt 0 ]; do case "$1" in --label) label="$2" ;; --body) body="$2" ;; --title) title="$2" ;; esac; shift; done
+    if [ -n "$label" ] && [ -e "$TW/no-label" ]; then echo "could not add label: '$label' not found" >&2; exit 1; fi
+    [ -e "$TW/fail-create" ] && { echo "HTTP 502: Server Error" >&2; exit 1; }
+    printf '%s\n' "$body" > "$TW/body"; printf '%s\n' "$title" > "$TW/title"; echo "${label:-none}" > "$TW/label"
+    echo "https://github.com/o/r/issues/7" ;;
+  *) exit 2 ;;
+esac
+SH
+  chmod +x "$TW/bin/gh"
+  A1=1111111111111111111111111111111111111111; A2=2222222222222222222222222222222222222222; A3=3333333333333333333333333333333333333333
+  twreset() { rm -f "$TW"/fail-* "$TW/no-label" "$TW/body" "$TW/title" "$TW/label"; echo '[]' > "$TW/labelled.json"; echo '[]' > "$TW/all.json"; : > "$TW/calls"; }
+  tw()      { TWOUT=$(TW="$TW" PATH="$TW/bin:$PATH" bash "$S/adlc-tripwire-alert.sh" "$@" 2>&1); }
+  creates() { grep -c '^issue create ' "$TW/calls"; }
+  open_issue() { jq -cn --argjson n "$1" --arg b "$2" '[{number: $n, body: $b}]'; }   # <number> <body>
+  twreset; tw direct "$A2" "$A1"; check 0 "direct: no open alert → the issue is filed" $?
+  eq "adlc:tripwire" "…with the label adlc:tripwire (not bug)" "$(cat "$TW/label")"
+  eq "ADLC-TRIPWIRE: direct $A1 $A2" "…its body ends with the machine-readable line, the ids sorted" "$(tail -n 1 "$TW/body")"
+  eq 1 "…after one listing of the open alerts, by label, with their bodies" "$(grep -c '^issue list --state open --label adlc:tripwire --limit 200 --json number,body$' "$TW/calls")"
+  eq 1 "…and names the commits and the branch in its text" "$(grep -c "reached \`main\` with no associated merged PR: $A1 $A2" "$TW/body")"
+  FILED="$(cat "$TW/body")"
+  twreset; open_issue 41 "$FILED" > "$TW/labelled.json"; tw direct "$A1" "$A2"; check 0 "direct: an open alert for the same commits → exit 0" $?
+  eq 0 "…and no second issue is filed" "$(creates)"
+  case "$TWOUT" in *"issue #41"*) ok "…the output names the open alert" ;; *) bad "a duplicate must name the open alert (got: $TWOUT)" ;; esac
+  eq 1 "…with no comment on it either (one gh call: the listing)" "$(grep -c . "$TW/calls")"
+  twreset; open_issue 41 "$(printf '%s' "$FILED" | awk '{ printf "%s\r\n", $0 }')" > "$TW/labelled.json"; tw direct "$A2" "$A1"
+  eq 0 "…also when the open alert's body has CRLF line ends and the ids come in another order" "$(creates)"
+  twreset; open_issue 41 "$FILED" > "$TW/labelled.json"; tw direct "$A1" "$A2" "$A3"; check 0 "direct: an open alert for a different set of commits → filed" $?
+  eq 1 "…one new issue" "$(creates)"
+  twreset; open_issue 41 "$FILED" > "$TW/labelled.json"; tw direct "$A1"
+  eq 1 "…a subset of an open alert's commits is a different set too (the line is compared whole)" "$(creates)"
+  twreset; open_issue 41 "As the alert said: ADLC-TRIPWIRE: direct $A1 $A2 (quoted)" > "$TW/labelled.json"; tw direct "$A1" "$A2"
+  eq 1 "…and the line quoted inside a sentence is not the line" "$(creates)"
+  twreset; : > "$TW/fail-list-labelled"; tw direct "$A1"; check 0 "direct: the listing fails → the alert is filed anyway (when in doubt, file)" $?
+  eq 1 "…one issue" "$(creates)"
+  case "$TWOUT" in *"could not list"*) ok "…and the failed read is said" ;; *) bad "a failed listing must be said (got: $TWOUT)" ;; esac
+  twreset; echo 'not json' > "$TW/labelled.json"; tw direct "$A1"
+  eq 1 "…a listing that is not JSON files too" "$(creates)"
+  twreset; : > "$TW/no-label"; tw direct "$A1"; check 0 "direct: the label does not exist in the repo → still filed" $?
+  eq none "…without a label" "$(cat "$TW/label")"
+  eq 2 "…on the second attempt" "$(creates)"
+  eq "ADLC-TRIPWIRE: direct $A1" "…with the same machine-readable line" "$(tail -n 1 "$TW/body")"
+  twreset; : > "$TW/no-label"; open_issue 52 "$(printf 'x\n\nADLC-TRIPWIRE: direct %s' "$A1")" > "$TW/all.json"; tw direct "$A1"; check 0 "…and an unlabelled open alert for the same commits is found before filing unlabelled" $?
+  eq 1 "…so only the refused labelled attempt was made" "$(creates)"
+  eq 1 "…the second listing carries no label filter" "$(grep -c '^issue list --state open --limit 200 --json number,body$' "$TW/calls")"
+  twreset; : > "$TW/no-label"; : > "$TW/fail-list-all"; tw direct "$A1"
+  eq none "…a failed second listing files the unlabelled alert" "$(cat "$TW/label" 2>/dev/null)"
+  twreset; : > "$TW/fail-create"; tw direct "$A1"; check 1 "direct: gh cannot create the issue at all → exit 1" $?
+  twreset; tw forced "$A2" "$A1"; check 0 "forced: the alert is filed" $?
+  eq "ADLC-TRIPWIRE: forced $A2 $A1" "…its line keeps before and after in order" "$(tail -n 1 "$TW/body")"
+  eq 1 "…the text says the branch was force-pushed and from where to where" "$(grep -c "was force-pushed: its tip moved from $A2 to $A1" "$TW/body")"
+  case "$(cat "$TW/title")" in *"Force-push to main"*"history was rewritten"*) ok "…and so does the title" ;; *) bad "forced: the title must say the history was rewritten (got: $(cat "$TW/title"))" ;; esac
+  FORCED_BODY="$(cat "$TW/body")"
+  twreset; open_issue 60 "$FORCED_BODY" > "$TW/labelled.json"; tw forced "$A2" "$A1"
+  eq 0 "forced: the same rewrite is not filed twice" "$(creates)"
+  twreset; open_issue 60 "$FORCED_BODY" > "$TW/labelled.json"; tw forced "$A1" "$A2"
+  eq 1 "…the reverse move is another event" "$(creates)"
+  twreset; open_issue 60 "$FORCED_BODY" > "$TW/labelled.json"; tw direct "$A1" "$A2"
+  eq 1 "…and a direct push of the same two ids is not a force-push" "$(creates)"
+  twreset; TWOUT=$(ADLC_TRIPWIRE_BRANCH=trunk TW="$TW" PATH="$TW/bin:$PATH" bash "$S/adlc-tripwire-alert.sh" direct "$A1" 2>&1)
+  case "$(cat "$TW/title")" in *"Direct push to trunk"*) ok "ADLC_TRIPWIRE_BRANCH names the branch in the text" ;; *) bad "the title must name the branch (got: $(cat "$TW/title"))" ;; esac
+  twreset; tw direct;               check 2 "bad arguments: direct with no commit" $?
+  tw forced "$A1";                  check 2 "bad arguments: forced with one commit" $?
+  tw direct "$A1" 'x y';            check 2 "bad arguments: a commit id that is not hexadecimal" $?
+  tw sideways "$A1";                check 2 "bad arguments: an unknown kind" $?
+  tw;                               check 2 "bad arguments: none" $?
+  eq 0 "…none of which reached gh" "$(grep -c . "$TW/calls")"
+  rm -rf "$TW"
+else
+  echo "  · skipped the tripwire-alert checks (no jq here)"
+fi
 
 echo "doctor (placeholder scan):"
 FIX="$(mktemp -d)"
@@ -347,7 +453,9 @@ echo "$*" >> "$DFX/calls"
 here() { [ "$(pwd -P)" = "$(cd "$DFX_ROOT" && pwd -P)" ]; }
 case "$*" in
   "auth status"*) [ -e "$DFX/noauth" ] && exit 1; exit 0 ;;
-  "label list"*)  here && printf '%s\n' stage:intake gate:stories stage:design stage:build stage:qa gate:deploy; exit 0 ;;
+  "label list"*)  here && printf '%s\n' stage:intake gate:stories stage:design stage:build stage:qa gate:deploy
+                  here && [ ! -e "$DFX/old-labels" ] && printf '%s\n' adlc:change-failure adlc:tripwire   # old-labels: a repo set up before issue 21
+                  exit 0 ;;
   "repo view"*|"api "*|"issue list"*|"pr list"*|"run "*) here || { echo "fake gh: asked from $PWD, not the fixture root" >&2; exit 1; } ;;
 esac
 case "$1 $2" in
@@ -393,6 +501,16 @@ eq yes "…and says what the tripwire cannot do" "$(says_gate "cannot stop a mer
 gate false - none;           check 1 "gate: not protected and no tripwire is flagged" $?
 eq yes "…as no merge gate" "$(says_gate "no merge gate")"
 gate - - -;                  check 1 "gate: a failed lookup is flagged, not passed" $?
+# issue 21: the two labels a script filters on — a repo whose labels predate them (labels.sh not re-run)
+gate true 1 none; : > "$FIX/fx/old-labels"
+GATE=$(DFX="$FIX/fx" DFX_ROOT="$FIX" PATH="$FIX/bin:$PATH" bash "$S/adlc-doctor.sh" "$FIX" 2>&1); check 1 "labels: a repo without adlc:change-failure is flagged" $?
+eq yes "…naming the label and the fix" "$(says_gate "missing GitHub label: adlc:change-failure (the change-failure metric counts issues that carry it) — re-run the plugin's templates/github/labels.sh")"
+eq no  "…adlc:tripwire is not asked for where the tripwire is not installed" "$(says_gate "missing GitHub label: adlc:tripwire")"
+gate false - none tripwire; : > "$FIX/fx/old-labels"
+GATE=$(DFX="$FIX/fx" DFX_ROOT="$FIX" PATH="$FIX/bin:$PATH" bash "$S/adlc-doctor.sh" "$FIX" 2>&1)
+eq yes "…and is where it is, saying the alerts are filed unlabelled without it" "$(says_gate "missing GitHub label: adlc:tripwire (the tripwire files its alerts under it; without it they are filed unlabelled)")"
+gate false - none tripwire;  check 0 "labels: with both labels and the tripwire installed, nothing is flagged" $?
+eq no  "…no missing label" "$(says_gate "missing GitHub label")"
 # the double-label check (issue 38): one state per issue — `issue list` and `pr list` through the stub
 dl() { # <issues json | -> <prs json | -> : seeds a sound gate fixture, then the lists
   gate true 1 none
@@ -1258,6 +1376,13 @@ if command -v jq >/dev/null 2>&1; then
 # stub gh: `pr list` serves $MX_PRS, `run list` $MX_RUNS, `run view <id>` $MX_JOBS/<id>.json (none → gh's failure),
 # `issue list` an empty list; all through the call's own --jq
 echo "$1 $2" >> "$MX_CALLS"
+echo "$*" >> "$MX_CALLS.args"   # the whole call: the change-failure cases pin the query
+# `label list` serves $MX_LABELS (unset → no labels; a missing file → gh's failure); `issue list` serves $MX_ISSUES when set
+if [ "$1 $2" = "label list" ] || { [ "$1 $2" = "issue list" ] && [ -n "${MX_ISSUES:-}" ]; }; then
+  [ "$2 $1" = "list label" ] && src="${MX_LABELS:-/dev/null}" || src="$MX_ISSUES"
+  f=.; while [ $# -gt 0 ]; do [ "$1" = "--jq" ] && f="$2"; shift; done
+  jq -r "$f" "$src"; exit $?
+fi
 case "$1 $2" in "pr list") src="$MX_PRS" ;; "run list") src="$MX_RUNS" ;; "run view") src="$MX_JOBS/$3.json"; [ -f "$src" ] || { echo "run 1 not found" >&2; exit 1; } ;; "issue list") src=/dev/null ;; *) exit 2 ;; esac
 f=.; while [ $# -gt 0 ]; do [ "$1" = "--jq" ] && f="$2"; shift; done
 [ "$src" = /dev/null ] && echo '[]' | jq -r "$f" || jq -r "$f" "$src"   # -r: gh --jq prints a string result raw
@@ -1377,6 +1502,24 @@ ADLC-CI: PASS head $H2"
   OUT=$( cd "$MX/repo" && env PATH="$MX/bin:$PATH" MX_PRS="$MX/prs.json" MX_RUNS="$MX/runs.json" MX_JOBS="$MX/jobs" MX_CALLS="$MX/calls" bash "$S/adlc-metrics.sh" 30 2>&1 )
   eq "first_pass_approved: 0 / 0" "no merged PRs: 0 / 0" "$(printf '%s\n' "$OUT" | grep '^first_pass_approved:')"
   eq "iterations_to_green: no CI runs found for the merged PRs of the window" "no merged PRs: iterations-to-green says so" "$(printf '%s\n' "$OUT" | grep '^iterations_to_green:')"
+  # Issue 21: the change-failure signal counted every `bug` issue, so each bug a person reported
+  # through intake and each tripwire alert raised it. It now counts the issues labelled
+  # adlc:change-failure (a defect Ops traced to a deploy). The stub records the whole call.
+  mx() { OUT=$( cd "$MX/repo" && env PATH="$MX/bin:$PATH" MX_PRS="$MX/prs.json" MX_RUNS="$MX/runs.json" MX_JOBS="$MX/jobs" MX_CALLS="$MX/calls" "$@" bash "$S/adlc-metrics.sh" 30 2>&1 ); }
+  echo '[{"name":"bug"},{"name":"adlc:change-failure"},{"name":"stage:qa"}]' > "$MX/labels.json"
+  jq -n --arg at "$now" '[{createdAt: $at}, {createdAt: $at}, {createdAt: "2000-01-01T00:00:00Z"}]' > "$MX/issues.json"
+  : > "$MX/calls.args"; mx MX_LABELS="$MX/labels.json" MX_ISSUES="$MX/issues.json"; check 0 "change failures: the script runs to the end" $?
+  eq "change_failures: 2" "change failures: the issues in the window, printed as change_failures" "$(printf '%s\n' "$OUT" | grep '^change_failures:')"
+  eq 1 "…asked for by the label adlc:change-failure, open and closed alike, in one call" "$(grep -c '^issue list --state all --label adlc:change-failure --limit 200 --json createdAt --jq ' "$MX/calls.args")"
+  eq 1 "…the only issue listing the script makes" "$(grep -c '^issue list ' "$MX/calls.args")"
+  eq 0 "…and nothing is counted by the bug label any more" "$(grep -c -- '--label bug' "$MX/calls.args")"
+  eq 0 "…nor printed as bugs_filed" "$(printf '%s\n' "$OUT" | grep -c '^bugs_filed')"
+  echo '[{"name":"bug"},{"name":"adlc:change-failure-old"}]' > "$MX/labels.json"
+  : > "$MX/calls.args"; mx MX_LABELS="$MX/labels.json" MX_ISSUES="$MX/issues.json"; check 0 "change failures: a repo without the label does not break the script" $?
+  eq "change_failures: 0 (this repo has no adlc:change-failure label, so no issue carries it — run the plugin's templates/github/labels.sh)" "…it prints a zero that says why (a label with a longer name is not the label)" "$(printf '%s\n' "$OUT" | grep '^change_failures:')"
+  eq 0 "…without asking for issues no label could be on" "$(grep -c '^issue list ' "$MX/calls.args")"
+  mx MX_LABELS="$MX/no-such-file" MX_ISSUES="$MX/issues.json"; [ $? -ne 0 ] && ok "change failures: a label listing that fails stops the script with an error (no silent zero)" || bad "change failures: a failed label listing must stop the script"
+  eq 0 "…and no change_failures line is printed" "$(printf '%s\n' "$OUT" | grep -c '^change_failures:')"
   rm -rf "$MX"
 else
   echo "  · skipped the metrics checks (no jq here)"
@@ -1400,6 +1543,14 @@ SH
 chmod +x "$LB/gh"; : > "$LB/created"
 LB_OUT="$LB/created" PATH="$LB:$PATH" bash "$ROOT/templates/github/labels.sh" >/dev/null 2>&1; check 0 "labels.sh runs to the end (no description over GitHub's 100-char limit)" $?
 eq "$(grep -c '^create "' "$ROOT/templates/github/labels.sh")" "…and creates every label it lists" "$(grep -c . "$LB/created")"
+# issue 21: one meaning per label
+for l in bug adlc:change-failure adlc:tripwire; do grep -qx "$l" "$LB/created" && ok "labels.sh creates $l" || bad "labels.sh must create $l"; done
+grep -E '^create "bug" ' "$ROOT/templates/github/labels.sh" | grep -qi 'ops\|deploy' && bad "labels.sh: bug must not be described as Ops-filed or deploy-related (that is adlc:change-failure)" || ok "bug is described as any defect, not as Ops-filed"
+grep -E '^create "adlc:change-failure" ' "$ROOT/templates/github/labels.sh" | grep -q 'Ops traced to a deploy' && ok "adlc:change-failure is the defect Ops traced to a deploy" || bad "labels.sh: adlc:change-failure must be described as a defect Ops traced to a deploy"
+grep -q 'adlc:change-failure' "$ROOT/skills/role-qa-release-ops/SKILL.md" && ok "the QA/Ops role prompt files a deploy-caused defect with adlc:change-failure" || bad "role-qa-release-ops: must name adlc:change-failure"
+grep -q 'adlc:change-failure' "$ROOT/templates/skills/release-ops.SKILL.md.tmpl" && ok "…and so does the release-ops template" || bad "release-ops template: must name adlc:change-failure"
+grep -q 'add the `bug` label' "$ROOT/skills/intake/SKILL.md" && ok "intake still adds bug to a reported bug" || bad "intake: must still add the bug label"
+grep -q 'adlc:change-failure' "$ROOT/skills/intake/SKILL.md" && bad "intake must not apply adlc:change-failure (it is Ops's)" || ok "…and never adlc:change-failure"
 rm -rf "$LB"
 
 echo "design → build handoff steps (the workflows' own run: scripts, real git + a stub gh):"
@@ -2251,6 +2402,212 @@ grep -q 'a record, not a gate' "$QA" && ok "…and calls it a record, not a gate
 grep -q '\.adlc/scripts/adlc-local-ci\.sh <pr>' "$RB" && grep -q '\.adlc/local-ci\.txt' "$RB" && ok "RUNBOOK has the local CI recipe (script and commands file)" || bad "RUNBOOK must name adlc-local-ci.sh and .adlc/local-ci.txt"
 tr '\n' ' ' < "$RB" | grep -q 'a record, not a gate: anyone who can comment can write that line' && ok "…and says the marker is a record, not a gate" || bad "RUNBOOK: must say the marker is a record, not a gate"
 grep -q '`blocked=`' "$ROOT/skills/cycle-retro/SKILL.md" && ok "cycle-retro explains the blocked= figure" || bad "cycle-retro must explain blocked="
+echo "tripwire step (the workflow's own run: script, on a real git history + a stub gh):"
+# The step of adlc-main-tripwire.yml, pulled out of the template and run as Actions runs it
+# (bash -e), with the two scripts it calls. The stub gh answers the commit→PR lookup (1 PR unless
+# $TS/nopr/<sha> exists), keeps the open issues in $TS/issues.json and adds each one it "creates",
+# so a second run of the same event meets the first run's alert.
+if command -v jq >/dev/null 2>&1; then
+  TS="$(mktemp -d)"; mkdir -p "$TS/bin" "$TS/nopr" "$TS/repo/.adlc/scripts"
+  cp "$S/adlc-tripwire-check.sh" "$S/adlc-tripwire-alert.sh" "$TS/repo/.adlc/scripts/"
+  step_run "$ROOT/templates/github/adlc-main-tripwire.yml" '- name: Flag commits not linked to a merged PR' > "$TS/step.sh"
+  [ -s "$TS/step.sh" ] && ok "the run: script is extracted from the template" || bad "could not extract the tripwire's run: script"
+  cat > "$TS/bin/gh" <<'SH'
+#!/usr/bin/env bash
+echo "$*" >> "$TS/calls"
+case "$1 $2" in
+  "api repos/o/r/commits/"*) sha="${2#repos/o/r/commits/}"; sha="${sha%/pulls}"; [ -e "$TS/nopr/$sha" ] && echo 0 || echo 1 ;;
+  "issue list") cat "$TS/issues.json" ;;
+  "issue create")
+    body=""; while [ $# -gt 0 ]; do [ "$1" = "--body" ] && body="$2"; shift; done
+    jq --arg b "$body" '. + [{number: (length + 1), body: $b}]' "$TS/issues.json" > "$TS/issues.new" && mv "$TS/issues.new" "$TS/issues.json"
+    echo "https://github.com/o/r/issues/1" ;;
+  *) exit 2 ;;
+esac
+SH
+  chmod +x "$TS/bin/gh"
+  tgit() { git -C "$TS/repo" -c user.name=t -c user.email=t@example.com -c commit.gpgsign=false -c core.hooksPath=/dev/null "$@"; }
+  git init -q "$TS/repo" >/dev/null 2>&1
+  for c in one two three; do echo "$c" > "$TS/repo/f"; tgit add -A >/dev/null 2>&1; tgit commit -q -m "$c" >/dev/null 2>&1; done
+  C1=$(tgit rev-parse HEAD~2); C2=$(tgit rev-parse HEAD~1); C3=$(tgit rev-parse HEAD); GONE=dddddddddddddddddddddddddddddddddddddddd
+  tws() { # <forced> <before> <after> — one run of the step
+    TSOUT=$( cd "$TS/repo" && env PATH="$TS/bin:$PATH" TS="$TS" GH_TOKEN=x REPO=o/r FORCED="$1" BEFORE="$2" AFTER="$3" ADLC_TRIPWIRE_BRANCH=main bash -e "$TS/step.sh" 2>&1 )
+  }
+  tscreates() { grep -c '^issue create ' "$TS/calls"; }
+  echo '[]' > "$TS/issues.json"; : > "$TS/calls"
+  tws false "$C1" "$C3";       check 0 "every pushed commit has a PR → the step passes" $?
+  eq 0 "…and files nothing" "$(tscreates)"
+  : > "$TS/nopr/$C3"; : > "$TS/calls"
+  tws false "$C1" "$C3";       check 1 "a commit with no PR → the step fails" $?
+  eq 1 "…and files one alert" "$(tscreates)"
+  eq 1 "…labelled adlc:tripwire" "$(grep -c '^issue create .* --label adlc:tripwire ' "$TS/calls")"
+  eq "ADLC-TRIPWIRE: direct $C3" "…naming that commit alone in its machine-readable line" "$(jq -r '.[0].body' "$TS/issues.json" | tail -n 1)"
+  tws false "$C1" "$C3";       check 1 "the same event run again → the step still fails" $?
+  eq 1 "…and no second alert is filed for the same commits (issue 39)" "$(tscreates)"
+  : > "$TS/nopr/$C2"
+  tws false "$C1" "$C3";       check 1 "a push with one more direct commit is a different set" $?
+  eq 2 "…and gets its own alert" "$(tscreates)"
+  echo '[]' > "$TS/issues.json"; : > "$TS/calls"
+  tws false 0000000000000000000000000000000000000000 "$C3"; check 1 "a new branch (all-zero before): the new commit alone is checked" $?
+  eq "ADLC-TRIPWIRE: direct $C3" "…so the alert names it and not the older direct commit" "$(jq -r '.[0].body' "$TS/issues.json" | tail -n 1)"
+  rm -f "$TS"/nopr/*; echo '[]' > "$TS/issues.json"; : > "$TS/calls"
+  tws true "$GONE" "$C3";      check 1 "a force-push → the step fails, though every commit now on the branch has a PR" $?
+  eq 1 "…and files one alert" "$(tscreates)"
+  eq "ADLC-TRIPWIRE: forced $GONE $C3" "…for the rewrite, from the old tip to the new" "$(jq -r '.[0].body' "$TS/issues.json" | tail -n 1)"
+  eq 0 "…without walking before..after (the old tip is not in the clone)" "$(grep -c '^api ' "$TS/calls")"
+  case "$TSOUT" in *"::error::Force-push to main"*) ok "…and the run's error line says it was a force-push" ;; *) bad "a force-push must be said in the run's error line (got: $TSOUT)" ;; esac
+  tws true "$GONE" "$C3"
+  eq 1 "the same force-push run again files no second alert" "$(tscreates)"
+  echo '[]' > "$TS/issues.json"; : > "$TS/calls"
+  tws false "$GONE" "$C3";     [ $? -ne 0 ] && ok "an ordinary push whose before is not in the clone fails the step (a failed rev-list is not 'no commits')" || bad "a failed rev-list must fail the step"
+  tws "" "$C1" "$C3";          [ $? -ne 0 ] && ok "an event with no forced field fails the step" || bad "an unreadable event must fail the step"
+  eq 0 "…neither files an alert it has no commits for" "$(tscreates)"
+  rm -rf "$TS"
+else
+  echo "  · skipped the tripwire step checks (no jq here)"
+fi
+
+echo "adlc-refresh.sh (the refresh: per-file diff, host-owned copies kept):"
+# Issue 39: the refresh copied templates/scripts/*.sh over the host's copies with no comparison
+# and no way to keep a file. Run the script as shipped against a fixture host tree.
+RF="$(mktemp -d)"; RH="$RF/host"; mkdir -p "$RH"
+R="$S/adlc-refresh.sh"
+rf()     { RFOUT=$(bash "$R" "$@" 2>&1); }
+status() { printf '%s\n' "$RFOUT" | awk -v t="$1" '$NF == t { $NF = ""; sub(/ +$/, ""); print; exit }'; }   # <target> → its status line, without the path
+tree()   { ( cd "$RH" && find . \( -type f -o -type l \) -exec cksum {} + | sort -k3; find . -type f -perm -u+x | sort ); }   # contents + exec bits
+NSCRIPTS=$(ls "$S"/*.sh | grep -vc '/adlc-refresh\.sh$')
+rf;                          check 2 "bad arguments: no host root" $?
+rf "$RF/nowhere";            check 2 "bad arguments: a host root that is not a directory" $?
+rf "$RH" one-extra;          check 2 "bad arguments: a filled file with no target" $?
+rf --apply;                  check 2 "bad arguments: --apply alone" $?
+rf --force "$RH";            check 2 "bad arguments: an unknown flag" $?
+# no template may itself carry the marker where the script looks: every installed copy would read as host-owned
+eq "" "no file under templates/ carries the host-owned marker in its first five lines" "$(for f in $(find "$ROOT/templates" -type f); do head -n 5 "$f" | grep -lqF 'adlc: host-owned' && echo "$f"; done)"
+rf "$RH";                    check 0 "dry run on a host with no tooling yet exits 0" $?
+eq "$NSCRIPTS" "…lists every templates/scripts/*.sh as new" "$(printf '%s\n' "$RFOUT" | grep -c '^new  *\.adlc/scripts/adlc-[a-z-]*\.sh$')"
+eq "new" "…and the MIT notice" "$(status .adlc/LICENSE)"
+eq 0 "…but not itself: it runs from the plugin and is not copied" "$(printf '%s\n' "$RFOUT" | grep -c 'adlc-refresh\.sh')"
+eq "" "…and writes nothing, not even a folder" "$(ls -A "$RH")"
+case "$RFOUT" in *"nothing written"*) ok "…saying so" ;; *) bad "a dry run must say nothing was written" ;; esac
+rf --apply "$RH";            check 0 "--apply on the same host exits 0" $?
+eq "$NSCRIPTS" "…every script is there" "$(ls "$RH/.adlc/scripts" | grep -c .)"
+eq "$NSCRIPTS" "…executable" "$(find "$RH/.adlc/scripts" -type f -perm -u+x | grep -c .)"
+eq "" "…byte for byte the plugin's" "$(for f in "$RH"/.adlc/scripts/*.sh; do cmp -s "$f" "$S/${f##*/}" || echo "$f"; done)"
+cmp -s "$RH/.adlc/LICENSE" "$ROOT/templates/LICENSE" && [ ! -x "$RH/.adlc/LICENSE" ] && ok "…with the MIT notice, not executable" || bad "--apply must copy templates/LICENSE to .adlc/LICENSE as a plain file"
+eq "" "…and nothing outside .adlc/scripts and .adlc/LICENSE" "$(cd "$RH" && find . -type f | grep -v '^\./\.adlc/scripts/adlc-[a-z-]*\.sh$' | grep -vx './.adlc/LICENSE')"
+rf "$RH"
+eq "$((NSCRIPTS + 1))" "a second run reads every file as same" "$(printf '%s\n' "$RFOUT" | grep -c '^same  ')"
+# the host's own changes: one copy edited, one edited and marked host-owned, one deleted, one lost its
+# exec bit, one marked on line 6 (too late to count), one extra file of the host's own
+echo '# a local tweak' >> "$RH/.adlc/scripts/adlc-verdict.sh"
+{ printf '#!/usr/bin/env bash\n# adlc: host-owned (our own metrics)\necho ours\n'; } > "$RH/.adlc/scripts/adlc-metrics.sh"; chmod 644 "$RH/.adlc/scripts/adlc-metrics.sh"
+{ sed -n '1,4p' "$S/adlc-cost.sh"; echo '# kept as is. adlc: host-owned'; sed -n '5,$p' "$S/adlc-cost.sh"; } > "$RH/.adlc/scripts/adlc-cost.sh"
+{ sed -n '1,5p' "$S/adlc-cache.sh"; echo '# adlc: host-owned'; sed -n '6,$p' "$S/adlc-cache.sh"; } > "$RH/.adlc/scripts/adlc-cache.sh"
+rm "$RH/.adlc/scripts/adlc-triage.sh"
+chmod -x "$RH/.adlc/scripts/adlc-fix-cap.sh"; echo '# x' >> "$RH/.adlc/scripts/adlc-fix-cap.sh"
+echo 'echo own' > "$RH/.adlc/scripts/own-tool.sh"
+cp "$RH/.adlc/scripts/adlc-metrics.sh" "$RF/metrics.keep"; cp "$RH/.adlc/scripts/adlc-cost.sh" "$RF/cost.keep"
+BEFORE="$(tree)"
+rf "$RH";                    check 0 "dry run on a host with local changes exits 0" $?
+eq "changed" "an edited copy is changed" "$(status .adlc/scripts/adlc-verdict.sh)"
+eq "host-owned (skipped)" "a copy marked on line 2 is host-owned" "$(status .adlc/scripts/adlc-metrics.sh)"
+eq "host-owned (skipped)" "…and one marked on line 5, mid-comment" "$(status .adlc/scripts/adlc-cost.sh)"
+eq "changed" "a marker on line 6 is not in the first five lines: the copy is changed" "$(status .adlc/scripts/adlc-cache.sh)"
+eq "new" "a deleted copy is new" "$(status .adlc/scripts/adlc-triage.sh)"
+eq "same" "an untouched copy is same" "$(status .adlc/scripts/adlc-doctor.sh)"
+eq 0 "the host's own file is not a mapped target: not listed" "$(printf '%s\n' "$RFOUT" | grep -c 'own-tool')"
+eq 3 "each changed file is followed by a unified diff, installed → plugin" "$(printf '%s\n' "$RFOUT" | grep -c '^--- \.adlc/scripts/adlc-[a-z-]*\.sh (installed)$')"
+eq 1 "…showing the host's line as the one that would go" "$(printf '%s\n' "$RFOUT" | grep -c '^-# a local tweak$')"
+eq 0 "…and no diff for a host-owned file" "$(printf '%s\n' "$RFOUT" | grep -c 'echo ours')"
+eq "$BEFORE" "without --apply nothing is written (contents and exec bits as before)" "$(tree)"
+rf --apply "$RH";            check 0 "--apply with host-owned files skipped still exits 0 (the list is the report)" $?
+cmp -s "$RH/.adlc/scripts/adlc-verdict.sh" "$S/adlc-verdict.sh" && ok "the changed copy is now the plugin's" || bad "--apply must copy a changed file"
+cmp -s "$RH/.adlc/scripts/adlc-cache.sh" "$S/adlc-cache.sh" && ok "…the late-marked one too" || bad "--apply must copy a file whose marker is past line 5"
+[ -x "$RH/.adlc/scripts/adlc-triage.sh" ] && cmp -s "$RH/.adlc/scripts/adlc-triage.sh" "$S/adlc-triage.sh" && ok "the new copy is there, executable" || bad "--apply must copy a new file, executable"
+[ -x "$RH/.adlc/scripts/adlc-fix-cap.sh" ] && ok "a script that had lost its exec bit has it back" || bad "--apply must leave a script executable"
+[ -x "$RH/.adlc/scripts/adlc-verdict.sh" ] && ok "…and an overwritten script keeps it" || bad "--apply must keep the exec bit"
+cmp -s "$RH/.adlc/scripts/adlc-metrics.sh" "$RF/metrics.keep" && cmp -s "$RH/.adlc/scripts/adlc-cost.sh" "$RF/cost.keep" && ok "the host-owned files are untouched, byte for byte" || bad "--apply must not touch a host-owned file"
+[ ! -x "$RH/.adlc/scripts/adlc-metrics.sh" ] && ok "…their mode too" || bad "--apply must not chmod a host-owned file"
+eq "echo own" "…and so is the host's own file" "$(cat "$RH/.adlc/scripts/own-tool.sh")"
+eq "copied: 4 · unchanged: $((NSCRIPTS - 6 + 1)) · skipped: 2|skipped (left exactly as they are):|  .adlc/scripts/adlc-cost.sh — host-owned|  .adlc/scripts/adlc-metrics.sh — host-owned|" "the output ends with the counts and the list of what it skipped" "$(printf '%s\n' "$RFOUT" | tail -n 4 | tr '\n' '|')"
+# a link at a target, or above it: nothing is written through it
+rm "$RH/.adlc/scripts/adlc-pr-stage.sh"; echo outside > "$RF/outside.sh"; ln -s "$RF/outside.sh" "$RH/.adlc/scripts/adlc-pr-stage.sh"
+rf --apply "$RH";            check 0 "a link at a target is skipped, not an error" $?
+eq "not a plain file (skipped)" "…with its own status" "$(status .adlc/scripts/adlc-pr-stage.sh)"
+eq "outside" "…and the file it points at is not written" "$(cat "$RF/outside.sh")"
+[ -L "$RH/.adlc/scripts/adlc-pr-stage.sh" ] && ok "…nor is the link replaced" || bad "a link at a target must be left alone"
+RH2="$RF/host2"; mkdir -p "$RH2" "$RF/elsewhere"; ln -s "$RF/elsewhere" "$RH2/.adlc"
+rf --apply "$RH2";           check 0 "a link at .adlc: every target under it is skipped" $?
+eq "" "…and nothing is written through the link" "$(ls -A "$RF/elsewhere")"
+# files the wizard fills first: the filled result, one target
+printf 'name: ADLC QA\non: push\nif: "someone"\n' > "$RF/qa.yml"
+rf "$RH" "$RF/qa.yml" .github/workflows/adlc-qa.yml; check 0 "filled file: a dry run exits 0" $?
+eq "new" "…a workflow the host does not have is new" "$(status .github/workflows/adlc-qa.yml)"
+[ ! -e "$RH/.github" ] && ok "…and nothing is written" || bad "filled file: a dry run must write nothing"
+rf --apply "$RH" "$RF/qa.yml" .github/workflows/adlc-qa.yml
+cmp -s "$RF/qa.yml" "$RH/.github/workflows/adlc-qa.yml" && [ ! -x "$RH/.github/workflows/adlc-qa.yml" ] && ok "filled file: --apply copies it to its target, not executable" || bad "filled file: --apply must copy the workflow as a plain file"
+printf 'name: ADLC QA\non: push\nif: "someone-else"\n' > "$RF/qa2.yml"
+rf "$RH" "$RF/qa2.yml" .github/workflows/adlc-qa.yml
+eq "changed" "…a filled result that differs from the installed workflow is changed" "$(status .github/workflows/adlc-qa.yml)"
+eq 1 "…with the diff against the installed file" "$(printf '%s\n' "$RFOUT" | grep -c '^+if: "someone-else"$')"
+{ echo '# adlc: host-owned'; cat "$RF/qa.yml"; } > "$RH/.github/workflows/adlc-qa.yml"; cp "$RH/.github/workflows/adlc-qa.yml" "$RF/qa.keep"
+rf --apply "$RH" "$RF/qa2.yml" .github/workflows/adlc-qa.yml; check 0 "filled file: a host-owned workflow is skipped" $?
+eq "host-owned (skipped)" "…with that status" "$(status .github/workflows/adlc-qa.yml)"
+cmp -s "$RH/.github/workflows/adlc-qa.yml" "$RF/qa.keep" && ok "…and untouched" || bad "filled file: a host-owned workflow must not be written"
+printf 'jobs:\n  a:\n    if: github.actor == '"'"'{{PRINCIPAL}}'"'"'\n    env:\n      T: ${{ github.token }}\n' > "$RF/unfilled.yml"
+rf --apply "$RH" "$RF/unfilled.yml" .github/workflows/adlc-builder.yml; check 2 "filled file: one that still holds a {{PLACEHOLDER}} is refused" $?
+[ ! -e "$RH/.github/workflows/adlc-builder.yml" ] && ok "…and not written" || bad "an unfilled file must not be written"
+printf 'env:\n  T: ${{ github.token }}\n' > "$RF/expr.yml"
+rf "$RH" "$RF/expr.yml" .github/workflows/adlc-builder.yml; check 0 "…a GitHub \${{ expression }} is not a placeholder" $?
+printf -- '---\nname: adlc-builder\nmodel: opus\n---\nx\n' > "$RF/agent.md"
+rf --apply "$RH" "$RF/agent.md" .claude/agents/adlc-builder.md; check 0 "filled file: an agent copy is a target" $?
+rf --apply "$RH" "$RF/agent.md" ./.github/ISSUE_TEMPLATE/requirement.yml; check 0 "…and the issue template (a leading ./ is fine)" $?
+for t in src/app.py .adlc/scripts/adlc-verdict.sh .github/workflows/ci.yml .github/workflows/adlc-x/../../../evil.yml .github/workflows/adlc-a/../adlc-b.yml ../adlc-x.yml .claude/agents/builder.md .claude/settings.json; do
+  rf --apply "$RH" "$RF/qa.yml" "$t"; check 2 "filled file: '$t' is not a target this script writes" $?
+done
+rf --apply "$RH" "$RF/qa.yml" "$RH/.github/workflows/adlc-qa.yml"; check 2 "filled file: an absolute path is not a target (targets are relative to the host root)" $?
+[ ! -e "$RH/src" ] && [ ! -e "$RF/evil.yml" ] && [ ! -e "$RH/.github/workflows/ci.yml" ] && [ ! -e "$RH/.github/workflows/adlc-b.yml" ] && ok "…and none of them was written" || bad "a refused target must not be written"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$RF/hook"
+rf --apply "$RH" "$RF/hook" .git/hooks/pre-commit; check 1 "filled file: the hook into a folder with no .git/hooks is an error" $?
+[ ! -e "$RH/.git" ] && ok "…and no .git is made up" || bad "the script must not create .git"
+mkdir -p "$RH/.git/hooks"
+rf --apply "$RH" "$RF/hook" .git/hooks/pre-commit; check 0 "filled file: the hook, where .git/hooks exists" $?
+[ -x "$RH/.git/hooks/pre-commit" ] && ok "…is installed executable" || bad "the hook must be executable"
+# the plugin's own copy only: a copy of the script elsewhere has no templates beside it
+mkdir -p "$RF/copy/.adlc/scripts"; cp "$R" "$RF/copy/.adlc/scripts/"
+RFOUT=$(bash "$RF/copy/.adlc/scripts/adlc-refresh.sh" "$RH" 2>&1); check 1 "a copy of the script outside the plugin refuses to run (no templates beside it)" $?
+# the wizard uses it, and says what was skipped
+BS="$ROOT/skills/bootstrap/SKILL.md"
+grep -q '${CLAUDE_PLUGIN_ROOT}/templates/scripts/adlc-refresh.sh "${CLAUDE_PROJECT_DIR}"' "$BS" && ok "bootstrap runs the refresh script from the plugin" || bad "bootstrap: step 8b must run \${CLAUDE_PLUGIN_ROOT}/templates/scripts/adlc-refresh.sh"
+grep -q 'adlc: host-owned' "$BS" && ok "…names the host-owned marker" || bad "bootstrap: must name the host-owned marker"
+grep -q -- '--apply' "$BS" && ok "…writes only with --apply, after showing the dry run" || bad "bootstrap: must run the dry run first, then --apply"
+grep -q 'tell the user which files it skipped' "$BS" && ok "…and tells the user what was skipped" || bad "bootstrap: must tell the user which files the refresh skipped"
+grep -q 'adlc-refresh.sh "${CLAUDE_PROJECT_DIR}" <scratch file> <target>' "$BS" && ok "…with the filled files (workflows, agent copies, the hook) going through the same script" || bad "bootstrap: filled files must go through adlc-refresh.sh"
+grep -q 'copy `templates/scripts/\*.sh` to' "$BS" && bad "bootstrap must not copy templates/scripts/*.sh by hand any more" || ok "…and no longer copies templates/scripts/*.sh by hand"
+for f in "$S"/*.sh; do grep -q "${f##*/}" "$ROOT/README.md" || bad "README layout tree does not list ${f##*/}"; done
+grep -q 'adlc: host-owned' "$ROOT/README.md" && ok "README says how to keep a copy (the marker)" || bad "README: must name the host-owned marker"
+# the doctor: a host-owned copy is listed on one line and is not a problem for differing
+DH="$RF/dhost"; mkdir -p "$DH/.claude/skills/project-conventions" "$DH/.claude/skills/release-ops" "$DH/.claude/agents" "$DH/.github/workflows" "$DH/.adlc/scripts"
+printf '{"permissions":{"deny":["Bash(gh pr merge:*)"]}}' > "$DH/.claude/settings.json"
+echo x > "$DH/.claude/skills/project-conventions/SKILL.md"; echo x > "$DH/.claude/skills/release-ops/SKILL.md"
+for a in product-analyst architect builder adversarial-reviewer qa-release-ops; do printf -- '---\nname: adlc-%s\nmodel: opus\n---\n\nx\n' "$a" > "$DH/.claude/agents/adlc-$a.md"; done
+cp "$S/adlc-verdict.sh" "$DH/.adlc/scripts/"; printf '#!/usr/bin/env bash\n# adlc: host-owned\necho ours\n' > "$DH/.adlc/scripts/adlc-metrics.sh"
+printf '# adlc: host-owned\njobs:\n  t:\n    steps:\n      - run: echo hi\n' > "$DH/.github/workflows/adlc-ci.yml"
+ddoc() { DOUT=$(ADLC_DOCTOR_SKIP_LABELS=1 CLAUDE_PLUGIN_ROOT= ADLC_PLUGIN_ROOT= CLAUDE_CONFIG_DIR="$RF/none" bash "$S/adlc-doctor.sh" "$DH" 2>&1); }
+ddoc;                        check 0 "doctor: host-owned copies that differ from the plugin's are not a problem" $?
+eq "  · host-owned (a refresh skips these; keeping them current with the plugin is this repo's job): .adlc/scripts/adlc-metrics.sh .github/workflows/adlc-ci.yml" "…and are listed on one line" "$(printf '%s\n' "$DOUT" | grep 'host-owned')"
+printf '# adlc: host-owned\njobs:\n  a:\n    steps:\n      - uses: anthropics/claude-code-action@v1\n        with:\n          prompt: go\n' > "$DH/.github/workflows/adlc-qa.yml"
+ddoc;                        check 1 "doctor: a host-owned lane that cannot run its agent is still a problem" $?
+eq 1 "…named as host-owned, since a refresh will not re-copy it" "$(printf '%s\n' "$DOUT" | grep -c 'adlc-qa.yml (host-owned: a refresh will not re-copy it')"
+rm "$DH/.github/workflows/adlc-qa.yml" "$DH/.github/workflows/adlc-ci.yml" "$DH/.adlc/scripts/adlc-metrics.sh"
+ddoc
+eq 0 "doctor: with no host-owned copy the line is not printed" "$(printf '%s\n' "$DOUT" | grep -c 'host-owned')"
+# scope-file lifecycle (issue 39): the RUNBOOK says what the code does
+grep -q '^## Scope files' "$ROOT/templates/RUNBOOK.md.tmpl" && ok "RUNBOOK states the scope-file lifecycle" || bad "RUNBOOK: must say what becomes of .adlc/scope/<n>.txt"
+SCT="$(mktemp -d)"; mkdir -p "$SCT/.adlc/scope"; printf 'src/\n' > "$SCT/.adlc/scope/12.txt"
+( cd "$SCT" && printf '.adlc/scope/7.txt\n.adlc/scope/8.txt\n' | bash "$S/adlc-diff-scope.sh" build .adlc/scope/12.txt ) >/dev/null 2>&1; check 1 "…a lane PR cannot prune other issues' scope files (the diff-scope check refuses it)" $?
+( cd "$SCT" && printf '.adlc/scope/7.txt\n.adlc/scope/8.txt\n' | bash "$S/adlc-diff-scope.sh" other ) >/dev/null 2>&1; check 0 "…a PR tied to no lane issue can (the check skips it)" $?
+rm -rf "$RF" "$SCT"
 
 echo ""
 echo "== $pass passed, $fail failed =="

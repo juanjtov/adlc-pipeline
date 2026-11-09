@@ -121,10 +121,21 @@ jq -rn --slurpfile runs <(echo "$runs") --slurpfile prs <(echo "$prs") --argjson
          (if $lc > 0 then "local_ci: \($lc) ADLC-CI marker comments on \([$per[] | select(.lc > 0)] | length) merged PRs (\($per | map(.lcfail) | add // 0) FAIL), counted above as CI runs" else empty end)
     end'
 
-# --- Change failure signal (bugs filed by Ops after a deploy) ---
-bugs=$(gh issue list --state all --label bug --limit 200 --json createdAt \
+# --- Change failure signal (defects Ops traced to a deploy) ---
+# Issues labelled adlc:change-failure, which Ops puts beside `bug` on a defect it traced to a
+# deploy. `bug` alone means any defect, however it was reported (intake adds it to every bug a
+# person brings), so it is not what is counted. A repo whose labels predate this one (labels.sh
+# not re-run) has no issue that could carry it: the line says so instead of a bare 0. One
+# `gh label list` call more; if it fails the script stops there, as it does for the PR listing.
+CF_LABEL="adlc:change-failure"
+repo_labels=$(gh label list --limit 500 --json name --jq '.[].name')
+if grep -qxF "$CF_LABEL" <<<"$repo_labels"; then
+  cf=$(gh issue list --state all --label "$CF_LABEL" --limit 200 --json createdAt \
         --jq "[.[] | select(.createdAt >= \"$SINCE\")] | length")
-echo "bugs_filed: $bugs"
+  echo "change_failures: $cf"
+else
+  echo "change_failures: 0 (this repo has no $CF_LABEL label, so no issue carries it — run the plugin's templates/github/labels.sh)"
+fi
 
 # --- Finding classes (the compounding signal) ---
 if [ -f "$LEDGER" ]; then

@@ -1,8 +1,12 @@
 # ADLC main-branch tripwire — the Free-plan substitute for branch protection on PRIVATE repos.
 # On every push to main it FAILS (and opens an alert issue) if a pushed commit didn't arrive
-# through a merged PR — i.e. someone pushed straight to main, bypassing the QA gate + Gate 2.
-# The decision is `.adlc/scripts/adlc-tripwire-check.sh` (unit-tested); this workflow just
-# resolves each commit's PR association via `gh api` and pipes it in.
+# through a merged PR — i.e. someone pushed straight to main, bypassing the QA gate + Gate 2 —
+# or if the push was a force-push, which rewrites the branch's history.
+# The decisions are `.adlc/scripts/adlc-tripwire-check.sh` (which commits to ask about; which of
+# them have no PR) and `.adlc/scripts/adlc-tripwire-alert.sh` (the alert issue, labelled
+# `adlc:tripwire`, and no second one while an open alert names the same commits), both
+# unit-tested; this workflow just resolves each commit's PR association via `gh api` and pipes
+# it in.
 # On a PUBLIC repo use real branch protection instead. Agents are stopped before the push by
 # the plugin's guard hook (backed by the `.claude/settings.json` deny rules); this catches what
 # those cannot — a HUMAN pushing by hand, or a push hidden from a command-text check — after
@@ -15,6 +19,7 @@ on:
 
 permissions:
   contents: read
+  # Filing the alert, and listing the open alerts first so the same one is not filed twice.
   issues: write
   # The commit→PR lookup below needs this on a private repo. Without it the call is a 403, and
   # every commit reads as a direct push.
@@ -33,10 +38,21 @@ jobs:
           REPO: ${{ github.repository }}
           BEFORE: ${{ github.event.before }}
           AFTER: ${{ github.event.after }}
+          FORCED: ${{ github.event.forced }}
+          ADLC_TRIPWIRE_BRANCH: ${{ github.ref_name }}
         run: |
-          chmod +x .adlc/scripts/adlc-tripwire-check.sh
-          # New-branch pushes report an all-zero "before"; scope to the new commit then.
-          if [ -z "${BEFORE//0/}" ]; then range="$AFTER -n 1"; else range="$BEFORE..$AFTER"; fi
+          chmod +x .adlc/scripts/adlc-tripwire-check.sh .adlc/scripts/adlc-tripwire-alert.sh
+          # Which commits this push asks about: BEFORE..AFTER, the new commit alone when a
+          # new-branch push reports an all-zero "before", or FORCED. A statement of its own: an
+          # event the script cannot read must fail the step.
+          range=$(.adlc/scripts/adlc-tripwire-check.sh range "$FORCED" "$BEFORE" "$AFTER")
+          # A force-push rewrote the branch. BEFORE is then no longer on it, and need not be in
+          # this clone at all, so there is no range to walk: the rewrite itself is the alert.
+          if [ "$range" = FORCED ]; then
+            echo "::error::Force-push to $ADLC_TRIPWIRE_BRANCH — its history was rewritten ($BEFORE → $AFTER)"
+            .adlc/scripts/adlc-tripwire-alert.sh forced "$BEFORE" "$AFTER" || echo "::error::The alert issue could not be filed"
+            exit 1
+          fi
 
           # Build "<sha> <pr_count>" lines for each non-merge commit, then let the script decide.
           # A statement of its own: a rev-list that fails must fail the step, not read as "no commits".
@@ -47,14 +63,9 @@ jobs:
                   done)
           result=$(printf '%s\n' "$lines" | .adlc/scripts/adlc-tripwire-check.sh) || {
             shas=${result#DIRECT:}
-            echo "::error::Direct push to main detected (bypassed the QA gate):$shas"
-            gh issue create \
-              --title "⚠️ Direct push to main — bypassed the QA gate" \
-              --label "bug" \
-              --body "These commits reached \`main\` with no associated merged PR:$shas
-
-          Gate 2 requires merges go through the QA gate and Principal approval. If unintended,
-          revert and re-land through a PR. (ADLC tripwire — the Free-plan stand-in for branch protection.)"
+            echo "::error::Direct push to $ADLC_TRIPWIRE_BRANCH detected (bypassed the QA gate):$shas"
+            # The alert issue: its text, its label and the duplicate check are the script's.
+            .adlc/scripts/adlc-tripwire-alert.sh direct $shas || echo "::error::The alert issue could not be filed"
             exit 1
           }
           echo "$result"

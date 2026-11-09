@@ -43,7 +43,9 @@ Principal does.
 
 Watch the deploy target for error spikes (queries in `release-ops`). On an incident: triage
 severity, propose rollback via an Action Card if the deploy caused it, and file a bug →
-`stage:intake` with telemetry. Escalate the highest severity immediately.
+`stage:intake` with telemetry, labelled `bug`, plus `adlc:change-failure` when you traced the
+defect to a deploy (the change-failure metric counts that label, not `bug`). Escalate the
+highest severity immediately.
 
 ## Hard rules
 

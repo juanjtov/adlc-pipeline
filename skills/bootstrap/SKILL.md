@@ -15,6 +15,13 @@ stand up the pipeline end-to-end with minimal friction. Bundled templates live u
   review and commit. (This matches the charter's propose-before-write / no-auto-commit.)
 - **Confirm before any GitHub write** (`gh label create`, creating issues) and before
   **overwriting or editing any file that already exists** — show a diff/summary and ask.
+- **A copy the host took over is never overwritten.** A file copied from `templates/` whose
+  first five lines contain `adlc: host-owned` (the host writes it in a comment, e.g.
+  `# adlc: host-owned`) stays exactly as it is, on a first run and on every refresh. Every such
+  copy — scripts, workflows, agent copies, the hook — goes through
+  `${CLAUDE_PLUGIN_ROOT}/templates/scripts/adlc-refresh.sh` (step 8b), which checks the marker,
+  prints a diff of each file that differs, and writes only with `--apply`. Never copy one of
+  them by hand, and always tell the user which files it skipped.
 - Keep momentum. Batch the questions, auto-detect everything you can, and state your
   detected defaults so the user can just confirm.
 - **Generate the minimum.** Every line you write is a tax paid on every future request.
@@ -207,22 +214,43 @@ Create/write:
    `ablation` skill reads on each reset; it keeps the generated context from rotting into
    append-only.
 
-8b. `.adlc/scripts/` + the local guard — copy `templates/scripts/*.sh` to `.adlc/scripts/`
-   (chmod +x). These are the **deterministic guardrails** (`adlc-diff-scope`, `adlc-tripwire-check`,
-   `adlc-fix-cap`, `adlc-verdict`, `adlc-relabel`, `adlc-adr-check`, `adlc-metrics`, `adlc-run-log`, `adlc-cycle`, `adlc-doctor`) that the workflows and the local
+8b. `.adlc/scripts/` + the local guard — run
+   `${CLAUDE_PLUGIN_ROOT}/templates/scripts/adlc-refresh.sh "${CLAUDE_PROJECT_DIR}"`. It compares
+   every `templates/scripts/*.sh` (all but itself: it runs from the plugin) with `.adlc/scripts/`,
+   and `templates/LICENSE` with `.adlc/LICENSE`, prints one line per file — `same`, `new`,
+   `changed` followed by a diff, `host-owned (skipped)` — and writes nothing. Show the user what
+   would change, ask, then run it again with `--apply` before the path: it copies the `new` and
+   `changed` files (scripts executable) and nothing else, and its last lines list what it
+   skipped. Relay that list: a host-owned file that differs from the plugin's is the user's to
+   bring up to date by hand. These are the **deterministic guardrails** (`adlc-diff-scope`, `adlc-tripwire-check`,
+   `adlc-tripwire-alert`, `adlc-fix-cap`, `adlc-verdict`, `adlc-relabel`, `adlc-adr-check`, `adlc-metrics`, `adlc-run-log`, `adlc-cycle`, `adlc-doctor`) that the workflows and the local
    hook call — one unit-tested source of truth, not prose. Also write the plugin's version to
    `.adlc/VERSION` (one line): read `.version` from `${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json`.
    That stamp says which plugin release these frozen copies came from, so `adlc-doctor.sh` can tell
    the user when a newer release may have newer tooling (the plugin's `CHANGELOG.md` says per
-   release whether a refresh is needed). Re-running this step is the refresh: it restamps. Also copy
-   `templates/LICENSE` to `.adlc/LICENSE`: it is the MIT notice for every file this wizard copies
+   release whether a refresh is needed). Re-running this step is the refresh: it restamps, also
+   when host-owned files were skipped (the doctor lists those). `.adlc/LICENSE` is the MIT
+   notice for every file this wizard copies
    from `templates/` (the scripts, the workflows, the agent copies, the hook, the generated docs),
    which the MIT license requires to travel with them; the plugin itself is AGPL, the copies are
-   not. Then install the **local diff-scope
-   guard**: copy `templates/hooks/pre-commit` to `.git/hooks/pre-commit` (chmod +x) — **ask first
-   if a pre-commit hook already exists** — so the Builder's declared scope is enforced on every
-   local commit, not only in CI. Set the hook's `ADLC_TEST_DIRS` default to the repo's test dirs
-   (the same regex that fills `{{TEST_DIR_REGEX}}`).
+   not.
+
+   **Files you fill before copying** — a workflow, an agent copy, the hook — cannot be compared
+   from the template alone, so the script takes the filled result: write it to a scratch file
+   outside the repo (`mktemp -d`), then
+   `adlc-refresh.sh "${CLAUDE_PROJECT_DIR}" <scratch file> <target>` (`<target>` relative to the
+   repo root: `.github/workflows/adlc-<name>.yml`, `.github/ISSUE_TEMPLATE/requirement.yml`,
+   `.claude/agents/adlc-<role>.md` or `.git/hooks/pre-commit`). Same lines, same marker, the diff
+   is against the installed file, nothing is written without `--apply`, and a scratch file that
+   still holds a `{{PLACEHOLDER}}` is refused. A workflow with nothing to fill goes through the
+   same call, the template as its own filled file.
+
+   Then install the **local diff-scope guard**: in a scratch copy of
+   `templates/hooks/pre-commit` set the `ADLC_TEST_DIRS` default to the repo's test dirs (the
+   same regex that fills `{{TEST_DIR_REGEX}}`), and pass it through the script to
+   `.git/hooks/pre-commit` — **ask first if a pre-commit hook already exists** (the diff shows
+   what it would replace) — so the Builder's declared scope is enforced on every local commit,
+   not only in CI.
 
 8c. `.claude/agents/adlc-<role>.md` — five files, from `templates/agents/adlc-<role>.md.tmpl`:
    `adlc-product-analyst`, `adlc-architect`, `adlc-builder`, `adlc-adversarial-reviewer`,
@@ -234,7 +262,8 @@ Create/write:
    plugin's `adlc:<role>` agent behave the same, and only the `model:` line is this repo's. The
    RUNBOOK invokes the copies by name, and `/adlc-model` shows or changes a model line later.
    An existing file gets the usual treatment — show the diff and ask — and a refresh re-copies
-   the wrapper around the model the user confirmed in Phase 1 (pre-filled from the file).
+   the wrapper around the model the user confirmed in Phase 1 (pre-filled from the file). Each
+   filled copy goes through `adlc-refresh.sh` (step 8b), so one marked host-owned is left alone.
 
 9. **UI projects only** (frontend detected): note that the `design-system` and
    `verify-frontend-change` skills are expected by the Builder/QA agents when frontend
@@ -254,8 +283,11 @@ Only if a GitHub remote exists and `gh` is authenticated.
 **Labels (both automation levels need these):** propose running
 `${CLAUDE_PLUGIN_ROOT}/templates/github/labels.sh` (it `gh label create`s the state
 machine: `stage:intake`, `gate:stories`, `stage:design`, `stage:build`, `stage:qa`,
-`gate:deploy`, `stage:fast` + `lane:fast` for the fast lane, plus `adlc:auto` and a bug
-label). **Show the commands and ask before running** — this writes to their GitHub repo.
+`gate:deploy`, `stage:fast` + `lane:fast` for the fast lane, plus `adlc:auto`, `bug` (any
+defect), `adlc:change-failure` (a defect Ops traced to a deploy; the metric counts these) and
+`adlc:tripwire` (the tripwire's alerts)). **Show the commands and ask before running** — this
+writes to their GitHub repo. On a refresh propose it again: it is idempotent, and it creates the
+labels a newer release added.
 
 **How a lane runs its agent — keep these lines intact in every workflow you copy.** The action
 gives a prompt no shell, edit or `gh` access, and it knows nothing about this plugin. So each
@@ -266,7 +298,9 @@ repo: the agent definitions, the `adlc:*` skills and the guard hook all come fro
 If the user installed the plugin from a fork or a private marketplace (check
 `claude plugin marketplace list`), replace the marketplace URL and the `@adlc-pipeline` suffix
 in every copied workflow, and tell them a private marketplace needs the runner to have git
-access to it.
+access to it. Every workflow below, filled, reaches `.github/workflows/` through
+`adlc-refresh.sh` (Phase 2, step 8b): on a refresh that is the diff the user sees, and a
+workflow marked host-owned is skipped.
 
 **Full-automation only:** copy the lane workflows into `.github/workflows/`
 (`adlc-builder.yml`, `adlc-qa.yml`, and `adlc-review.yml`), filled with the repo's
@@ -352,9 +386,9 @@ the merge gate according to the repo's visibility (the Phase 1 choice):
   pushes. This is the hard gate.
 - **Private repo (Free plan)** → also copy `adlc-main-tripwire.yml` into `.github/workflows/`.
   Branch protection isn't available, so the merge gate is: the plugin's guard hook (backed by
-  the `settings.json` deny rules written in Phase 2) + this tripwire (fails and files a bug
-  on any direct push to main) + the human Gate 2. Actions minutes are limited there: the
-  sizing from Phase 1 (7a) applies.
+  the `settings.json` deny rules written in Phase 2) + this tripwire (fails and files an
+  `adlc:tripwire` alert issue on a direct push or a force-push to main) + the human Gate 2.
+  Actions minutes are limited there: the sizing from Phase 1 (7a) applies.
 
 Then print the **one-time manual infra checklist** (Principal tasks — you cannot do these):
 - Two repo secrets: `CLAUDE_CODE_OAUTH_TOKEN` (`claude setup-token` — subscription, no API

@@ -13,7 +13,9 @@ a single PR through the normal gates (author/verifier separation holds even here
 Inputs (all deterministic — never agent self-report):
 - **GitHub-derived metrics** — run `${CLAUDE_PROJECT_DIR}/.adlc/scripts/adlc-metrics.sh` (or the
   copy under the plugin templates) for first-pass acceptance, iterations-to-green, cycle time
-  per stage, and change failure signals from PRs / CI / labels.
+  per stage, and change failure signals from PRs / CI / labels (`change_failures` counts the
+  issues labelled `adlc:change-failure`, the defects Ops traced to a deploy; `bug` alone is any
+  reported defect and is not counted).
 - **Finding ledger** — **materialize it first** from the PR comments (the durable store):
   ```
   : > .adlc/metrics/findings.jsonl

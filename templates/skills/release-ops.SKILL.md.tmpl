@@ -55,5 +55,6 @@ Awaiting:   Principal approval
 
 - First 30 minutes: {{MONITOR_CMD}} <!-- log/error-rate query for the deploy target -->
 - Incident: triage severity; if the deploy caused it, propose rollback (Action Card) and
-  file a bug → `stage:intake` with telemetry attached. Escalate the highest severity to the
-  Principal immediately.
+  file a bug → `stage:intake` with telemetry attached, labelled `bug`, plus
+  `adlc:change-failure` when the defect is traced to a deploy. Escalate the highest severity
+  to the Principal immediately.
