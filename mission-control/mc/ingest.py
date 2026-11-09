@@ -31,6 +31,10 @@ class Repos:
         self.cache[cwd] = (time.time(), repo, branch)
         return repo, branch
 
+    def root(self, cwd):
+        """The top folder of the git checkout a working directory is in, or '' when it is in none."""
+        return _git(cwd, 'rev-parse', '--show-toplevel') if cwd else ''
+
 
 def _git(cwd, *args):
     try:
@@ -40,14 +44,26 @@ def _git(cwd, *args):
         return ''
 
 
-def adopted(cwd):
+MAX_CWD = 4096   # longer than any real path; the walk below costs a few file checks per level
+
+
+def adopted(cwd, top=None):
     """Whether a working directory is in a repo /adlc-init set up: the same rule as the guard hook (hooks/adlc-guard.sh),
-    one of the wizard's markers at or above it. A bare .adlc/ folder is not one."""
-    d = os.path.abspath(cwd) if cwd else ''
+    one of the wizard's markers at or above it. A bare .adlc/ folder is not one.
+
+    With `top` (the checkout's top folder) the walk stops there, so a marker further up does not count: a clone
+    that sits inside an adopted repo's folder has not adopted anything itself."""
+    if not cwd or not isinstance(cwd, str) or len(cwd) > MAX_CWD or '\0' in cwd:
+        return False
+    d = os.path.abspath(cwd)
+    if top:
+        d, top = os.path.realpath(d), os.path.realpath(top)   # git names the top by its real path; compare like with like
     while d:
         if os.path.isdir(os.path.join(d, '.adlc', 'scripts')) or os.path.isfile(os.path.join(d, '.adlc', 'VERSION')) \
                 or os.path.isfile(os.path.join(d, 'docs', 'adlc', 'CHARTER.md')):
             return True
+        if top and d == top:
+            return False
         up = os.path.dirname(d)
         d = up if up != d else ''
     return False
@@ -156,6 +172,9 @@ class Ingest:
         """A Claude Code session opened somewhere. In an adopted repo that puts the repo on the page's menu, so it is
         there before any agent has run in it. Anywhere else nothing is kept, not even the path."""
         if not adopted(cwd):
+            return False
+        top = self.repos.root(cwd)
+        if top and not adopted(cwd, top):   # the marker belongs to a folder above this checkout, not to it
             return False
         repo, _ = self.repos.lookup(cwd)
         if not repo or repo in self.store.repos():
