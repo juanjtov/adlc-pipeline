@@ -107,7 +107,7 @@ HEREDOC_ESCAPE = re.compile(r"\\([$`\\])")
 ANSI_C = re.compile(r"\\(x[0-9A-Fa-f]{1,2}|u[0-9A-Fa-f]{1,4}|[0-7]{1,3}|.)", re.S)
 ANSI_C_NAMED = {"n": "\n", "t": "\t", "r": "\r", "a": "\a", "b": "\b", "e": "\x1b", "f": "\f", "v": "\v"}
 RAW_PUSH = re.compile(r"(?<![\w.-])git\b(?:\s+-[cC]\s*\S+|\s+--?[\w-]+(?:=\S+)?)*\s+['\"]?push\b")
-RAW_MERGE = re.compile(r"(?<![\w.-])gh\b[^\n;|&]*?\bpr\s+merge\b")
+RAW_MERGE = re.compile(r"(?<![\w.-])gh\b[^\n;|&]*?\bpr\b[^\n;|&]*?\bmerge\b")  # `gh pr --subject x merge` too
 RAW_API = re.compile(r"(?<![\w.-])gh\b[^\n;|&]*?\bapi\b")
 RAW_HTTP = re.compile(r"^(?=.*(?<![\w.-])(?:curl|wget)\b)(?=.*(?:(?:api|uploads)\.github\.com|GITHUB_(?:API|GRAPHQL)_URL))",
                       re.I | re.M)  # one line naming both, in either order
@@ -884,8 +884,8 @@ class Guard:
                     if word in texts:
                         self.check_push(args[texts.index(word) + 1:], self.cwd_of(scope), plumbing=word != "push")
                 for word in ("pr", "api", "alias"):
-                    if word in texts:
-                        self.check_gh(args[texts.index(word):], scope)
+                    if word in texts:  # (what stands before the word goes after it: gh reads a flag there too)
+                        self.check_gh(args[texts.index(word):] + args[:texts.index(word)], scope)
                 self.check_http("curl", args)
             except Block as b:
                 raise Block("%s (The program here is named by `%s`, so the command is judged as the "
@@ -1379,6 +1379,38 @@ class Guard:
                 raise Block("push to the protected branch `%s`. %s" % (dst, advice))
 
     # -- gh ----------------------------------------------------------------------------
+    def check_gh_early_flag(self, args, k, scope):
+        """args[k] is a `--flag` or `-f` written before the gh subcommand. While gh looks for the
+        command it takes the word after such a flag as the flag's value, unless it knows the flag
+        as a switch at that level: `gh pr --subject view merge 5` is `gh pr merge 5`, and
+        `gh -X DELETE api …` is a DELETE. Which flag gh knows where is not the guard's to guess,
+        so from here ANY bare word of the call may be the group or the subcommand, and the call is
+        judged by all of them. False when no bare word follows the flag (`gh --version`)."""
+        if all(w.text.startswith("-") for w in args[k + 1:]):
+            return False
+        bare = [w for w in args if not w.text.startswith("-")]
+        texts = [w.text for w in bare]
+        why = ("gh may take the word after `%s` as that flag's value, so any word of this call "
+               "may be its subcommand. Put the options after the subcommand: "
+               "`gh pr view 5 --json title`." % args[k].text)
+        if self.role:
+            raise Block("this gh command can't be checked against the %s role's limits: %s" % (self.role, why))
+        if any(w.dynamic for w in bare):
+            raise Block("the gh command can't be verified, a word of it is computed: %s" % why)
+        try:
+            if "pr" in texts and "merge" in texts:
+                self.check_gh([Word("pr"), Word("merge")], scope)
+            for sub in ("set", "import"):
+                if "alias" in texts and sub in texts:
+                    self.check_gh([Word("alias"), Word(sub)], scope)
+            if "api" in texts:
+                self.check_gh_api([w for w in args if w.text != "api"])
+        except Block as b:
+            raise Block("%s (%s)" % (b, why))
+        if "pr" in texts and "checkout" in texts:
+            self.lost = True  # it may have checked a PR out, or may not: no branch is trusted after
+        return True
+
     def check_gh(self, args, scope):
         positional, k = [], 0
         while k < len(args) and len(positional) < 2:
@@ -1386,12 +1418,19 @@ class Guard:
             if a in ("-R", "--repo", "--hostname") and k + 1 < len(args):
                 k += 2
             elif a.startswith("-"):
+                # `--flag` and `-f` (no `=`, not a cluster) are the two shapes that may take the next word
+                if (args[k].dynamic or ("=" not in a and (a.startswith("--") or len(a) == 2))) \
+                        and self.check_gh_early_flag(args, k, scope):
+                    return
                 k += 1
             else:
                 positional.append(args[k])
                 k += 1
         if not positional:
             return
+        if positional[0].text == "api" and args[0] is not positional[0]:
+            # a flag written before `api` is api's flag too: `gh --method=DELETE api …` is a DELETE
+            self.check_gh_api([w for w in args if w is not positional[0]])
         group = positional[0].text
         sub = positional[1].text if len(positional) > 1 else ""
         if self.role:
