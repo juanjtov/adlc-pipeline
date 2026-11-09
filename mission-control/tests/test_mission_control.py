@@ -534,7 +534,7 @@ class GitHubReader(unittest.TestCase):
             if isinstance(reply, Exception):
                 raise reply
             return reply
-        poller = github.Poller(store, lambda: [REPO], lambda: changes.append(1), fetcher=fetcher)
+        poller = github.Poller(store, lambda: [REPO], lambda: changes.append(1), fetcher=fetcher, actions=lambda repo: None)   # the Actions read is a real gh call; not here
         poller.poll(REPO)
         self.assertEqual((poller.status[REPO]['ok'], poller.status[REPO]['msg']), (False, 'Reading GitHub failed (TypeError)'))
         poller.poll(REPO)
@@ -566,6 +566,12 @@ class GitHubReader(unittest.TestCase):
         self.assertFalse(github.actions_health(REPO, run=gh({'runs': dead(10, secs=300), 'jobs': no_steps}))['blocked'])   # five minutes is a run
         mixed = dead(10); mixed['workflow_runs'][3]['conclusion'] = 'success'
         self.assertFalse(github.actions_health(REPO, run=gh({'runs': mixed, 'jobs': no_steps}))['blocked'])
+        # a lane whose job-level `if:` did not match concludes `skipped` without asking for a runner: it says nothing either way
+        diluted = dead(10); diluted['workflow_runs'][0]['conclusion'] = 'skipped'; diluted['workflow_runs'][5]['conclusion'] = 'cancelled'
+        out = github.actions_health(REPO, run=gh({'runs': diluted, 'jobs': no_steps}))
+        self.assertEqual((out['blocked'], out['runs'], out['latest']), (True, 8, 109))                 # the latest that ran, not the skipped one
+        only_skipped = dead(10, conclusion='skipped')
+        self.assertEqual(github.actions_health(REPO, run=gh({'runs': only_skipped, 'jobs': no_steps}))['runs'], 0)
         self.assertEqual(github.actions_health(REPO, run=gh({'runs': {'workflow_runs': []}, 'jobs': no_steps}))['runs'], 0)
         calls = []
         def counting(cmd, **kw):

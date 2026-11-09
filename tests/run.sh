@@ -449,6 +449,13 @@ eq 0 "…no run view is made" "$(grep -c '^run view ' "$FIX/fx/calls")"
 ac "$({ ten | jq '.[]'; R 200 failure 300; } | jq -s .)" "$(J "")"; check 0 "actions: one run that took five minutes breaks the pattern" $?
 ac "$({ ten | jq '.[]'; R 200 success 3; } | jq -s .)" "$(J "")"; check 0 "actions: one green run breaks the pattern" $?
 eq yes "…and says Actions runs" "$(says_gate "Actions runs workflows")"
+# a lane whose job-level if: did not match concludes skipped before a runner is asked for; it says nothing either way
+ac "$({ R 200 skipped 2; ten | jq '.[]'; R 201 cancelled 2; } | jq -s .)" "$(J "")"; check 1 "actions: skipped and cancelled runs among the fast failures do not hide the block" $?
+eq yes "…counting only the runs that ran" "$(says_gate "the last 10 completed runs (skipped")"
+eq 1 "…and reading the latest run that ran, not the skipped one" "$(grep -c '^run view 101 ' "$FIX/fx/calls")"
+ac "$({ R 1 skipped 2; R 2 skipped 2; R 3 skipped 2; } | jq -s .)" "$(J "")"; check 0 "actions: only skipped runs say nothing (no completed run that ran)" $?
+eq yes "…read as no completed run yet" "$(says_gate "no completed run yet")"
+ac "$(ten)" '{"jobs":[{"name":"test","conclusion":"failure","steps":[{"name":"Set up job","conclusion":""}]}]}'; check 1 "actions: a step whose conclusion gh renders as the empty string did not run" $?
 ac '[]' -;                                check 0 "actions: no completed run yet passes" $?
 ac "$(ten)" -;                            check 1 "actions: fast failures whose latest run cannot be read are flagged as possibly blocked" $?
 eq yes "…as unknown" "$(says_gate "may be blocked")"
