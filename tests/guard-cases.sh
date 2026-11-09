@@ -584,7 +584,11 @@ g A - onmain 'git fetch origin && git checkout feat/1-x && git add docs/adr/0007
 g A - feat 'gh issue edit 7 --add-label adlc:autopilot && .adlc/scripts/adlc-relabel.sh 7 stage:design'
 g A - feat 'gh pr edit 9 --add-label needs:human && gh pr comment 9 --body "stopped: the cap did not say GO"'
 g A - feat '.adlc/scripts/adlc-fix-cap.sh --pr 9'
-g A - feat 'bodies=$(gh pr view 9 --json comments --jq ".comments[].body"); printf "%s\n" "$bodies" | .adlc/scripts/adlc-verdict.sh ADLC-ADV'
+g A - feat 'gh pr list --state open --json number,headRefName,author'
+g A - feat 'gh pr view 9 --json comments --jq ".comments | length"'
+g A - feat 'bodies=$(gh pr view 9 --json comments --jq ".comments[4:][].body"); printf "%s\n" "$bodies" | .adlc/scripts/adlc-verdict.sh ADLC-ADV'
+g A - feat 'gh pr edit 9 --add-label adlc:changes-requested && .adlc/scripts/adlc-fix-cap.sh --pr 9'
+g A - feat 'gh pr edit 9 --remove-label needs:human'
 g A - feat 'git fetch origin && base=$(git merge-base refs/remotes/origin/main refs/remotes/origin/feat/1-x) && d=$(git -c core.quotePath=false diff --numstat --no-renames --raw --ignore-submodules=none "$base" refs/remotes/origin/feat/1-x) && [ -n "$d" ] && printf "%s\n" "$d" | .adlc/scripts/adlc-triage.sh'
 g D adlc-adversarial-reviewer feat '.adlc/scripts/adlc-relabel.sh 7 gate:deploy'   # so on the fast lane the orchestrator moves the issue
 # ── the labels a narrow role may put on an issue (labels.may_add in its contract) ──────────

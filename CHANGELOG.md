@@ -19,23 +19,25 @@ asks before it replaces yours), the RUNBOOK's Stage 4 names the check, and the w
 new `settings.cache.json` into `.claude/settings.json`. From issue 34: `adlc-ci-budget.sh` and
 `adlc-local-ci.sh` are new; the `adlc-cycle.sh` copy gains the `blocked=` figure, the
 `adlc-metrics.sh` copy the `blocked` and `local_ci` lines, the `adlc-run-log.sh` copy the
-`outcome` field, the `adlc-doctor.sh` copy a pointer to the local CI script, and the RUNBOOK
-template the local CI recipe. From issues 39 and 21: `adlc-tripwire-alert.sh` is new and the
-refreshed `adlc-main-tripwire.yml` calls it (with the `adlc-tripwire-check.sh` copy's new `range`
-mode); the `adlc-doctor.sh` copy gains the two new labels and the host-owned line, the
-`adlc-metrics.sh` copy the `change_failures` count, and the RUNBOOK template the scope-file
-section. Re-run `templates/github/labels.sh` as well: it creates `adlc:change-failure` and
-`adlc:tripwire`. The refresh itself now runs through `adlc-refresh.sh`, from the plugin. From
-issue 37: `adlc-chains.sh` is new, and QA's prompt and both retros call it; `labels.sh` creates
-two more labels (`adlc:follow-up`, `adlc:accepted-risk`; the refreshed `adlc-doctor.sh` copy
-reports them missing until you run it again), and the `adlc-metrics.sh` copy gains the
-`follow_ups_filed` line. From issues 35 and 13: `adlc-rounds.sh` is new, and the `adlc-fix.yml`,
-`adlc-fix-cap.sh` and `adlc-cycle.sh` copies call it (the three come together: the new
-`adlc-fix.yml` beside an older `adlc-fix-cap.sh` fails its cap step, it does not run uncapped),
-and the RUNBOOK copy gains the capped fix cycle. From issue 36: the RUNBOOK template gains a
-paragraph pointing at `/adlc:autopilot`; the two new skills themselves live in the plugin. From
-issue 4: `adlc-outputs.sh` is new (no lane calls it yet); the role contracts themselves live in
-the plugin. The security-gate, code-review and efficient-runs skills, the retro and cycle-retro
+`outcome` field, the `adlc-doctor.sh` copy a pointer to the local CI script, the `adlc-triage.sh`
+copy `.adlc/local-ci.txt` on its deny list, and the RUNBOOK template the local CI recipe. From
+issues 39 and 21: `adlc-tripwire-alert.sh` is new and the refreshed `adlc-main-tripwire.yml` calls
+it (with the `adlc-tripwire-check.sh` copy's new `range` mode); the `adlc-doctor.sh` copy gains
+the two new labels and the host-owned line, the `adlc-metrics.sh` copy the `change_failures`
+count, and the RUNBOOK template the scope-file section. Re-run `templates/github/labels.sh` as
+well: it creates `adlc:change-failure` and `adlc:tripwire`. The refresh itself now runs through
+`adlc-refresh.sh`, from the plugin. From issue 37: `adlc-chains.sh` is new, and QA's prompt and
+both retros call it; `labels.sh` creates two more labels (`adlc:follow-up`, `adlc:accepted-risk`;
+the refreshed `adlc-doctor.sh` copy reports them missing until you run it again), and the
+`adlc-metrics.sh` copy gains the `follow_ups_filed` line. From issues 35 and 13: `adlc-rounds.sh`
+is new, and the `adlc-fix.yml`, `adlc-fix-cap.sh` and `adlc-cycle.sh` copies call it (the three
+come together: the new `adlc-fix.yml` beside an older `adlc-fix-cap.sh` fails its cap step, it
+does not run uncapped; a PR open across the refresh can be in that state too, its branch still
+holding the older scripts, until the base branch is merged into it, as the step's comment on the
+PR says), and the RUNBOOK copy gains the capped fix cycle. From issue 36: the RUNBOOK template
+gains a paragraph pointing at `/adlc:autopilot`; the two new skills themselves live in the plugin.
+From issue 4: `adlc-outputs.sh` is new (no lane calls it yet); the role contracts themselves live
+in the plugin. The security-gate, code-review and efficient-runs skills, the retro and cycle-retro
 recipes, the role prompts and the guard hook live in the plugin, which every session loads from
 the installed plugin, so those parts need no refresh.
 
@@ -81,12 +83,18 @@ the installed plugin, so those parts need no refresh.
   on one issue from the Principal's own session, one subagent per role (the repo's `adlc-<role>`
   copies): an author gate against the charter's `Principal:` line; Gate 1 auto-approved for a
   `FULL` triage verdict only (it puts `adlc:autopilot` on the issue and moves it with
-  `adlc-relabel.sh`; a `FAST` verdict waits for the Principal); the adversarial review, then the
-  conformance review, read with `adlc-verdict.sh`; `adlc-fix-cap.sh --pr <pr>` before each
-  return to the Builder; round 2 as a review of the fix delta; one ADR amendment pass before
-  `stage:qa`; a QA that trusts the recorded verdicts; the fast lane, with `adlc-triage.sh` on
-  the real diff, once the Principal has applied `stage:fast`; and `needs:human` plus a comment
-  at every stop. It never merges or deploys, `/security-review` and accepting the ADR stay with
+  `adlc-relabel.sh`; a `FAST` verdict waits for the Principal); a PR taken by its head branch
+  `feat/<issue>-…` and only when the Principal opened it; the adversarial review, then the
+  conformance review, read with `adlc-verdict.sh` from the comments of the current round only
+  (a reviewer that posted none stops the run); `adlc-fix-cap.sh --pr <pr>` before each return
+  to the Builder, each labelled `adlc:changes-requested` so the cap counts QA and red-check
+  returns too, and each followed by the reviews again; round 2 as a re-check of every earlier
+  finding plus the fix delta; one ADR amendment pass before `stage:qa`; a QA that trusts the
+  recorded verdicts and still runs its own security gate; the fast lane (the cap with
+  `adlc-triage.sh` on the real diff, then the adversarial review; no QA) once the Principal has
+  applied `stage:fast`; and `needs:human` plus a comment at a stop (a `FAST` verdict, a charter
+  with no Principal handle and installed agent lanes end the run with a report and no label).
+  It never merges or deploys, `/security-review` and accepting the ADR stay with
   the Principal, and only a typed `/adlc:autopilot` starts it (`disable-model-invocation`). The
   `context-budget` skill holds the generic rules: what each role reads, a size cap per artifact
   (stated defaults), one fix series per round, one amendment pass, stop when the verdict is
@@ -97,7 +105,8 @@ the installed plugin, so those parts need no refresh.
   and the README says so. That host's own ledger showed 38 % fewer tokens per acceptance
   criterion on its first two chains; that is one host's self-recorded figure, not a measurement
   of this release. With a copy of `adlc-fix-cap.sh` that has no `--pr` form the autopilot stops
-  at the first return to the Builder (the script's error is read as not-`GO`). No
+  at the first return to the Builder (the script's error is read as not-`GO`). The budget never
+  outranks a role skill, and under it QA still attempts every security-gate class. No
   `/adlc-autopilot` alias was added, and the explainer still describes the local recipe as by
   hand only.
 
@@ -128,7 +137,8 @@ the installed plugin, so those parts need no refresh.
   the path: it posts `ADLC-SCOPE-REQUEST: <path prefix> | <reason>` on the PR, finishes what is
   in scope and pushes. The Architect's next review answers each open request with
   `ADLC-SCOPE: GRANT <path prefix>` or `ADLC-SCOPE: DENY <path prefix>`, a grant with a CHANGES
-  verdict, and the Builder then adds that line to the scope file. The diff-scope check is
+  verdict, and the Builder then adds that line to the scope file and to the ADR's `## Scope`
+  (the one ADR edit it may make, so `adlc-adr-check.sh` still passes). The diff-scope check is
   unchanged and reads no marker: the scope file is still what it enforces, and the marker is the
   record of the decision, not an authorization check (in the Actions lanes every agent posts
   under the same account). A granted request costs one round of the cap. Not done: in the
@@ -168,17 +178,22 @@ the installed plugin, so those parts need no refresh.
   `gh pr list` call, only then) and resolved to the issue its body closes. A parent must be
   older than its follow-up, so issues that name each other cannot loop. `adlc-chains.sh report
   [min_depth]` prints one line per root issue whose longest path is 3 or more issues deep,
-  with every issue under the root counted, and lists a chain whose root carries
+  with the issues in the chain counted (the root included), and lists a chain whose root carries
   `adlc:accepted-risk` apart as decided; `adlc-chains.sh root <issue>` prints an issue's root,
   the chain's depth and `accepted-risk` or `open`. The `retro` and `cycle-retro` skills run the
   report and put each undecided chain to the Principal as a decision (label the root
   `adlc:accepted-risk`, or one issue that replaces the approach), not as further follow-ups; QA
   asks `root` before filing and, on `accepted-risk`, files nothing and names the residuals in
   its comment and on the Action Card's Risk line, and on a chain already 3 deep says so on the
-  card. `labels.sh` creates the two labels, the doctor reports them missing, and
-  `adlc-metrics.sh` prints `follow_ups_filed: N / M`, the follow-ups among the issues opened in
-  the window. Not done: these are prompt rules and a report, so nothing blocks an agent that
-  files an issue anyway; the phrase reading is a heuristic (a body that says "QA of #N" about
+  card; when the lookup fails or the label is refused it files anyway and says so there.
+  `labels.sh` creates the two labels, the doctor reports them missing, and
+  `adlc-metrics.sh` prints `follow_ups_filed: N / M`, the issues labelled `adlc:follow-up`
+  among the issues opened in the window (a follow-up filed without the label is not in it, and
+  a repo without the label gets a note beside the 0). Not done: these are prompt rules and a
+  report, so nothing blocks an agent that files an issue anyway; the report counts every issue
+  whatever its author or label, so whoever can open issues (anyone, on a public repo) can
+  deepen an existing chain with marker lines, though not change what an existing issue names
+  as its parent or make a chain read decided; the phrase reading is a heuristic (a body that says "QA of #N" about
   an unrelated issue links to it); only the label on a chain's ROOT counts; a PR tied to its
   issue by hand, with no closing keyword in its body, is not resolved; and the lanes' prompts
   are unchanged, so the rule reaches QA through its role skill.
@@ -203,13 +218,17 @@ the installed plugin, so those parts need no refresh.
   `forced <before> <after>`) and files nothing while an open `adlc:tripwire` issue carries the
   same line (one host got the same four commits twice, a minute apart). A failed listing files
   anyway; a repo without the label gets the alert unlabelled. The RUNBOOK template now says what
-  becomes of `.adlc/scope/<n>.txt`: they stay as the record, nothing reads one after its PR
-  merges unless a later PR is tied to the same issue, and pruning is the Principal's, outside
-  the lanes (the diff-scope check refuses a lane PR that touches another issue's scope file).
+  becomes of `.adlc/scope/<n>.txt`: they stay as the record; after the merge
+  `adlc-adr-check.sh` still compares one with the Scope of each ADR naming its issue, and a
+  later PR tied to the same issue is held to it; pruning is the Principal's, outside the lanes
+  (the diff-scope check refuses a lane PR that touches another issue's scope file), and turns
+  that ADR comparison off.
   Not done: the script does not fill placeholders itself, `.adlc/VERSION` is restamped also when
   files were skipped, an alert closed and then re-triggered is filed again, two tripwire runs
   that list the open alerts at the same moment can still both file, and a force-push's commits
-  are not checked one by one.
+  are not checked one by one. The duplicate check trusts the line wherever it is: an open
+  alert issue whose body already holds the exact key line holds back a new alert for that set
+  of commits (the run still fails).
 
 - **`bug` means any defect; the change-failure metric counts `adlc:change-failure`** (issue
   21). Four parts used `bug` and meant different things: `labels.sh` described it as an
@@ -242,11 +261,16 @@ the installed plugin, so those parts need no refresh.
   minutes come on top, and the CI template has no ready-made switch for the second proposal.
   (2) New `adlc-local-ci.sh <pr> [--dry-run] [commands-file]` runs the host's own list
   (`.adlc/local-ci.txt`, one `<name>: <command>` per line) from the repo root, refuses unless
-  the tree is clean and HEAD is the PR's head commit, and posts one PR comment whose last line
-  is `ADLC-CI: PASS head <sha>` or `ADLC-CI: FAIL head <sha>`. QA's prompt counts it as the
-  battery result only for the PR's current head, `adlc-metrics.sh` counts each such comment on
-  a merged PR as one CI run (from the comments it already fetched; a `local_ci:` line says how
-  many), and the doctor's blocked note names the script. The marker is a record, not a gate:
+  the tree is clean (untracked files count) and HEAD is the PR's head commit, posts nothing when
+  the battery itself moved HEAD or changed the tree (a formatter that fixes, a code generator:
+  the later checks did not run on that commit), and otherwise posts one PR comment whose last
+  line is `ADLC-CI: PASS head <sha>` or `ADLC-CI: FAIL head <sha>`. QA's prompt counts it as the
+  battery result only for the PR's current head, `adlc-metrics.sh` counts each comment on a
+  merged PR whose last non-blank line starts with that marker as one CI run (from the comments
+  it already fetched; a comment that quotes the marker elsewhere is not a run; a `local_ci:`
+  line says how many), and the doctor's blocked note names the script. The battery file is now a
+  sensitive path for the fast lane: `adlc-triage.sh`'s default deny list holds
+  `.adlc/local-ci.txt`, so a PR that edits it goes FULL. The marker is a record, not a gate:
   anyone who can comment can write it, and nothing checks that the battery ran. No per-command
   timeout. (3) A run that concluded `failure` within 60 s of its creation with no step run (the
   doctor's rule, per run) is `blocked`: `adlc-run-log.sh actions` rows carry `outcome`
@@ -282,14 +306,21 @@ the installed plugin, so those parts need no refresh.
   the lines of `.adlc/scope/<issue>.txt`) and `## Guarantees` (a table: claim → the
   `path::node` of the test that pins it, or `unenforced — <reason>`). New
   `adlc-adr-check.sh [adr-dir]` reports every problem, one line each, and exits 1: a missing
-  section, a Scope with no block, a row that is neither form, a path that does not exist, a
-  node that is not in that file as a whole word, an `unenforced` with no reason, and, where
-  the ADR names its issue and the scope file exists, any difference between the two (`docs/`
+  section, a header that names no issue (`**Issue:** none` says there is none), a fenced
+  block that is never closed, a Scope with no block, a row that is neither form, a path that
+  does not exist, a node that is not in that file as a whole word, an `unenforced` with no
+  reason, and, where the issue's scope file exists, any difference between the two (`docs/`
   lines of the scope file aside: the design lane puts the files it commits there). An ADR
-  with neither section is skipped and listed, so ADRs written before this template keep
-  passing with no cut-off to maintain; the cost is that a new ADR with both left out is
-  skipped too, which the Architect's review is told to treat as a finding. The Builder runs
-  the script before opening the PR, the Architect in its conformance review, and QA with the
+  with no sign of the sections is skipped and listed, so ADRs written before this template
+  keep passing with no cut-off to maintain; any sign of them (a heading of any level that
+  starts with Scope or Guarantees, `**Issue` in the header, an unclosed fence) makes it a
+  checked ADR, so a near-miss spelling fails instead of switching the check off. Two costs: a
+  new ADR with all of it left out is skipped too, which the Architect's review is told to
+  treat as a finding, and an older ADR that happens to carry such a heading or field must be
+  reworded or filled in. The script's last line names the ADRs it checked. The Builder runs
+  the script before opening the PR, the Architect in its conformance review (it cannot switch
+  branches, so the RUNBOOK has the Principal check the PR branch out first, and an ADR
+  missing from that last line means the check did not run), and QA with the
   battery; in the Actions review lane the Architect has no grant for it and reads the two
   sections instead. Not done: no workflow runs it (`adlc-diff-scope.yml` never checks out the
   PR head, and `adlc-ci.yml` has no guards job), the design lane does not write the scope file
@@ -425,8 +456,9 @@ the installed plugin, so those parts need no refresh.
   adopted repo (the guard's own rule: `.adlc/scripts/`, `.adlc/VERSION` or
   `docs/adlc/CHARTER.md` at or above it) the server puts that repo on the menu, and keeps
   nothing from any other session, not even its path. The checkout the session is in must hold
-  the marker itself (a clone sitting inside an adopted repo's folder does not count), and only
-  a session that starts while Mission Control is running is seen. A second start prints the running copy's
+  the marker itself (a clone sitting inside an adopted repo's folder does not count; a linked
+  worktree inside that folder counts through the checkout it was added from), and a session that was already open
+  is not seen until Claude Code next sends its session-start event for it. A second start prints the running copy's
   address on the repo it was run from (`?repo=owner/name`) and `--open` opens that; a repo the
   copy has not heard of is named, not linked, since the page would show another repo's line.
   The documented way to run a copy per repo (`ADLC_MC_HOME` and `--port` for each) stays, with

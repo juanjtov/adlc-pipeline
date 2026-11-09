@@ -51,7 +51,7 @@ skills/
   ablation/                    # periodic context reset so the setup doesn't rot append-only
   bootstrap/                   # ← the dual-mode adoption WIZARD
   intake/                      # start a request: idea / PRD / issue / Notion-Linear ticket → sharpened stage:intake issue
-  autopilot/                   # local orchestrator: one issue → QA-approved PR at Gate 2, one subagent per role (never merges)
+  autopilot/                   # local orchestrator: one issue → reviewed PR at Gate 2, one subagent per role (never merges)
   context-budget/              # opt-in read / write / round caps per role; the autopilot's briefs name it
 commands/adlc-init.md          # friendly alias that launches the wizard
 commands/adlc-intake.md        # friendly alias that starts a request (the intake interview)
@@ -82,7 +82,7 @@ templates/                     # what the wizard fills into the host repo
             adlc-cache.sh · adlc-triage.sh · adlc-pr-stage.sh · adlc-branch-issue.sh   # deterministic logic
             adlc-run-log.sh · adlc-cycle.sh                                            # the cycle-retro's two ledgers
             adlc-relabel.sh                                                            # one state per issue: move to a stage:/gate: label in one call
-            adlc-adr-check.sh                                                          # an ADR's Scope = the scope file; each Guarantees row names a test that exists
+            adlc-adr-check.sh                                                          # an ADR's Scope = its issue's scope file, once that exists; each Guarantees row names a test that exists
             adlc-ci-budget.sh · adlc-local-ci.sh                                       # Actions minutes: will the CI battery fit · the battery run locally, one marker comment on the PR
             adlc-refresh.sh                                                            # the refresh: per-file diff, skips host-owned copies; runs from the plugin, not copied
             adlc-chains.sh                                                             # follow-up chains: which issue follows which, how deep, decided or not
@@ -121,14 +121,17 @@ in `.adlc/scope/<issue>.txt`; the diff-scope check fails a lane PR that strays o
 declares none. A Builder that needs a path outside it asks on the PR
 (`ADLC-SCOPE-REQUEST: <path prefix> | <reason>`), and the Architect's next review answers
 `ADLC-SCOPE: GRANT <path prefix>` or `DENY`; on a grant the Builder adds that line to the scope
-file. The markers are the record of the decision, not an authorization check (in the Actions
+file and to the ADR's `## Scope`, the one ADR edit it may make, so `adlc-adr-check.sh` still
+passes. The markers are the record of the decision, not an authorization check (in the Actions
 lanes every agent posts under the same account): the scope file stays what the check enforces.
 That check and the fast-lane cap run on `pull_request_target` — the workflow and
 scripts come from the default branch and the PR is only read as data — so a PR cannot edit the
-guards that judge it. `adlc-adr-check.sh` holds an ADR to its own words: its `## Scope` must
-match that scope file (the `docs/` lines the design lane puts there aside), and each row of its `## Guarantees` table must name a test that
-exists (`path::node`) or say `unenforced — <reason>`; the Builder, the Architect's local review
-and QA run it, no workflow does, and ADRs with neither section (older ones) are skipped.
+guards that judge it. `adlc-adr-check.sh` holds an ADR to its own words: where the ADR names
+its issue and that issue's scope file exists, its `## Scope` must match the file (the `docs/`
+lines the design lane puts there aside), and each row of its `## Guarantees` table must name a
+test that exists (`path::node`) or say `unenforced — <reason>`; the Builder, the Architect's
+local review and QA run it, no workflow does, and an ADR with no sign of either section or of
+the header's issue field (an older one) is skipped.
 `adlc-doctor.sh` validates a host repo's setup (deny rules, unfilled
 placeholders, lanes that can't run their agent, skills, the five agent copies and their model
 lines, labels, whether GitHub is still running the workflows at all, and whether the default
@@ -202,7 +205,9 @@ rises), so the metric is the point. The cache also expires: a run that blocks on
 for longer than the cache lifetime pays full input price on its next turn, so the wizard merges
 `settings.cache.json` (`promptCacheTtl` and `subagentPromptCacheTtl`, both `"1h"`) into
 `.claude/settings.json`. A 1-hour cache write is billed at a higher rate than a 5-minute one, so
-this pays off only where runs do wait that long; removing the two keys undoes it.
+this pays off only where runs do wait that long; removing the two keys undoes it. Not checked:
+that every Claude Code version reads the two keys from a project's settings file, and what the
+Actions lanes do with them.
 
 ### Two layers, on purpose
 
@@ -236,9 +241,9 @@ because `/adlc-init` copies workflows and scripts into your repo as frozen files
 `.adlc/VERSION` records which release they came from, and `.adlc/scripts/adlc-doctor.sh` tells
 you when it differs from the installed plugin. The refresh copies through the plugin's
 `adlc-refresh.sh`, which prints a diff of each copy that differs and writes only when told to.
-To keep your own version of a copy, put `adlc: host-owned` in a comment within its first five
-lines (`# adlc: host-owned`): the script then skips that file and lists it, and bringing it up
-to date with the plugin is yours to do.
+To keep your own version of a script, a workflow, an agent copy or the hook, put
+`adlc: host-owned` in a comment within its first five lines (`# adlc: host-owned`): the script
+then skips that file and lists it, and bringing it up to date with the plugin is yours to do.
 
 To work on the plugin itself, load a checkout instead — `claude --plugin-dir
 /path/to/adlc-pipeline` — and `/reload-plugins` picks up edits. That loads your working
@@ -328,7 +333,7 @@ Try it with made-up data: `adlc-mission-control --demo --open`.
 | `/adlc-intake` | starts a request: interview, preview, then a `stage:intake` issue |
 | `/adlc-mission-control` | opens the live view of the line |
 | `/adlc-model [<role> <model>]` | prints which model each of this repo's five agent copies runs on, or sets one (the `model:` line of `.claude/agents/adlc-<role>.md`; nothing is committed) |
-| `/adlc:autopilot <issue>` | runs the whole chain on one issue from your own session, one subagent per role, until a QA-approved PR waits at Gate 2; Gate 1 is auto-approved for a `FULL` triage verdict only, and nothing is merged or deployed; its subagents load the opt-in `adlc:context-budget` skill ([Automation modes](#automation-modes)) |
+| `/adlc:autopilot <issue>` | runs the whole chain on one issue from your own session, one subagent per role, until its PR waits at Gate 2 (QA-approved on the full lane; on the fast lane, adversarially reviewed, with no QA); Gate 1 is auto-approved for a `FULL` triage verdict only, and nothing is merged or deployed; its briefs tell each subagent to load the opt-in `adlc:context-budget` skill ([Automation modes](#automation-modes)) |
 | `/adlc:retro` | runs the self-improvement review now and proposes durable fixes |
 | `/adlc:cycle-retro [DAYS]` | ranks where a run's time and money go (per agent, per stage, fix rounds, gate waits) and proposes pipeline-shape fixes |
 | `/adlc:ablation` | starts the periodic context reset: on a branch it empties the persistent context, re-adds only what earns its place back, and logs that in `CONTEXT-LOG.md` |
@@ -373,9 +378,10 @@ Everything that makes a change safe is kept:
   approval — autopilot auto-approves Gate 1 into the *full* pipeline only.
 - **Author/verifier separation** — an independent adversarial + security review still runs.
 - **A deterministic cap** — `adlc-triage.sh` re-checks the *real* diff (≤ 5 files / ≤ 40 lines by
-  default, nothing touching migrations, auth, infra, CI, deps (`.gitmodules` included) or secrets,
-  and no change to a submodule's pointer, which is one line in a diff however much code it
-  brings in). Over-cap or sensitive ⇒ the change is **bounced back to the full pipeline**
+  default, nothing touching migrations, auth, infra, CI (the local battery `.adlc/local-ci.txt`
+  included), deps (`.gitmodules` included) or secrets, and no change to a submodule's pointer,
+  which is one line in a diff however much code it brings in). Over-cap or sensitive ⇒ the
+  change is **bounced back to the full pipeline**
   (`stage:design`). So a mis-triage — or a crafted issue arguing it's "trivial" — can't smuggle a
   big change through.
   The same cap also runs from the default branch (in `adlc-diff-scope.yml`), so a PR that edits the
@@ -552,11 +558,15 @@ subagent per role (this repo's `adlc-<role>` copies), and calls the scripts the 
 `adlc-relabel.sh` for every state label, `adlc-verdict.sh` for the two review markers,
 `adlc-triage.sh` on the real diff of a fast-lane PR, `adlc-fix-cap.sh` before each return to the
 Builder. It runs only on an issue the Principal filed (the handle `/adlc-init` wrote into
-`docs/adlc/CHARTER.md`), auto-approves Gate 1 for a `FULL` verdict only, putting
-`adlc:autopilot` on the issue as the record, and ends at a QA-approved PR with its Action Card,
-or at `needs:human` with a comment saying why (the author gate, an Analyst that asked questions,
-a red check that is not the Builder's to fix, a cap that did not say `GO`). What it does not do:
-merge, deploy or run a migration; start the fast lane (it runs that lane only once you have
+`docs/adlc/CHARTER.md`) and on a PR the Principal's account opened from `feat/<issue>-…`,
+auto-approves Gate 1 for a `FULL` verdict only, putting `adlc:autopilot` on the issue as the
+record, and sends every Builder fix, QA's included, back through the reviews. It ends at a PR
+with its Action Card (QA-approved on the full lane; the fast lane has the adversarial review and
+no QA), or at `needs:human` with a comment saying why (an author gate, an Analyst that asked
+questions, a reviewer that posted no verdict for the round, a red check that is not the
+Builder's to fix, a cap that did not say `GO`). Three endings carry no label, only a word to
+you: a `FAST` verdict, a charter with no Principal handle, and agent lanes found installed. What
+it does not do: merge, deploy or run a migration; start the fast lane (it runs that lane only once you have
 applied `stage:fast`, and a `FAST` recommendation waits for you); run `/security-review`; accept
 the ADR. It is a prompt, not a workflow: the scripts are deterministic, the order they are called
 in is a model following the skill. It is the generalization of a skill one adopting repo wrote
@@ -564,7 +574,7 @@ for itself and ran its pull requests through; as shipped in the plugin it has no
 end to end. Use it or the Actions agent lanes on a repo, not both: where the lanes are
 installed, the label moves it makes start them as well. Its briefs tell each subagent to load
 the opt-in `context-budget` skill (what each role reads, size caps per artifact, one ADR
-amendment pass, round 2 as a review of the fix delta); spend is still measured by
+amendment pass, round 2 as a re-check of the earlier findings plus the fix delta); spend is still measured by
 `adlc-run-log.sh`, never reported by an agent.
 
 ## Licensing

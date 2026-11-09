@@ -13,8 +13,9 @@ prints them all or changes one, and a model named in the call itself still wins 
 The Actions lanes run the plugin's own `adlc:<role>` agents, which keep the plugin's defaults.
 
 Unattended, one issue at a time: `/adlc:autopilot <issue>` drives the stages below from your own
-session, one subagent per role, and stops when a QA-approved PR waits at Gate 2 or when it needs
-you (`needs:human`, with a comment saying why). It auto-approves Gate 1 for a `FULL` triage
+session, one subagent per role, and stops when the PR waits at Gate 2 (QA-approved; on the fast
+lane, adversarially reviewed) or when it needs you (it says why, and most such stops label
+`needs:human`). It auto-approves Gate 1 for a `FULL` triage
 verdict only; choosing the fast lane, `/security-review`, accepting the ADR and all of Gate 2
 stay yours.
 
@@ -71,21 +72,29 @@ directly to a fresh issue (your own triage) or after the Analyst recommends FAST
 
 ## Stage 4 — Design-conformance review (Architect, duty 2)
 
-1. Invoke the **adlc-architect** agent on the Builder's PR (its model is the `model:` line in
+1. Check out the PR branch first (`gh pr checkout <n>`), or start the agent in the Builder's
+   worktree: the Architect cannot switch branches, and `adlc-adr-check.sh` reads the checkout
+   it runs in.
+2. Invoke the **adlc-architect** agent on the Builder's PR (its model is the `model:` line in
    `.claude/agents/adlc-architect.md`).
-2. It reviews for diff-scope + design conformance and submits `--approve` /
+3. It reviews for diff-scope + design conformance and submits `--approve` /
    `--request-changes`. On approval, you (or CI) advance the issue `stage:build → stage:qa`.
    It runs `.adlc/scripts/adlc-adr-check.sh` (you can too): the ADR's `## Scope` against the
-   scope file, and every `## Guarantees` row against the test it names.
-3. **Fix cycle, capped.** When a review asked for changes, run
+   scope file, and every `## Guarantees` row against the test it names. Its last line names
+   the ADRs it checked.
+4. **Fix cycle, capped.** When a review asked for changes, run
    `.adlc/scripts/adlc-fix-cap.sh --pr <pr>` before you hand the PR back. On `GO`, invoke the
    Builder again on the PR, then the reviews again. On `STOP` (the reviews have sent this PR
    back more than 3 times), label the PR `needs:human` (`gh pr edit <pr> --add-label needs:human`)
    and stop: a person takes it from there. If it prints neither, the count could not be read;
-   that is not a `GO`. The cap counts reviews, not commits. Run by hand, nothing puts the
+   that is not a `GO`. Keep the `--pr`: a bare number is the older form's max, which reads
+   commit subjects from stdin and, given none, prints `GO`. The cap counts reviews, not
+   commits. Run by hand, nothing puts the
    `adlc:changes-requested` label on, so what it counts here is the reviewers' PR comments
    whose last verdict marker is `ADLC-ADV: CHANGES` or `ADLC-ARCH: CHANGES`; a request for
-   changes that left no such comment is not counted.
+   changes that left no such comment is not counted. Any commenter's marker counts, and an
+   edited or deleted comment no longer does: where others can comment, read the thread before
+   you trust the answer.
 
 ## Stage 5 — QA gate (QA & Release/Ops)
 
@@ -128,11 +137,14 @@ can write that line.
 ## Scope files (`.adlc/scope/<n>.txt`)
 
 One per issue, merged with its PR. They stay on the default branch as the record of what each
-change was allowed to touch; once the PR has merged nothing reads the file again, unless a later
-PR is tied to the same issue (its branch starts with the file, and is held to it). Pruning old
-ones is yours to do, in a PR tied to no lane issue: the diff-scope check fails a lane PR that
-changes another issue's scope file, a deletion included, because such a file left on the default
-branch would be the scope a later PR is held to without that PR's diff showing it.
+change was allowed to touch. After the merge two things still read a file:
+`.adlc/scripts/adlc-adr-check.sh`, which on every run compares it with the `## Scope` of each
+ADR that names the issue, and a later PR tied to the same issue (its branch starts with the
+file, and is held to it). Pruning old ones is yours to do, in a PR tied to no lane issue: the
+diff-scope check fails a lane PR that changes another issue's scope file, a deletion included,
+because such a file left on the default branch would be the scope a later PR is held to without
+that PR's diff showing it. A pruned file turns that ADR comparison off: `adlc-adr-check.sh`
+then says the Scope is not compared.
 
 ## Isolated-worktree recipe (optional, for parallel Builder/QA)
 
