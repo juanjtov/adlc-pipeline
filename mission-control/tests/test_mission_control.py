@@ -43,6 +43,9 @@ class FakeRepos:
     def lookup(self, cwd):
         return REPO, 'feat/3-password-reset'
 
+    def root(self, cwd):
+        return ''   # no checkout to bound the walk by: the markers at or above the folder decide
+
 
 def seeded(data=None):
     store = Store()
@@ -221,6 +224,19 @@ class Intake(unittest.TestCase):
                 open(os.path.join(repo, *marker), 'w').close()
                 self.assertTrue(ingest.adopted(repo), marker)
             self.assertFalse(ingest.adopted(''))
+            # a clone inside an adopted repo's folder has adopted nothing itself: the walk stops at the checkout's top
+            nested = os.path.join(root, 'shop', 'vendor', 'nested', 'src')
+            os.makedirs(nested)
+            top = os.path.join(root, 'shop', 'vendor', 'nested')
+            self.assertTrue(ingest.adopted(nested))                                            # the guard's rule: a marker anywhere above
+            self.assertFalse(ingest.adopted(nested, top))
+            self.assertTrue(ingest.adopted(inside, os.path.join(root, 'shop')))                # the marker at the top itself counts
+            bounded = type('Repos', (), {'lookup': staticmethod(lambda cwd: ('third/party', 'main')), 'root': staticmethod(lambda cwd: top)})()
+            self.assertFalse(ingest.Ingest(self.store, repos=bounded, on_repo=self.store.add_repo).hook(fx.hook('SessionStart', agent=None, cwd=nested)))
+            self.assertEqual(self.store.repos(), [REPO])
+            # a path longer than any real one is refused before the walk (it costs a few file checks per level)
+            self.assertFalse(ingest.adopted('/a' * 3000))
+            self.assertFalse(ingest.adopted(None))
             # a path git cannot take is refused by the lookup, not raised to the request handler
             self.assertFalse(ingest.Ingest(Store(), on_repo=self.store.add_repo).hook(fx.hook('SessionStart', agent=None, cwd=inside + '\0x')))
         finally:
@@ -701,7 +717,8 @@ class OverHttp(unittest.TestCase):
         root, plain = tempfile.mkdtemp(), tempfile.mkdtemp()
         try:
             os.makedirs(os.path.join(root, '.adlc', 'scripts'))
-            self.app.ingest.repos = type('Repos', (), {'lookup': staticmethod(lambda cwd: ('acme/other', 'main') if cwd == root else (REPO, 'main'))})()
+            self.app.ingest.repos = type('Repos', (), {'lookup': staticmethod(lambda cwd: ('acme/other', 'main') if cwd == root else (REPO, 'main')),
+                                                       'root': staticmethod(lambda cwd: '')})()
             out = self.hook({'hook_event_name': 'SessionStart', 'session_id': 's-user', 'cwd': root, 'source': 'startup'})
             self.assertEqual((out.returncode, out.stdout, out.stderr), (0, '', ''))
             self.assertEqual(len(self.arrived), 1)
@@ -867,6 +884,7 @@ class Launcher(unittest.TestCase):
             unknown = self.start(home, port, '--repo', 'Acme/Other')
             out, _ = unknown.communicate(timeout=10)
             self.assertIn('already running at http://localhost:%d. acme/other is not on its menu yet' % port, out)
+            self.assertIn('not set up with /adlc-init' if not ingest.adopted(os.getcwd()) else 'a new Claude Code session starts', out)
             # the demo keeps to itself: no marker of its own, so agents never report to made-up data
             demo_port = self.free_port()
             demo = self.start(tempfile.mkdtemp(), demo_port, '--demo')

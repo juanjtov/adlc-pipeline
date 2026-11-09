@@ -1454,11 +1454,27 @@ grep -q 'adlc\[:-\]' "$ROOT/mission-control/hook.sh" && ok "Mission Control's re
 grep -q '"SessionStart"' "$ROOT/mission-control/hook.sh" && ok "Mission Control's reporter forwards a session starting" || bad "mission-control/hook.sh: must forward SessionStart"
 python3 -c 'import json,sys; assert "SessionStart" in json.load(open(sys.argv[1]))["hooks"]' "$ROOT/hooks/hooks.json" 2>/dev/null \
   && ok "hooks.json fires the reporter on SessionStart" || bad "hooks.json: the reporter must run on SessionStart"
-# Mission Control decides "adopted" by the guard's markers; the two must name the same three
-for m in '.adlc/scripts' '.adlc/VERSION' 'docs/adlc/CHARTER.md'; do
-  grep -q "$m" "$ROOT/hooks/adlc-guard.sh" && grep -q "$(printf '%s' "$m" | sed "s#/#', '#g")" "$ROOT/mission-control/mc/ingest.py" \
-    && ok "guard and Mission Control both know the marker $m" || bad "marker $m: hooks/adlc-guard.sh and mission-control/mc/ingest.py must agree"
-done
+# Mission Control decides "adopted" by the guard's rule. Run the two side by side over the same folders: a grep for
+# the marker names would pass on the guard's comment alone.
+if command -v python3 >/dev/null 2>&1; then
+  AD="$(mktemp -d)"
+  mkdir -p "$AD/plain/src" "$AD/bare/.adlc" "$AD/scripts/.adlc/scripts" "$AD/scripts/src/api" "$AD/version/.adlc" "$AD/version/a/b" \
+           "$AD/charter/docs/adlc" "$AD/charter/docs/x" "$AD/wrongtype/.adlc/VERSION" "$AD/wrongtype2/.adlc" "$AD/wrongtype3/docs/adlc/CHARTER.md" \
+           "$AD/scripts/vendor/nested/src"
+  : > "$AD/version/.adlc/VERSION"; : > "$AD/charter/docs/adlc/CHARTER.md"; : > "$AD/wrongtype2/.adlc/scripts"
+  eval "$(sed -n '/^adopted() {/,/^}/p' "$ROOT/hooks/adlc-guard.sh")"
+  mc_adopted() { python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); from mc import ingest; sys.exit(0 if ingest.adopted(sys.argv[2]) else 1)' "$ROOT/mission-control" "$1"; }
+  for case in plain:1 plain/src:1 bare:1 scripts:0 scripts/src/api:0 scripts/vendor/nested/src:0 version:0 version/a/b:0 charter:0 charter/docs/x:0 \
+              wrongtype:1 wrongtype2:1 wrongtype3:1 missing/dir:1; do
+    d="$AD/${case%:*}"; want="${case#*:}"
+    adopted "$d"; g=$?; mc_adopted "$d"; m=$?
+    [ "$g" = "$want" ] && [ "$m" = "$want" ] && ok "adopted, guard and Mission Control alike: ${case%:*} → $want" \
+      || bad "adopted(${case%:*}): want $want, the guard says $g, Mission Control says $m"
+  done
+  unset -f adopted mc_adopted; rm -rf "$AD"
+else
+  echo "  · skipped the guard / Mission Control adopted() comparison (needs python3)"
+fi
 
 echo "guard hook (merge / push-to-main / force-push / role limits):"
 if command -v python3 >/dev/null 2>&1 && command -v git >/dev/null 2>&1; then

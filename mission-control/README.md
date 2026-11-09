@@ -22,8 +22,10 @@ Inside Claude Code, `/adlc-mission-control` does the same. The page is at
 One copy serves every repo on the machine. Run the same command in another adopted repo while
 it is running and it prints that repo's address on the running copy
 (`http://localhost:4319/?repo=owner/name`), and `--open` opens it there. A repo is on the menu
-once a Claude Code session has opened in it (the plugin's hook says so), once a pipeline agent
-has run in it, or when it is the repo you started from. If `?repo=` names a repo the copy does
+once a new Claude Code session has started in it while Mission Control was running (the plugin's
+hook says so; a session that was already open before Mission Control started is not seen), once a pipeline agent has run in it, or when it is the repo you started from. The
+session's folder must be in a checkout that holds one of the wizard's markers itself: a clone
+sitting inside an adopted repo's folder does not count. If `?repo=` names a repo the copy does
 not know, the page falls back to one it knows.
 
 Requirements: Python 3.9 or newer (the one that ships with macOS developer tools is enough),
