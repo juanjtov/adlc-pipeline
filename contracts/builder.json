@@ -1,0 +1,60 @@
+{
+  "role": "builder",
+  "tools": [
+    "Read",
+    "Grep",
+    "Glob",
+    "Edit",
+    "Write",
+    "Bash",
+    "Skill"
+  ],
+  "shell": null,
+  "write_paths": null,
+  "labels": {
+    "may_add": null,
+    "moves": []
+  },
+  "outputs": {},
+  "lanes": [
+    {
+      "workflow": "adlc-builder.yml",
+      "step": "Run Builder agent",
+      "allowedTools": [
+        "Read",
+        "Edit",
+        "Write",
+        "Skill",
+        "Bash"
+      ]
+    },
+    {
+      "workflow": "adlc-fast.yml",
+      "step": "Run Builder (fast lane)",
+      "allowedTools": [
+        "Read",
+        "Edit",
+        "Write",
+        "Skill",
+        "Bash"
+      ]
+    },
+    {
+      "workflow": "adlc-fix.yml",
+      "step": "Builder addresses the review",
+      "allowedTools": [
+        "Read",
+        "Edit",
+        "Write",
+        "Skill",
+        "Bash"
+      ]
+    }
+  ],
+  "inputs": [
+    "the issue, its ADR and task breakdown (full lane) or its change brief (fast lane)",
+    "the repository",
+    "on a fix round: the review comments on its PR",
+    "the skills its agent file lists"
+  ]
+}

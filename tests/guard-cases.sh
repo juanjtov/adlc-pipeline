@@ -4,6 +4,10 @@
 #   feat = on branch feat/1-x · onmain = on main · track = branch tracking origin/main
 #   trunk = clone whose origin default branch is `trunk`
 #   matching = on branch feat/2-y in a clone configured push.default=matching
+#   w <A|D> <role|-> <repo[/subdir]> <tool> <path|->     a file-writing tool call ("-" = it names no file)
+#   wr = a repo with docs/adr/, src/ and sub/, and links under docs/: code → ../src, away → out of
+#        the repo, latest → adr, app.md → ../src/app.py, dangling.md → a file that is not there
+#   nogit = a directory with docs/ in no git work tree
 AN=adlc:product-analyst; RV=adlc:adversarial-reviewer; AR=adlc:architect
 
 # ── merge: every shape of it ─────────────────────────────────────────────────────────────
@@ -558,3 +562,98 @@ g A - feat '.adlc/scripts/adlc-fix-cap.sh --pr 9'
 g A - feat 'bodies=$(gh pr view 9 --json comments --jq ".comments[].body"); printf "%s\n" "$bodies" | .adlc/scripts/adlc-verdict.sh ADLC-ADV'
 g A - feat 'git fetch origin && base=$(git merge-base refs/remotes/origin/main refs/remotes/origin/feat/1-x) && d=$(git -c core.quotePath=false diff --numstat --no-renames --raw --ignore-submodules=none "$base" refs/remotes/origin/feat/1-x) && [ -n "$d" ] && printf "%s\n" "$d" | .adlc/scripts/adlc-triage.sh'
 g D adlc-adversarial-reviewer feat '.adlc/scripts/adlc-relabel.sh 7 gate:deploy'   # so on the fast lane the orchestrator moves the issue
+# ── the labels a narrow role may put on an issue (labels.may_add in its contract) ──────────
+g A $AN feat 'gh issue edit 5 --add-label gate:stories'
+g A $AN feat 'gh issue edit 5 --add-label=gate:stories --remove-label stage:intake'
+g D $AN feat 'gh issue edit 5 --add-label stage:design'                         # routing past Gate 1 is the Principal's
+g D $AN feat 'gh issue edit 5 --remove-label stage:intake --add-label stage:fast'
+g D $AN feat 'gh issue edit 5 --add-label=stage:fast'
+g D $AN feat 'gh issue edit 5 --add-label gate:stories,stage:fast'              # a list: every name counts
+g D $AN feat 'gh issue edit 5 --add-label gate:stories --add-label adlc:autopilot'   # the opt-in is not the agent's to give
+g D $AN feat 'gh issue edit 5 --add-label GATE:STORIES'                         # GitHub matches a label's name without case; the list does not
+g D $AN feat 'gh -R o/r issue edit 5 --add-label stage:design'
+g D $AN feat 'gh issue edit --add-label stage:design 5'
+g D $AN feat 'bash -c "gh issue edit 5 --add-label stage:design"'
+g D $AN feat 'gh issue edit 5 --add-label "$L"'                                 # a computed label
+g D $AN feat 'gh issue edit 5 --add-label=$L'
+g D $AN feat 'L=stage:fast; gh issue edit 5 --add-label $L'                     # resolved, and not on the list
+g A $AN feat 'L=gate:stories; gh issue edit 5 --add-label $L'
+g D $AN feat 'gh issue edit 5 $EXTRA'                                           # a computed word that may hold the option itself
+g D $AN feat 'gh issue edit 5 "$FLAG"'
+g D $AN feat 'gh issue edit 5 --add-"$X"'
+g D $AN feat 'gh issue edit "$N" --add-label gate:stories'                      # …the issue number included: write it out
+g D $AN feat 'echo "--add-label stage:fast" | xargs gh issue edit 5'
+g D $AN feat 'gh issue edit 5 --body $BODY'                                     # unquoted: it may split into more options
+g A $AN feat 'gh issue edit 5 --body "$BODY" --add-label gate:stories'          # another option's value may be computed
+g A $AN feat 'gh issue edit 5 --body="$(cat notes.md)"'
+g A $AN feat 'gh issue edit 5 -b"$BODY" --remove-label "$OLD"'
+g A $AN feat 'gh issue edit 5 --title "why --add-label stage:fast is wrong" --add-label gate:stories'
+g A $AN feat $'gh issue edit 5 --body-file - <<\'EOF\'\nnever --add-label stage:fast\nEOF'
+g A $AN feat 'gh issue comment 5 --body "I recommend --add-label stage:fast"'   # a comment adds no label
+g D $AN feat '.adlc/scripts/adlc-relabel.sh 5 stage:design'                     # the relabel script: its second argument is the label
+g D $AN feat '.adlc/scripts/adlc-relabel.sh 5 stage:fast'
+g D $AN feat 'bash .adlc/scripts/adlc-relabel.sh 5 stage:fast'
+g D $AN feat '.adlc/scripts/adlc-relabel.sh 5 "$L"'
+g D $AN feat '.adlc/scripts/adlc-relabel.sh $ARGS'                              # unquoted: the issue AND the label
+g D $AN feat 'echo 5 stage:fast | xargs .adlc/scripts/adlc-relabel.sh'
+g D $AN feat 'echo stage:fast | xargs .adlc/scripts/adlc-relabel.sh 5'
+g A $AN feat '.adlc/scripts/adlc-relabel.sh "$N" gate:stories'                  # the script takes one word as the issue, whatever it holds
+g A $AN feat 'N=5; .adlc/scripts/adlc-relabel.sh $N gate:stories'
+g D $AR feat 'gh issue edit 5 --add-label gate:deploy'
+g D $AR feat 'gh issue edit 5 --remove-label gate:stories --add-label stage:design'   # the label that follows a gate
+g D $AR feat '.adlc/scripts/adlc-relabel.sh 5 stage:qa'
+g D adlc-architect feat '.adlc/scripts/adlc-relabel.sh 5 gate:deploy'
+g D adlc-product-analyst feat 'gh issue edit 5 --add-label stage:design'
+g A adlc-qa-release-ops feat 'gh issue edit 5 --add-label needs:human'          # not a narrow role: its labels are not limited here
+g A adlc:builder feat 'gh pr edit 5 --add-label lane:fast'
+g A - feat 'gh issue edit 5 --add-label stage:design'                           # the Principal's own session
+
+# ── file writes: a role whose contract limits its paths (architect: docs/**; analyst, reviewer: none) ──
+w A $AR wr Write "$GR/wr/docs/adr/0002-login.md"                 # an absolute path into the repo's docs/
+w A $AR wr Edit "$GR/wr/docs/adr/0001-a.md"
+w A $AR wr Write 'docs/adr/0002-login.md'                        # relative to the session's directory
+w A $AR wr Write 'docs/new/deep/tree/x.md'                       # directories that do not exist yet
+w A $AR wr/sub Write '../docs/guide.md'                          # from a subdirectory: the repo's docs/ …
+w D $AR wr/sub Write 'docs/guide.md'                             # … and sub/docs/ is not it
+w D $AR wr Write "$GR/wr/src/app.py"
+w D $AR wr Edit 'src/app.py'
+w D $AR wr Write 'README.md'
+w D $AR wr Write 'docs'                                          # the directory itself
+w D $AR wr Write 'docsx/a.md'
+w D $AR wr Write 'DOCS/adr/x.md'                                 # another spelling is another path
+w D $AR wr Write '.adlc/scripts/adlc-relabel.sh'
+w D $AR wr Write '.claude/settings.json'
+w D $AR wr Write 'docs/../src/app.py'                            # `..`
+w D $AR wr Write "$GR/wr/docs/adr/../../.github/workflows/x.yml"
+w D $AR wr Write 'docs/nope/../../src/app.py'                    # `..` through a directory that is not there
+w D $AR wr Write 'docs/code/app.py'                              # docs/code → ../src: a link out of docs/
+w D $AR wr Write 'docs/code/new.py'
+w D $AR wr Write 'docs/away/x.md'                                # … and one out of the repository
+w D $AR wr Edit 'docs/app.md'                                    # a linked FILE: the write would land on src/app.py
+w D $AR wr Write 'docs/dangling.md'                              # … also when its target is not there yet
+w A $AR wr Write 'docs/latest/0003-x.md'                         # docs/latest → adr: a link that stays inside
+w D $AR wr Write 'docs/code/../adr/x.md'                         # read link-first this is <repo>/adr/x.md: one reading outside is enough
+w D $AR wr Write "$GR/outside/docs/x.md"                         # another tree's docs/
+w D $AR wr Write '/etc/hosts'
+w D $AR wr Write '~/docs/x.md'                                   # the home directory
+w D $AR nogit Write 'docs/x.md'                                  # no repository: nothing to measure docs/ from
+w D $AR wr Write -                                               # the call names no file: nothing to check
+w D $AR wr Write ''
+w A $AR wr MultiEdit 'docs/adr/0001-a.md'
+w D $AR wr MultiEdit 'src/app.py'
+w A $AR wr NotebookEdit 'docs/n.ipynb'                           # NotebookEdit names its file in notebook_path
+w D $AR wr NotebookEdit 'src/n.ipynb'
+w A adlc-architect wr Write 'docs/adr/x.md'                      # this repo's copy of the agent is the role too
+w D adlc-architect wr Write 'src/app.py'
+w D architect wr Write 'src/app.py'
+w D $AN wr Write 'docs/adr/x.md'                                 # the Analyst and the reviewer write no file
+w D $RV wr Edit 'src/app.py'
+w D adlc-adversarial-reviewer wr Write 'docs/x.md'
+w A adlc:builder wr Write 'src/app.py'                           # not limited here: the diff-scope check judges their paths
+w A adlc-builder wr Write "$GR/outside/x"
+w A adlc:qa-release-ops wr Edit 'src/app.py'
+w A - wr Write 'src/app.py'                                      # the main thread
+w A - wr Write -
+w A other:architect wr Write 'src/app.py'                        # another plugin's agent
+w A adlc-other wr Write 'src/app.py'                             # not one of the roles
+w A general-purpose wr Write 'src/app.py'

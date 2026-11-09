@@ -163,6 +163,17 @@ class PipelineRules(unittest.TestCase):
             self.assertIn('Bash', info['tools'])          # the file's line as written: nothing is invented
             self.assertEqual(info['blocked'], [])
             self.assertEqual(info['lanes'], [])
+            # The guard takes each role's limits from contracts/<role>.json. With the guard there and a contract
+            # gone, that role's limits are unknown too: an empty table must not read as "the whole shell".
+            shutil.copytree(os.path.join(PLUGIN, 'hooks'), os.path.join(root, 'hooks'))
+            shutil.copytree(os.path.join(PLUGIN, 'contracts'), os.path.join(root, 'contracts'))
+            self.assertEqual(pipeline.read_agent(root, 'reviewer')['guard'], 'ok')
+            self.assertNotIn('Bash', pipeline.read_agent(root, 'reviewer')['tools'])
+            os.remove(os.path.join(root, 'contracts', 'adversarial-reviewer.json'))
+            info = pipeline.read_agent(root, 'reviewer')
+            self.assertEqual(info['guard'], 'missing')
+            self.assertIn('Bash', info['tools'])
+            self.assertEqual(pipeline.read_agent(root, 'analyst')['guard'], 'ok')   # the other roles' contracts still read
         finally:
             shutil.rmtree(root)
 

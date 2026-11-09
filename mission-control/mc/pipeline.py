@@ -171,7 +171,7 @@ def read_agent(plugin_root, station):
     """The agent file for a station — frontmatter fields plus the body, a thin wrapper — and the role prompt it
     preloads (the plugin skill adlc:role-<name>, which a subagent gets in full), plus what the plugin lets that agent
     run: the guard hook's command limits (a local run) and each Actions lane's grant. Nothing here is typed in: it is
-    read from agents/, skills/role-*/, hooks/adlc_guard.py and templates/github/."""
+    read from agents/, skills/role-*/, hooks/adlc_guard.py (which reads contracts/) and templates/github/."""
     name = STATION_AGENT[station]
     path = os.path.join(plugin_root, 'agents', name + '.md')
     info = {'station': station, 'agent': name, 'file': 'agents/' + name + '.md', 'prompt': '', 'model': '', 'tools': [],
@@ -231,16 +231,22 @@ def _guard_blocks(tools, narrow):
     return out
 
 
+GH_LOOKUPS = {'auth', 'repo', 'version', 'help'}   # gh auth status and the like: every narrow role keeps them, not worth a chip
+
+
 def _guard_limits(plugin_root, agent):
-    """The gh and git commands the guard hook (hooks/adlc_guard.py) allows a narrow role, e.g.
-    ['gh pr diff', 'gh pr view', 'git (read-only)']. [] when the role holds the whole shell. None when the guard
-    cannot be read — the caller must not pass that off as "no limits"."""
+    """The gh and git commands the guard hook (hooks/adlc_guard.py) allows a narrow role, as it read them from the
+    role's contract (contracts/<role>.json), e.g. ['gh pr diff', 'gh pr view', 'git (read-only)']. [] when the role
+    holds the whole shell. None when the guard cannot be read, or could not read this role's contract — the caller
+    must not pass that off as "no limits"."""
     try:
         spec = importlib.util.spec_from_file_location('adlc_guard', os.path.join(plugin_root, 'hooks', 'adlc_guard.py'))
         guard = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(guard)
+        if agent in guard.UNREADABLE:
+            return None
         rules = guard.ROLE_RULES.get(agent)
-        lookups = set(guard.READ_GH)        # gh auth status and the like: every role keeps them, not worth a chip
+        lookups = GH_LOOKUPS
     except Exception:
         return None
     if not rules:

@@ -1,0 +1,121 @@
+{
+  "role": "adversarial-reviewer",
+  "tools": [
+    "Read",
+    "Grep",
+    "Glob",
+    "Bash",
+    "Skill"
+  ],
+  "shell": {
+    "gh": {
+      "auth": [
+        "status"
+      ],
+      "repo": [
+        "view"
+      ],
+      "version": null,
+      "help": null,
+      "pr": [
+        "view",
+        "diff",
+        "comment",
+        "list",
+        "checks"
+      ],
+      "issue": [
+        "view"
+      ]
+    },
+    "git": [
+      "status",
+      "diff",
+      "log",
+      "show",
+      "ls-files",
+      "ls-tree",
+      "rev-parse",
+      "rev-list",
+      "blame",
+      "grep",
+      "merge-base",
+      "describe",
+      "cat-file",
+      "shortlog",
+      "branch",
+      "remote"
+    ]
+  },
+  "write_paths": [],
+  "labels": {
+    "may_add": [],
+    "moves": []
+  },
+  "outputs": {
+    "review": {
+      "where": "PR comment",
+      "markers": [
+        {
+          "marker": "ADLC-ADV",
+          "form": "ADLC-ADV: PASS|CHANGES",
+          "required": true,
+          "check": {
+            "line": "last",
+            "ere": "(^|[^[:alnum:]_-])ADLC-ADV:[*`_[:space:]]*(PASS|CHANGES)([^[:alnum:]_].*)?$"
+          },
+          "read_by": "templates/scripts/adlc-verdict.sh, called by templates/github/adlc-review.yml and adlc-fast.yml"
+        },
+        {
+          "marker": "ADLC-FINDING",
+          "form": "ADLC-FINDING: <severity> | <class> | <file>",
+          "required": false,
+          "read_by": "templates/scripts/adlc-log-findings.sh (one line per finding; none when there is no finding)"
+        }
+      ]
+    }
+  },
+  "lanes": [
+    {
+      "workflow": "adlc-review.yml",
+      "step": "Adversarial review",
+      "allowedTools": [
+        "Skill",
+        "Bash(gh pr view:*)",
+        "Bash(gh pr diff:*)",
+        "Bash(gh pr comment:*)",
+        "Bash(gh pr list:*)",
+        "Bash(gh pr checks:*)",
+        "Bash(gh issue view:*)",
+        "Bash(git status:*)",
+        "Bash(git diff:*)",
+        "Bash(git log:*)",
+        "Bash(git show:*)"
+      ]
+    },
+    {
+      "workflow": "adlc-fast.yml",
+      "step": "Adversarial + security review",
+      "allowedTools": [
+        "Skill",
+        "Bash(gh pr view:*)",
+        "Bash(gh pr diff:*)",
+        "Bash(gh pr comment:*)",
+        "Bash(gh pr list:*)",
+        "Bash(gh pr checks:*)",
+        "Bash(gh issue view:*)",
+        "Bash(git status:*)",
+        "Bash(git diff:*)",
+        "Bash(git log:*)",
+        "Bash(git show:*)"
+      ]
+    }
+  ],
+  "inputs": [
+    "the PR diff",
+    "the linked ADR and task breakdown, or the change brief (fast lane)",
+    "the story and its acceptance criteria",
+    "not the Builder's session, reasoning or self-report",
+    "the skills its agent file lists"
+  ]
+}

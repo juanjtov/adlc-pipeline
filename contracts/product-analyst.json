@@ -1,0 +1,103 @@
+{
+  "role": "product-analyst",
+  "tools": [
+    "Read",
+    "Grep",
+    "Glob",
+    "Bash",
+    "Skill"
+  ],
+  "shell": {
+    "gh": {
+      "auth": [
+        "status"
+      ],
+      "repo": [
+        "view"
+      ],
+      "version": null,
+      "help": null,
+      "issue": [
+        "view",
+        "comment",
+        "edit",
+        "list",
+        "status"
+      ],
+      "label": [
+        "list"
+      ],
+      "search": null
+    },
+    "git": [
+      "status",
+      "diff",
+      "log",
+      "show",
+      "ls-files",
+      "ls-tree",
+      "rev-parse",
+      "rev-list",
+      "blame",
+      "grep",
+      "merge-base",
+      "describe",
+      "cat-file",
+      "shortlog",
+      "branch",
+      "remote"
+    ]
+  },
+  "write_paths": [],
+  "labels": {
+    "may_add": [
+      "gate:stories"
+    ],
+    "moves": [
+      {
+        "from": "stage:intake",
+        "to": "gate:stories",
+        "by": "the role, with .adlc/scripts/adlc-relabel.sh (a local session and the intake lane alike)"
+      }
+    ]
+  },
+  "outputs": {
+    "triage": {
+      "where": "issue comment",
+      "markers": [
+        {
+          "marker": "ADLC-TRIAGE",
+          "form": "ADLC-TRIAGE: FAST|FULL",
+          "required": true,
+          "check": {
+            "line": "any",
+            "ere": "ADLC-TRIAGE:[[:space:]]*(FAST|FULL)"
+          },
+          "read_by": "templates/github/adlc-intake.yml (the Gate 1 handoff step)"
+        }
+      ]
+    }
+  },
+  "lanes": [
+    {
+      "workflow": "adlc-intake.yml",
+      "step": "Run Product Analyst",
+      "allowedTools": [
+        "Skill",
+        "Bash(gh issue view:*)",
+        "Bash(gh issue comment:*)",
+        "Bash(gh issue edit:*)",
+        "Bash(gh issue list:*)",
+        "Bash(gh label list:*)",
+        "Bash(gh search:*)",
+        "Bash(.adlc/scripts/adlc-triage.sh:*)",
+        "Bash(.adlc/scripts/adlc-relabel.sh:*)"
+      ]
+    }
+  ],
+  "inputs": [
+    "the issue it is given, and that issue's comments",
+    "the repository, read-only",
+    "the skills its agent file lists"
+  ]
+}

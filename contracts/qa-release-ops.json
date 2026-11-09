@@ -1,0 +1,57 @@
+{
+  "role": "qa-release-ops",
+  "tools": [
+    "Read",
+    "Grep",
+    "Glob",
+    "Edit",
+    "Write",
+    "Bash",
+    "Skill"
+  ],
+  "shell": null,
+  "write_paths": null,
+  "labels": {
+    "may_add": null,
+    "moves": [
+      {
+        "from": "stage:qa",
+        "to": "gate:deploy",
+        "by": "the role, with .adlc/scripts/adlc-relabel.sh (a local session and the QA lane alike)"
+      }
+    ]
+  },
+  "outputs": {
+    "qa-gate": {
+      "where": "PR comment",
+      "markers": [
+        {
+          "marker": "ADLC-FINDING",
+          "form": "ADLC-FINDING: <severity> | <class> | <file>",
+          "required": false,
+          "read_by": "templates/scripts/adlc-log-findings.sh (one line per finding; none when there is no finding)"
+        }
+      ]
+    }
+  },
+  "lanes": [
+    {
+      "workflow": "adlc-qa.yml",
+      "step": "Run QA & Release/Ops agent",
+      "allowedTools": [
+        "Read",
+        "Edit",
+        "Write",
+        "Skill",
+        "Bash"
+      ]
+    }
+  ],
+  "inputs": [
+    "the PR, its branch and its checks",
+    "the issue's stories and acceptance criteria",
+    "the adversarial reviewer's comment",
+    "after a deploy: the deploy target's logs and metrics",
+    "the skills its agent file lists"
+  ]
+}

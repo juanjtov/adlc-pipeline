@@ -2,7 +2,8 @@
 # Unit tests for the ADLC guardrail scripts. Plain bash; the guard hook also needs python3 + git.
 # Run: bash tests/run.sh   (exit 0 = all pass). These verify the deterministic guardrails
 # themselves — the same scripts CI and the local pre-commit hook call — plus the plugin's guard
-# hook. The static checks cover what can't be run here for real: the workflow templates (their
+# hook and the role contracts it reads (contracts/, with the text derived from them). The static
+# checks cover what can't be run here for real: the workflow templates (their
 # triggers, their agent wiring, the intake, diff-scope and design-handoff steps against a stub
 # gh, and the fast lane's and the fix loop's cap steps on a real git history), the pre-commit
 # hook, labels.sh, adlc-metrics.sh (against a stub gh), and the agents: thin wrappers over the
@@ -1885,8 +1886,12 @@ for f in "$T"/adlc-*.yml; do
   eq "$n" "$b: lists the dispatch bot"     "$(count '^[[:space:]]*allowed_bots:')"
   eq "$n" "$b: runs a named agent or skill" "$(count '--agent adlc:[a-z-]+$|prompt: "/adlc:[a-z-]+"')"
 done
-# WHAT each lane may do is the security boundary of the unattended pipeline, so it is pinned
-# here: widening a grant, or running a lane as another agent, has to change this table too.
+# WHAT each lane may do is the security boundary of the unattended pipeline. A role step's grant
+# is written once, in contracts/<role>.json (`lanes`); the workflow line is derived from it
+# (contracts/render.py). Here each side is read a second time, by other code (awk over the
+# template, jq over the contract), and compared: widening a grant has to change a contract, and
+# running a lane as another agent has to change the table of agents below. The retro's two skill
+# steps run as no role, so their grant stays pinned in this file.
 grants() { # <template> → "<agent>=<tools>;" per agent step, in file order ("-" = no --agent)
   awk '
     /^[ \t]*#/ { next }
@@ -1895,18 +1900,30 @@ grants() { # <template> → "<agent>=<tools>;" per agent step, in file order ("-
     seen && /^[ \t]*--allowedTools / { t = $0; sub(/^[^"]*"/, "", t); sub(/".*$/, "", t); tools = t }
     END { if (seen) printf "%s=%s;", agent, tools }' "$T/$1"
 }
+lane_agents() { grants "$1" | tr ';' '\n' | sed -n 's/=.*//p' | tr '\n' ' ' | sed 's/ $//'; }
+eq "adlc:product-analyst"                      "intake: the Analyst"                 "$(lane_agents adlc-intake.yml)"
+eq "adlc:architect"                            "design: the Architect"               "$(lane_agents adlc-design.yml)"
+eq "adlc:adversarial-reviewer adlc:architect"  "review: the reviewer, then the Architect" "$(lane_agents adlc-review.yml)"
+eq "adlc:builder adlc:adversarial-reviewer"    "fast: the Builder, then the reviewer" "$(lane_agents adlc-fast.yml)"
+eq "adlc:builder"                              "builder: the Builder"                "$(lane_agents adlc-builder.yml)"
+eq "adlc:builder"                              "fix: the Builder"                    "$(lane_agents adlc-fix.yml)"
+eq "adlc:qa-release-ops"                       "qa: QA"                              "$(lane_agents adlc-qa.yml)"
+if command -v jq >/dev/null 2>&1; then
+  contract_grants() { # <template> → the same pairs, as the contracts' lane entries give them, sorted
+    jq -r --arg w "$1" '.role as $r | .lanes[] | select(.workflow == $w) | "adlc:\($r)=\(.allowedTools | join(","))"' "$ROOT"/contracts/*.json | sort | tr '\n' ';'
+  }
+  for b in adlc-intake.yml adlc-design.yml adlc-review.yml adlc-fast.yml adlc-builder.yml adlc-fix.yml adlc-qa.yml; do
+    eq "$(contract_grants "$b")" "$b: each role step grants exactly what the role's contract lists for this lane" "$(grants "$b" | tr ';' '\n' | sed '/^$/d' | sort | tr '\n' ';')"
+  done
+else
+  bad "the lane grant checks need jq"
+fi
+# Whatever a contract comes to say, these hold: the narrow roles get no bare shell and no unscoped edit
+# tool in any lane, and the one path-scoped edit grant is the Architect's docs/ in the design lane.
+wide=$(for f in "$T"/adlc-*.yml; do grants "$(basename "$f")" | tr ';' '\n' | grep -E '^adlc:(product-analyst|architect|adversarial-reviewer)=' | grep -E '[=,](Bash|Edit|Write|MultiEdit|NotebookEdit)(,|$)'; done)
+eq "" "no lane gives the Analyst, the Architect or the reviewer a bare Bash or an unscoped edit tool" "$wide"
+eq "adlc-design.yml:Edit(docs/**)" "the only path-scoped edit grant is Edit(docs/**), in the design lane" "$(cd "$T" && grep -oE -- '(Edit|Write|MultiEdit|NotebookEdit)\([^)]*\)' adlc-*.yml | sort -u | tr '\n' ' ' | sed 's/ $//')"
 FULL='Read,Edit,Write,Skill,Bash'
-GITRO='Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*)'
-REVIEW="Skill,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*),Bash(gh pr list:*),Bash(gh pr checks:*),Bash(gh issue view:*),$GITRO"
-eq "adlc:product-analyst=Skill,Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh issue edit:*),Bash(gh issue list:*),Bash(gh label list:*),Bash(gh search:*),Bash(.adlc/scripts/adlc-triage.sh:*),Bash(.adlc/scripts/adlc-relabel.sh:*);" \
-   "intake: the Analyst, named gh commands, no edit tools" "$(grants adlc-intake.yml)"
-eq "adlc:architect=Edit(docs/**),Skill,Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh issue list:*),Bash(gh pr view:*),Bash(gh pr list:*),Bash(gh pr diff:*),$GITRO;" \
-   "design: the Architect, edits under docs/ only, no commit/push/label" "$(grants adlc-design.yml)"
-eq "adlc:adversarial-reviewer=$REVIEW;adlc:architect=$REVIEW;" "review: both reviewers read and comment only" "$(grants adlc-review.yml)"
-eq "adlc:builder=$FULL;adlc:adversarial-reviewer=$REVIEW;"      "fast: the Builder builds, the reviewer reads and comments" "$(grants adlc-fast.yml)"
-eq "adlc:builder=$FULL;"         "builder: the Builder"  "$(grants adlc-builder.yml)"
-eq "adlc:builder=$FULL;"         "fix: the Builder"      "$(grants adlc-fix.yml)"
-eq "adlc:qa-release-ops=$FULL;"  "qa: QA"                "$(grants adlc-qa.yml)"
 eq "-=$FULL;-=$FULL;"            "retro: the /adlc:retro and /adlc:cycle-retro skills, two steps, no agent" "$(grants adlc-retro.yml)"
 eq 2 "retro: each step names its skill once" "$(grep -c '^          prompt: "/adlc:\(cycle-\)\?retro"$' "$ROOT/templates/github/adlc-retro.yml")"
 eq "retro cycle-retro" "retro: a checkout reset (default branch, clean) sits between the two proposals, so the second does not carry the first's branch or ledgers" \
@@ -2088,12 +2105,32 @@ print(json.dumps(d))' "$@"
     case $rc in 0) got=A ;; 2) got=D ;; *) got="exit-$rc" ;; esac
     [ "$got" = "$1" ] && pass=$((pass+1)) || bad "guard [$2] want $1 got $got: $(printf '%s' "$4" | head -1)"
   }
+  # the file-write cases: a repo with docs/ and code beside it, and links under docs/ that lead out of it
+  git init -q -b main "$GR/wr" && mkdir -p "$GR/wr/docs/adr" "$GR/wr/src" "$GR/wr/sub" "$GR/outside/docs" "$GR/nogit/docs" \
+    && echo x > "$GR/wr/src/app.py" && echo x > "$GR/wr/docs/adr/0001-a.md" \
+    && ln -s ../src "$GR/wr/docs/code" && ln -s "$GR/outside" "$GR/wr/docs/away" && ln -s adr "$GR/wr/docs/latest" \
+    && ln -s ../src/app.py "$GR/wr/docs/app.md" && ln -s "$GR/outside/not-there.md" "$GR/wr/docs/dangling.md"
+  write_json() { # write_json <role|-> <cwd> <tool> <path|->  → the PreToolUse input of a file-writing tool
+    python3 -c 'import json,sys
+role, cwd, tool, path = sys.argv[1:5]
+d={"hook_event_name":"PreToolUse","tool_name":tool,"cwd":cwd,"tool_input":{"content":"x"}}
+if path!="-": d["tool_input"]["notebook_path" if tool=="NotebookEdit" else "file_path"]=path
+if role!="-": d["agent_type"]=role
+print(json.dumps(d))' "$@"
+  }
+  w() { # w <A|D> <role|-> <repo[/subdir]> <tool> <path|->
+    local got rc
+    write_json "$2" "$GR/$3" "$4" "$5" | GITHUB_ACTIONS=true bash "$H" >/dev/null 2>&1; rc=$?
+    case $rc in 0) got=A ;; 2) got=D ;; *) got="exit-$rc" ;; esac
+    [ "$got" = "$1" ] && pass=$((pass+1)) || bad "guard [$2] want $1 got $got: $4 $5"
+  }
   # the cases mean nothing unless each fixture really is where its name says
   eq feat/1-x     "fixture feat is on its feature branch"  "$(git -C "$GR/feat" symbolic-ref --short HEAD 2>/dev/null)"
   eq main         "fixture onmain is on main"              "$(git -C "$GR/onmain" symbolic-ref --short HEAD 2>/dev/null)"
   eq origin/main  "fixture track follows origin/main"      "$(git -C "$GR/track" rev-parse --abbrev-ref '@{upstream}' 2>/dev/null)"
   eq origin/trunk "fixture trunk's default branch is trunk" "$(git -C "$GR/trunk" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null)"
   eq matching     "fixture matching pushes every matching branch" "$(git -C "$GR/matching" config push.default 2>/dev/null)"
+  eq "$(cd "$GR/wr" && pwd -P)/src" "fixture wr: docs/code leads out of docs/" "$(cd "$GR/wr/docs/code" 2>/dev/null && pwd -P)"
   before=$pass; before_fail=$fail
   . "$ROOT/tests/guard-cases.sh"
   [ "$fail" -eq "$before_fail" ] && printf '  ✓ %s command cases (see tests/guard-cases.sh)\n' "$((pass-before))"
@@ -2140,6 +2177,53 @@ print(json.dumps(d))' "$@"
   eq "ADLC guard: blocked" "tells the agent why" "$(printf '%s' "$M" | GITHUB_ACTIONS=true bash "$H" 2>&1 >/dev/null | cut -c1-19)"
   eq 1 "…and, for a program named by a variable, how to get past a wrong guess" \
      "$(hook_json - "$GR/onmain" '"$DOCKER" push image:tag' | GITHUB_ACTIONS=true bash "$H" 2>&1 >/dev/null | grep -c 'write its name out')"
+  # ── the file-write hook: the same launcher, on the four tools that write a file ──
+  python3 -c 'import json,sys
+pre = json.load(open(sys.argv[1]))["hooks"]["PreToolUse"]
+bash = [h["command"] for e in pre if e.get("matcher") == "Bash" for h in e["hooks"]]
+found = [e for e in pre if sorted(e.get("matcher", "").split("|")) == ["Edit", "MultiEdit", "NotebookEdit", "Write"]]
+assert len(found) == 1 and [h["command"] for h in found[0]["hooks"]] == bash, found' "$ROOT/hooks/hooks.json" 2>/dev/null \
+    && ok "hooks.json wires the guard to Edit, Write, MultiEdit and NotebookEdit too, once, with the Bash guard's command" \
+    || bad "hooks.json must wire hooks/adlc-guard.sh to Edit|Write|MultiEdit|NotebookEdit, once"
+  WO="$(write_json adlc:architect "$GR/wr" Write src/app.py)"; WI="$(write_json adlc:architect "$GR/wr" Write docs/adr/9.md)"
+  ( cd "$GR/wr" && printf '%s' "$WO" | env -u GITHUB_ACTIONS CLAUDE_PROJECT_DIR="$GR/wr" bash "$H" ) >/dev/null 2>&1; check 0 "write hook: a no-op in a repo that has not adopted ADLC" $?
+  mkdir -p "$GR/wr/.adlc/scripts"
+  ( cd "$GR/wr" && printf '%s' "$WO" | env -u GITHUB_ACTIONS CLAUDE_PROJECT_DIR="$GR/wr" bash "$H" ) >/dev/null 2>&1; check 2 "…active in a local session once the repo adopted it: the Architect's write outside docs/ is blocked" $?
+  ( cd "$GR/wr" && printf '%s' "$WI" | env -u GITHUB_ACTIONS CLAUDE_PROJECT_DIR="$GR/wr" bash "$H" ) >/dev/null 2>&1; check 0 "…and its write under docs/ goes through" $?
+  printf '%s' "$WI" | env -i GITHUB_ACTIONS=true PATH=/nonexistent /bin/bash "$H" >/dev/null 2>&1; check 2 "write hook: fails closed in scope when python3 is missing" $?
+  eq 1 "write hook: tells the agent where the role may write" "$(printf '%s' "$WO" | GITHUB_ACTIONS=true bash "$H" 2>&1 >/dev/null | grep -c 'may write only under: docs/\*\*')"
+  # ── the contracts the guard reads: a role whose contract is missing or unreadable is blocked ──
+  # ("$GR/plug in" holds the two hook files and no contracts/ folder: the main thread still got its
+  # verdicts above; a role does not, since nothing says what it may do.)
+  PH="$GR/plug in/hooks/adlc-guard.sh"
+  as_role() { hook_json "$1" "$GR/feat" "$2" | GITHUB_ACTIONS=true bash "$PH" >/dev/null 2>&1; }
+  as_role adlc:product-analyst 'gh issue view 5';  check 2 "no contracts folder: a narrow role's command is blocked (fails closed)" $?
+  as_role adlc:builder 'git status';               check 2 "…and an un-narrowed role's too: without its contract nothing says it is un-narrowed" $?
+  as_role adlc-other 'git status';                 check 0 "…while an agent that is not one of the roles needs no contract" $?
+  printf '%s' "$WI" | GITHUB_ACTIONS=true bash "$PH" >/dev/null 2>&1; check 2 "…and the Architect's write is blocked, under docs/ included" $?
+  eq 1 "…saying that the contract could not be read" "$(hook_json adlc:product-analyst "$GR/feat" 'gh issue view 5' | GITHUB_ACTIONS=true bash "$PH" 2>&1 >/dev/null | grep -c "product-analyst role's contract could not be read")"
+  cp -R "$ROOT/contracts" "$GR/plug in/contracts"
+  as_role adlc:product-analyst 'gh issue view 5';  check 0 "with the contracts in place the role's allowed command runs" $?
+  as_role adlc:product-analyst 'git commit -am x'; check 2 "…and its limits hold" $?
+  printf '{"role": "architect", ' > "$GR/plug in/contracts/architect.json"
+  as_role adlc:architect 'gh issue view 5';        check 2 "a contract that is not JSON blocks its role" $?
+  printf '%s' "$WI" | GITHUB_ACTIONS=true bash "$PH" >/dev/null 2>&1; check 2 "…its file writes too" $?
+  as_role adlc:product-analyst 'gh issue view 5';  check 0 "…and no other role" $?
+  cedit() { # <role> <python expression over the contract `c`> — rewrite one contract of the copy
+    python3 -c 'import json,sys
+p = sys.argv[1]; c = json.load(open(p)); exec(sys.argv[2]); json.dump(c, open(p, "w"))' "$GR/plug in/contracts/$1.json" "$2"; }
+  cp "$ROOT/contracts/architect.json" "$GR/plug in/contracts/architect.json"; cedit architect 'del c["write_paths"]'
+  printf '%s' "$WO" | GITHUB_ACTIONS=true bash "$PH" >/dev/null 2>&1; check 2 "a contract that lost an enforced key blocks (a missing key is not \"no limit\")" $?
+  cp "$ROOT/contracts/architect.json" "$GR/plug in/contracts/architect.json"; cedit architect 'c["write_paths"] = ["../**"]'
+  printf '%s' "$WI" | GITHUB_ACTIONS=true bash "$PH" >/dev/null 2>&1; check 2 "a write path that climbs out of the repository is not a contract the guard accepts" $?
+  cp "$ROOT/contracts/architect.json" "$GR/plug in/contracts/architect.json"; cedit architect 'c["role"] = "builder"'
+  as_role adlc:architect 'gh issue view 5';        check 2 "a contract that names another role blocks" $?
+  cp "$ROOT/contracts/qa-release-ops.json" "$GR/plug in/contracts/qa-release-ops.json"; cedit qa-release-ops 'c["labels"]["may_add"] = ["gate:deploy"]'
+  as_role adlc:qa-release-ops 'git status';        check 2 "a label list on a role with no shell surface blocks: the guard could not enforce it" $?
+  cp "$ROOT/contracts/architect.json" "$GR/plug in/contracts/architect.json"; cedit architect 'c["write_paths"] = ["docs/adr/*.md", "docs/**/notes-?.txt"]'
+  ( cd "$GR" && PH_W() { write_json adlc:architect "$GR/wr" Write "$1" | GITHUB_ACTIONS=true bash "$PH" >/dev/null 2>&1; echo $?; }
+    echo "$(PH_W docs/adr/1.md)$(PH_W docs/adr/deep/1.md)$(PH_W docs/notes-1.txt)$(PH_W docs/a/b/notes-2.txt)$(PH_W docs/a/notes-12.txt)$(PH_W docs/guide.md)" ) > "$GR/globs" 2>/dev/null
+  eq "020022" "write globs: * and ? stay inside one name, ** spans directories (none included)" "$(cat "$GR/globs")"
   rm -rf "$GR"
 else
   bad "guard tests need python3 and git"
@@ -3047,6 +3131,127 @@ if command -v git >/dev/null 2>&1; then
   rm -rf "$AC"
 else
   bad "autopilot cap command tests need git"
+fi
+
+echo "contracts (one per role · the text derived from them · adlc-outputs.sh):"
+# contracts/<role>.json says what a role's tools, shell surface, write paths, label moves, markers and
+# lane grants are. render.py --check holds the derived text to them; the mutations below run it on a
+# copy of the tree, so each kind of drift is shown to be caught and none of them touches this checkout.
+if command -v python3 >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
+  ROLES="product-analyst architect builder adversarial-reviewer qa-release-ops"
+  roles_sorted="$(printf '%s\n' $ROLES | sort | tr '\n' ' ')"
+  python3 "$ROOT/contracts/render.py" --check >/dev/null 2>&1; check 0 "render.py --check: the tools lines, the lane grants and the marker table are what the contracts say" $?
+  eq "$roles_sorted" "one contract per role" "$(ls "$ROOT"/contracts/*.json | xargs -n1 basename | sed 's/\.json$//' | sort | tr '\n' ' ')"
+  eq "$roles_sorted" "…and they are the roles the guard reads a contract for, all five readable" \
+     "$(python3 -c 'import sys; sys.dont_write_bytecode = True; sys.path.insert(0, sys.argv[1]); import adlc_guard as g
+assert not g.UNREADABLE, g.UNREADABLE
+print(" ".join(sorted(g.ROLES)) + " ", end="")' "$ROOT/hooks" 2>/dev/null)"
+  eq "adversarial-reviewer architect product-analyst " "the narrowed roles are the three whose contract has a shell surface" "$(jq -r 'select(.shell != null) | .role' "$ROOT"/contracts/*.json | sort | tr '\n' ' ')"
+  CT="$(mktemp -d)"
+  ctree() { rm -rf "$CT/p"; mkdir -p "$CT/p/templates"; cp -R "$ROOT/contracts" "$ROOT/agents" "$ROOT/hooks" "$CT/p/"; cp -R "$ROOT/templates/agents" "$ROOT/templates/github" "$ROOT/templates/scripts" "$CT/p/templates/"; }
+  rcheck()  { python3 "$CT/p/contracts/render.py" --check 2>&1; }
+  rwrite()  { python3 "$CT/p/contracts/render.py" --write >/dev/null 2>&1; }
+  cjq()     { jq "$2" "$CT/p/contracts/$1.json" > "$CT/tmp.json" && mv "$CT/tmp.json" "$CT/p/contracts/$1.json"; }   # <role> <jq filter>
+  csed()    { sed "$2" "$CT/p/$1" > "$CT/tmp.txt" && mv "$CT/tmp.txt" "$CT/p/$1"; }                                    # <file> <sed expression>
+  derived() { for d in agents templates/agents templates/github templates/scripts; do diff -r "$ROOT/$d" "$CT/p/$d"; done 2>&1; }   # empty = the copy's derived files are this checkout's
+  caught()  { # <name> <text the report must contain> — --check fails and says so
+    local out; out="$(rcheck)"; local rc=$?
+    [ "$rc" = 1 ] && printf '%s' "$out" | grep -qF -- "$2" && ok "$1" || bad "$1 (exit $rc: $(printf '%s' "$out" | head -2 | tr '\n' ' '))"
+  }
+  ctree; rwrite; check 0 "--write on this checkout succeeds" $?
+  eq "" "…and rewrites nothing: every derived file already is what its contract renders to" "$(derived)"
+  # the tools line
+  ctree; cjq architect '.tools -= ["Glob"]'
+  caught "a tools line that differs from the contract is drift (the agent)" "agents/architect.md: its tools line"
+  caught "…(and its vendored copy)" "templates/agents/adlc-architect.md.tmpl: its tools line"
+  rwrite; check 0 "--write renders it" $?
+  eq "tools: Read, Grep, Edit, Write, Bash, Skill|tools: Read, Grep, Edit, Write, Bash, Skill" "…into both files" "$(grep -h '^tools:' "$CT/p/agents/architect.md" "$CT/p/templates/agents/adlc-architect.md.tmpl" | tr '\n' '|' | sed 's/|$//')"
+  eq 2 "…changing that one line of each and nothing else" "$(derived | grep -c '^[<>]' | awk '{ print $1 / 2 }')"
+  ctree; cjq product-analyst '.tools += ["Bash(gh issue:*)"]'; caught "a command specifier in tools is refused (a tools: line takes names)" "plain tool names"
+  ctree; cjq product-analyst '.tools += ["Edit"]';             caught "an edit tool on a role that writes no file is refused" "holds an edit tool"
+  # the lane grants
+  ctree; csed templates/github/adlc-intake.yml 's/Bash(gh label list:\*)/Bash(gh label:*)/'
+  caught "a grant widened in the workflow is drift" 'templates/github/adlc-intake.yml, step "Run Product Analyst": grants'
+  rwrite; eq "" "…and --write puts the contract's grant back" "$(derived)"
+  ctree; cjq product-analyst '.lanes[0].allowedTools += ["Bash(gh pr merge:*)"]'
+  caught "a contract whose lane grant goes past its own shell surface is refused" "\`Bash(gh pr merge:*)\` is outside the role's \`shell.gh\`"
+  rwrite; check 1 "…--write does not make that pass" $?
+  eq "" "…and renders nothing from a contract it refused" "$(derived)"
+  ctree; cjq adversarial-reviewer '.lanes[0].allowedTools = ["Skill", "Bash"]';  caught "a bare Bash for a narrowed role is refused" "a bare \`Bash\` for a role whose \`shell\` is narrowed"
+  ctree; cjq adversarial-reviewer '.lanes[0].allowedTools += ["Bash(git push:*)"]'; caught "a git subcommand outside the role's list is refused" "outside the role's \`shell.git\`"
+  ctree; cjq adversarial-reviewer '.lanes[0].allowedTools += ["Bash(.adlc/scripts/adlc-relabel.sh:*)"]'; caught "the relabel script counts as the gh issue edit it is" "is \`gh issue edit\`, which is outside the role's \`shell.gh\`"
+  ctree; cjq adversarial-reviewer '.lanes[0].allowedTools += ["Bash(npm test:*)"]'; caught "a command the check cannot place is refused, not waved through" "cannot tell whether this is inside"
+  ctree; cjq architect '.lanes[0].allowedTools[0] = "Edit(**)"';  caught "an edit grant outside the role's write paths is refused" "\`Edit(**)\` is outside the role's \`write_paths\`"
+  ctree; cjq architect '.lanes[0].allowedTools[0] = "Edit"';      caught "…an unscoped one too" "\`Edit\` is outside the role's \`write_paths\`"
+  ctree; cjq product-analyst '.lanes[0].allowedTools += ["Write"]'; caught "a tool the role does not have is refused" "the role's \`tools\` has no Write"
+  ctree; csed templates/github/adlc-qa.yml 's/- name: Run QA & Release\/Ops agent/- name: Run QA/'
+  caught "a renamed agent step has no lane entry" 'step "Run QA": contracts/qa-release-ops.json must have exactly one lane entry'
+  caught "…and its lane entry has no step" 'lane entry adlc-qa.yml, step "Run QA & Release/Ops agent": no step of that name'
+  ctree; csed templates/github/adlc-intake.yml 's/--agent adlc:product-analyst/--agent adlc:builder/'
+  caught "a lane switched to another agent is drift" 'step "Run Product Analyst": contracts/builder.json must have exactly one lane entry'
+  ctree; csed templates/github/adlc-intake.yml 's/--agent adlc:product-analyst/--agent adlc-product-analyst/'
+  caught "a lane that runs something other than a plugin role is drift" "is not one of the plugin's roles"
+  ctree; csed templates/github/adlc-qa.yml 's/^\( *\)--permission-mode dontAsk$/&\
+\1--allowedTools "Read"/'
+  caught "two grant lines in one step are refused (which one counts must not be a guess)" "must have exactly one \`--allowedTools"
+  # the contract's own shape
+  ctree; cjq architect 'del(.write_paths)';                      caught "a missing enforced key is refused, as the guard refuses it" "contracts/architect.json: the guard cannot read it"
+  ctree; cjq architect '.write_path = .write_paths';             caught "an unknown key is refused" "the keys must be exactly"
+  ctree; cjq qa-release-ops '.labels.may_add = ["gate:deploy"]'; caught "a label list on a role with no shell surface is refused" "where \`shell\` is null it must be null too"
+  ctree; cjq product-analyst '.labels.may_add = ["stage:intake"]'; caught "a label move the role's own list does not allow is refused" "ends at gate:stories, which \`labels.may_add\` does not allow"
+  ctree; rm "$CT/p/contracts/builder.json";                      caught "a missing contract is drift" "contracts/: the files must be the guard's roles"
+  ctree; cp "$CT/p/contracts/builder.json" "$CT/p/contracts/planner.json"; caught "…and so is one for a role the guard does not know" "contracts/: the files must be the guard's roles"
+  ctree; cjq adversarial-reviewer 'del(.outputs.review.markers[0].check)'; caught "a required marker with no form to check is refused" "plus \`check\` when it is required"
+  # the marker table inside adlc-outputs.sh
+  ctree; csed templates/scripts/adlc-outputs.sh 's/(FAST|FULL)$/(FAST|FULL|MAYBE)/'
+  caught "a marker table edited by hand is drift" "templates/scripts/adlc-outputs.sh: its marker table"
+  rwrite; eq "" "…and --write renders it back" "$(derived)"
+  ctree; cjq product-analyst '.outputs.triage.markers[0].required = false | del(.outputs.triage.markers[0].check)'; rwrite
+  eq "architect adversarial-reviewer " "the table holds the required markers only" "$(sed -n '/^table() /,/^ADLC_OUTPUTS$/p' "$CT/p/templates/scripts/adlc-outputs.sh" | sed '1d;$d' | cut -f1 | uniq | tr '\n' ' ')"
+  python3 "$ROOT/contracts/render.py" >/dev/null 2>&1; check 2 "render.py with no mode is a usage error" $?
+  rm -rf "$CT"
+
+  # adlc-outputs.sh, as shipped (its table is the rendered one)
+  O="$S/adlc-outputs.sh"
+  outs() { printf '%b' "$1" | bash "$O" "$2" "$3" >/dev/null 2>&1; }   # <text> <role> <duty>
+  outs 'x\nADLC-ADV: CHANGES\ny\nADLC-ADV: PASS\n' adversarial-reviewer review;         check 0 "outputs: the reviewer's verdict line is there" $?
+  outs 'ADLC-ADV: PASS\n\nADLC-ADV: Changes needed, see above\n' adversarial-reviewer review; check 1 "outputs: an unclear LAST verdict line is not one, whatever came before" $?
+  outs 'Looks fine.\n' adversarial-reviewer review;                                       check 1 "outputs: no verdict line" $?
+  outs '' adversarial-reviewer review;                                                    check 1 "outputs: no text at all" $?
+  outs 'ADLC-ADV: PASS\n' architect review;                                               check 1 "outputs: another role's marker does not count" $?
+  outs 'Off the ADR.\n**ADLC-ARCH:** CHANGES\r\n' architect review;                       check 0 "outputs: the Architect's review verdict (bold, CRLF)" $?
+  outs '## Tasks\nADLC-BREAKDOWN: `docs/adr/0002-login.md`\r\n' architect design;         check 0 "outputs: the breakdown line names a path" $?
+  outs 'ADLC-BREAKDOWN:\n' architect design;                                              check 1 "outputs: a breakdown line with no path" $?
+  outs 'ADLC-TRIAGE: FULL | needs design\n' product-analyst triage;                       check 0 "outputs: the triage verdict" $?
+  outs 'ADLC-TRIAGE: unsure\n' product-analyst triage;                                    check 1 "outputs: a triage line with no FAST or FULL" $?
+  outs 'x\n' builder build;                                                               check 2 "outputs: a role with no required marker is a usage error, not a pass" $?
+  outs 'x\n' qa-release-ops qa-gate;                                                      check 2 "outputs: …a duty whose only marker is optional too" $?
+  printf 'x\n' | bash "$O" architect >/dev/null 2>&1;                                     check 2 "outputs: a missing duty is a usage error" $?
+  eq "adlc-outputs: architect review: no \`ADLC-ARCH: PASS|CHANGES\` line" "outputs: says which marker is missing, in its form" "$(printf 'nothing\n' | bash "$O" architect review 2>&1 >/dev/null)"
+  eq 0 "outputs: a match on the first line of a long comment is still a match (no early-exit pipe)" "$( { printf 'ADLC-TRIAGE: FAST | x\n'; awk 'BEGIN { for (i = 0; i < 40000; i++) print "the quick brown fox jumps over the lazy dog, again and again and again" }'; } | bash "$O" product-analyst triage >/dev/null 2>&1; echo $?)"
+  # The forms are the lanes' own parsers'. The verdicts: every sample gets the same answer from
+  # adlc-verdict.sh (what the review and fast lanes call) and from the table.
+  agree=0; n=0
+  for sample in 'ADLC-ADV: PASS' 'ADLC-ADV: CHANGES' '**ADLC-ADV:** PASS' '- ADLC-ADV: CHANGES (two findings)' 'ADLC-ADV: PASSED' 'ADLC-ADV: pass' \
+                'ADLC-ADV-X: PASS' 'XADLC-ADV: PASS' 'ADLC-ADV: PASS\r' 'ADLC-ADV:PASS' 'ADLC-ADV: PASS.' 'format: ADLC-ADV: PASS\n\nADLC-ADV: Changes needed' \
+                'ADLC-ADV: CHANGES\nADLC-ADV-X: nothing\n' 'ADLC-ADV PASS' 'nothing here'; do
+    n=$((n+1)); v="$(printf '%b\n' "$sample" | bash "$S/adlc-verdict.sh" ADLC-ADV)"; outs "$sample\n" adversarial-reviewer review; rc=$?
+    { [ -n "$v" ] && [ "$rc" = 0 ]; } || { [ -z "$v" ] && [ "$rc" = 1 ]; } && agree=$((agree+1)) || bad "outputs and adlc-verdict.sh disagree on: $sample (verdict '$v', outputs exit $rc)"
+  done
+  eq "$n" "outputs: the verdict form is adlc-verdict.sh's ($n samples, the same answer from both)" "$agree"
+  # The triage form is, to the letter, the regex the intake lane's Gate 1 step greps for.
+  grep -qF -- "grep -oE '$(jq -r '.outputs.triage.markers[0].check.ere' "$ROOT/contracts/product-analyst.json")'" "$ROOT/templates/github/adlc-intake.yml" \
+    && ok "outputs: the triage form is the regex the intake lane's handoff step greps for" || bad "the ADLC-TRIAGE regex in contracts/product-analyst.json is not the one adlc-intake.yml greps for"
+  for f in "$ROOT"/contracts/*.json; do   # every marker a contract names is one its role prompt or lane prompt asks for
+    r="$(basename "$f" .json)"
+    for m in $(jq -r '.outputs[].markers[].marker' "$f" | sort -u); do
+      grep -q -- "$m:" "$ROOT/skills/role-$r/SKILL.md" "$ROOT"/templates/github/adlc-*.yml "$ROOT/skills/security-gate/SKILL.md" || bad "contracts/$r.json names $m, which no prompt asks the role for"
+    done
+  done
+  grep -q 'adlc-outputs.sh' "$ROOT/README.md" && ok "README's layout lists adlc-outputs.sh" || bad "README: list adlc-outputs.sh in the layout"
+  grep -q '^contracts/' "$ROOT/README.md" && ok "README's layout lists contracts/" || bad "README: list contracts/ in the layout"
+else
+  bad "the contract tests need python3 and jq"
 fi
 
 echo ""
