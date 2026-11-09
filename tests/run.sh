@@ -498,8 +498,11 @@ grep -q -- '--json comments,reviews' "$RR" && grep -q 'ts: (.submittedAt // "")'
 grep -q -- 'adlc-log-findings.sh "$pr" review "$(jq -r .ts <<<"$c")"' "$RR" && ok "retro recipe: passes the comment's time to the logger" || bad "retro recipe: must pass the comment's time to the logger"
 grep -q -- 'gh pr list --state all --limit 500' "$RR" && ok "retro recipe: lists 500 PRs, not 50" || bad "retro recipe: must list 500 PRs, not 50"
 # issue 28: the class is a closed vocabulary — synonyms map onto it, a name outside it is logged as written and reported once
-eq "logic-contradiction test-gap contract-violation doc-drift tenant-leak" "classes: known synonyms are written as their canonical name" \
-   "$(printf 'ADLC-FINDING: High | logic-bug | a.py\nADLC-FINDING: Low | test-coverage | b.py\nADLC-FINDING: Low | spec-drift | c.py\nADLC-FINDING: Low | docs | d.py\nADLC-FINDING: High | Tenant_Leak | e.py\n' | bash "$S/adlc-log-findings.sh" 3 review 2>/dev/null | jq -r .class | tr '\n' ' ' | sed 's/ $//')"
+eq "logic-contradiction test-gap contract-violation doc-drift tenant-leak tenant-leak" "classes: known synonyms are written as their canonical name (idor is the tenant probe)" \
+   "$(printf 'ADLC-FINDING: High | logic-bug | a.py\nADLC-FINDING: Low | test-coverage | b.py\nADLC-FINDING: Low | spec-drift | c.py\nADLC-FINDING: Low | docs | d.py\nADLC-FINDING: High | Tenant_Leak | e.py\nADLC-FINDING: Critical | idor | f.py\n' | bash "$S/adlc-log-findings.sh" 3 review 2>/dev/null | jq -r .class | tr '\n' ' ' | sed 's/ $//')"
+eq "adr-drift drift" "classes: a name that could be contract-violation or doc-drift (adr-drift, drift) is not guessed: kept as written and reported" \
+   "$(printf 'ADLC-FINDING: Low | adr-drift | a.md\nADLC-FINDING: Low | drift | b.md\n' | bash "$S/adlc-log-findings.sh" 3 review 2>/dev/null | jq -r .class | tr '\n' ' ' | sed 's/ $//')"
+for c in test-gap doc-drift; do grep -q "^| $c |" "$ROOT/skills/retro/SKILL.md" && ok "retro Step 2 has a durable-fix row for $c" || bad "retro Step 2 needs a durable-fix row for $c"; done
 eq "missing-edge-case" "classes: case, spaces and underscores do not make a new class" "$(printf 'ADLC-FINDING: Low | Missing Edge_Case | a.py\n' | bash "$S/adlc-log-findings.sh" 3 review 2>/dev/null | jq -r .class)"
 UKD="$(mktemp -d)"; UK=$(printf 'ADLC-FINDING: Low | weird-thing | a.py\nADLC-FINDING: Low | Weird Thing | b.py\n' | bash "$S/adlc-log-findings.sh" 33 review 2>"$UKD/uk.err")
 eq "weird-thing weird-thing" "classes: a name outside the list is logged as written (normalized), not dropped and not forced to other" "$(printf '%s\n' "$UK" | jq -r .class | tr '\n' ' ' | sed 's/ $//')"

@@ -67,6 +67,8 @@ in this order — a lower layer always beats a higher one:
 | tenant-leak, authz-gap, injection, secret-in-code | a **`adlc:security-gate` case** + a regression test |
 | hallucinated-api | a **CI check** (symbol/import lint) + a `project-conventions` "seams" note |
 | contract-violation / diff-scope breach | tighten the ADR template's declared-scope section |
+| test-gap | write the missing test, or make the vacuous one able to fail (an executable fix, like the first row) |
+| doc-drift | correct the doc, and where a check can compare the doc to the code (a table of names, a list of scripts), add that check |
 | flaky-test | fix/quarantine the test — **not** a context line |
 | recurring, un-checkable gotcha | last resort: one line in `project-conventions` or CLAUDE.md |
 

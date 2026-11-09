@@ -41,14 +41,17 @@ canon() {
   local c
   c="$(printf '%s' "$1" | tr 'A-Z_ ' 'a-z--')"
   case "$c" in
-    tenant-leak|tenant-isolation|cross-tenant|tenant-scope|scope-leak)                         c=tenant-leak ;;
-    authz-gap|authz|authorization|auth-gap|authn-bypass|auth-bypass|permission-gap|idor)          c=authz-gap ;;
+    tenant-leak|tenant-isolation|cross-tenant|tenant-scope|scope-leak|idor)                    c=tenant-leak ;;   # idor: the security gate's tenant probe
+    authz-gap|authz|authorization|auth-gap|authn-bypass|auth-bypass|permission-gap)               c=authz-gap ;;
     injection|sql-injection|sqli|command-injection|xss|prompt-injection|template-injection)      c=injection ;;
     secret-in-code|secret|secrets|hardcoded-secret|leaked-secret|credential-in-code)             c=secret-in-code ;;
     hallucinated-api|nonexistent-api|wrong-api|api-misuse|phantom-api|hallucination)             c=hallucinated-api ;;
     missing-edge-case|edge-case|edge-cases|boundary|unhandled-case|null-handling|error-handling)  c=missing-edge-case ;;
     logic-contradiction|logic-bug|logic-error|logic|wrong-logic|off-by-one|race-condition|correctness) c=logic-contradiction ;;
-    contract-violation|contract-drift|spec-violation|spec-drift|spec-deviation|spec-gap|design-drift|drift|adr-drift|scope-breach|diff-scope|scope-violation) c=contract-violation ;;
+    contract-violation|contract-drift|spec-violation|spec-drift|spec-deviation|spec-gap|scope-breach|diff-scope|scope-violation) c=contract-violation ;;
+    # not mapped on purpose: `drift`, `adr-drift`, `design-drift` — code that breaks a current ADR is
+    # contract-violation, an ADR whose text went stale is doc-drift; the name alone cannot tell, so
+    # it is reported and the reviewer picks.
     test-gap|test-coverage|missing-test|missing-tests|no-test|vacuous-test|weak-test|guard-gap|untested) c=test-gap ;;
     flaky-test|flaky|flakiness|nondeterministic-test)                                             c=flaky-test ;;
     perf-regression|performance|perf|n-plus-one|n+1|slow-query)                                   c=perf-regression ;;
