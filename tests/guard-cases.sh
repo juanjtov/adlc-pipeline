@@ -46,6 +46,18 @@ g D - feat "gh alias set x --shell 'gh pr merge 5'; gh x"
 g D - feat 'gh alias import aliases.yml'
 g D - feat '"$GH" alias set m "pr merge"'
 g A - feat 'gh alias list'
+g D - feat 'gh pr --subject view merge 5'                                     # gh takes the word after a flag as its value: this is `gh pr merge 5`
+g D - feat 'gh pr -s view merge 5'
+g D - feat 'gh --foo x pr merge 5'                                            # …at either level
+g D - feat 'gh pr --delete-branch --subject x merge 5'
+g D - feat 'bash -c "gh pr --body view merge 5"'
+g D - feat '"$GH" pr --subject view merge 5'
+g D - feat 'echo "gh pr --subject x merge 5" | bash'
+g D - feat 'gh alias --shell x set m "pr merge"'
+g D - feat 'gh pr --subject "$S" view 5'                                      # after such a flag a computed word may be the subcommand
+g A - feat 'gh pr --json title view 5'                                        # a flag first, and no word that could make a blocked call
+g A - feat 'gh -R o/r pr view 5 && gh pr view 5 --json title && gh pr list --state open && gh issue view 7 --comments'
+g A - feat 'gh pr --help && gh --help && gh pr view --help'
 g D - feat $'bash <<EOF\ngh pr merge 5\nEOF'
 g D - feat 'echo "gh pr merge 5" | bash'
 g A - feat 'gh pr view 5'
@@ -100,6 +112,7 @@ g D - feat 'git checkout main && git merge feat/1-x && git push origin HEAD'
 g D - feat 'git checkout -b hotfix origin/main && git push'                 # tracks origin/main
 g D - feat 'git checkout - && git push'                                      # previous branch: unknown
 g D - feat 'git checkout "$B" && git push origin HEAD'
+g D - onmain 'gh pr --foo checkout 5 && git push'                            # checked out, or `--foo checkout` was a flag and its value: unknown
 g A - onmain 'git checkout -b feat/5-login && git add -A && git commit -m "feat: login" && git push -u origin HEAD'
 g A - onmain 'git switch -c feat/6 && git push -u origin feat/6'
 g A - onmain 'git checkout -b feat/7 && git push'
@@ -254,6 +267,12 @@ g A - feat 'gh api -X GET repos/o/r/issues -f state=open'
 g D - feat 'gh api -X PUT repos/o/r/pulls/5/merge'
 g D - feat 'gh api repos/o/r/pulls/5/merge --method PUT'
 g D - feat 'gh api -XPUT repos/o/r/pulls/5/merge'
+g D - feat 'gh -X DELETE api repos/o/r/git/refs/heads/x'                      # a flag written before `api` is api's flag too
+g D - feat 'gh --method=DELETE api repos/o/r/issues/1'
+g D - feat 'gh -XDELETE api repos/o/r/issues/1'
+g D - feat 'gh -f title=x api repos/o/r/issues'
+g D - feat 'gh --input body.json api repos/o/r/issues'
+g A - feat 'gh --jq .name api repos/o/r && gh --hostname github.example.com api repos/o/r/issues'
 g D - feat 'gh api repos/o/r/merges -f base=main -f head=feat'
 g D - feat 'gh api repos/o/r/git/refs/heads/main -X PATCH -f sha=abc'
 g D - feat 'gh api -X "$M" repos/o/r/pulls/5/merge'
@@ -445,6 +464,7 @@ g A - feat '"$PYTHON" -m pytest -q && git push -u origin HEAD'               # a
 g D - feat '$GH api -X DELETE repos/o/r/git/refs/heads/x'
 g D - feat '"$GH" api --method POST repos/o/r/merges -f base=main -f head=x'
 g D - feat '"$GH" -R o/r pr merge 5'
+g D - feat '"$GH" -X DELETE api repos/o/r/git/refs/heads/x'
 g D - feat 'C=${X:-curl}; $C -X DELETE https://api.github.com/repos/o/r/git/refs/heads/x'
 g D - feat '"$GIT" -c core.x=y push origin main'
 g D - feat '$HOME/bin/gh api -X DELETE repos/o/r/git/refs/heads/x'            # the last part is literal: it IS gh
@@ -472,6 +492,9 @@ g D $AN feat 'gh repo delete o/r --yes'
 g D $AN feat 'sudo -u bob git commit -am x'
 g D $AN feat 'gh pr create --title x --body y'
 g D $AN feat 'gh api repos/o/r/issues'
+g D $AN feat 'gh issue --title view close 7'                                  # gh reads this as `gh issue close 7`: a flag before the subcommand can't be checked
+g D $AN feat 'gh --foo label issue delete 7 --yes'
+g A $AN feat 'gh -R o/r issue view 5 && gh issue view 5 --repo o/r'
 g D $AN feat 'git commit -am x'
 g D $AN feat 'git push -u origin feat/1-x'
 g D $AN feat 'git branch newbranch'
@@ -504,6 +527,7 @@ g A $RV feat "gh pr comment 5 --body 'finding: \`git push --force\` in deploy.sh
 g A $RV feat 'gh issue view 12'
 g A $RV feat 'git diff origin/main...HEAD -- src/ | head -400'
 g D $RV feat 'gh pr review 5 --approve'
+g D $RV feat 'gh pr --body view review 5 --approve'                           # `gh pr review`, behind a flag that takes `view` as its value
 g D $RV feat 'gh pr edit 5 --add-label adlc:changes-requested'
 g D $RV feat 'gh issue edit 12 --add-label stage:qa'
 g D $RV feat '.adlc/scripts/adlc-relabel.sh 12 stage:qa'                      # …so the reviewer may not run it either
@@ -526,6 +550,7 @@ g A $AR feat '.adlc/scripts/adlc-adr-check.sh'                              # a 
 g A adlc-architect feat 'bash .adlc/scripts/adlc-adr-check.sh docs/adr'
 g A $AR feat 'gh pr review 5 --request-changes --body x'
 g D $AR feat 'gh pr create --title x'
+g D $AR feat 'gh pr --title view create'
 g D $AR feat 'git commit -m adr'
 
 # ── role names: a vendored copy matches; another plugin's agent does not ──────────────────

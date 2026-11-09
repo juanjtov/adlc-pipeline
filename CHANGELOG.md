@@ -391,6 +391,25 @@ the installed plugin, so those parts need no refresh.
   row with its comment's time, and lists 500 PRs instead of 50: on a repo past 50 PRs the older
   ones fell off the end without a word (349 markers, 220 read, on the same host).
 
+- **Guard: a flag before the gh subcommand no longer hides it.** `gh` accepts flags before
+  the subcommand, and while it looks for the command it takes the word after `--flag` or `-f`
+  as that flag's value. The guard read that word as the subcommand: `gh pr --subject view
+  merge 5` runs `gh pr merge 5` and was judged as `gh pr view`, so it passed, for every agent,
+  the released 0.3.1 included. The same spelling hid a subcommand outside a narrow role's list
+  (`gh pr --body view review 5 --approve` as the reviewer), and a flag written before `api`
+  was not read at all (`gh -X DELETE api …`, `gh --method=DELETE api …`). Now, once a
+  `--flag` or `-f` sits before the subcommand, any bare word of the call may be the group or
+  the subcommand. The call is blocked when `pr` and `merge`, or `alias` and `set`/`import`,
+  are both among those words, when one of them is computed, or when it may be `gh api` and a
+  flag anywhere in it makes a write; a later bare `git push` is not trusted after a
+  `gh pr <flag> checkout`. For the Analyst, the Architect and the reviewer such a call is
+  blocked outright, with a note to put the options after the subcommand. `-R`, `--repo` and
+  `--hostname` with their value are read as before (`gh -R o/r pr view 5` is unchanged), and
+  so is a flag with `=` or a cluster such as `-XPUT`, neither of which takes the next word.
+  The plain-text scan the guard falls back on for text it cannot read (`echo "…" | bash`) now
+  matches `gh … pr … merge` with words in between. Still not seen: a gh alias or extension
+  set up earlier.
+
 - **One Mission Control shows every adopted repo on the machine, and says so** (issue 52).
   It always could: the hook sends each event with its working directory, the server maps that
   to a repo, and the page's repo menu switches between them. But a repo reached the menu only
