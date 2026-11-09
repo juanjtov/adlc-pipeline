@@ -77,7 +77,7 @@ templates/                     # what the wizard fills into the host repo
             adlc-cache.sh · adlc-triage.sh · adlc-pr-stage.sh · adlc-branch-issue.sh   # deterministic logic
             adlc-run-log.sh · adlc-cycle.sh                                            # the cycle-retro's two ledgers
             adlc-relabel.sh                                                            # one state per issue: move to a stage:/gate: label in one call
-            adlc-adr-check.sh                                                          # an ADR's Scope = the scope file; each Guarantees row names a test that exists
+            adlc-adr-check.sh                                                          # an ADR's Scope = its issue's scope file, once that exists; each Guarantees row names a test that exists
             adlc-ci-budget.sh · adlc-local-ci.sh                                       # Actions minutes: will the CI battery fit · the battery run locally, one marker comment on the PR
             adlc-refresh.sh                                                            # the refresh: per-file diff, skips host-owned copies; runs from the plugin, not copied
             adlc-chains.sh                                                             # follow-up chains: which issue follows which, how deep, decided or not
@@ -120,10 +120,12 @@ passes. The markers are the record of the decision, not an authorization check (
 lanes every agent posts under the same account): the scope file stays what the check enforces.
 That check and the fast-lane cap run on `pull_request_target` — the workflow and
 scripts come from the default branch and the PR is only read as data — so a PR cannot edit the
-guards that judge it. `adlc-adr-check.sh` holds an ADR to its own words: its `## Scope` must
-match that scope file (the `docs/` lines the design lane puts there aside), and each row of its `## Guarantees` table must name a test that
-exists (`path::node`) or say `unenforced — <reason>`; the Builder, the Architect's local review
-and QA run it, no workflow does, and ADRs with neither section (older ones) are skipped.
+guards that judge it. `adlc-adr-check.sh` holds an ADR to its own words: where the ADR names
+its issue and that issue's scope file exists, its `## Scope` must match the file (the `docs/`
+lines the design lane puts there aside), and each row of its `## Guarantees` table must name a
+test that exists (`path::node`) or say `unenforced — <reason>`; the Builder, the Architect's
+local review and QA run it, no workflow does, and an ADR with no sign of either section or of
+the header's issue field (an older one) is skipped.
 `adlc-doctor.sh` validates a host repo's setup (deny rules, unfilled
 placeholders, lanes that can't run their agent, skills, the five agent copies and their model
 lines, labels, whether GitHub is still running the workflows at all, and whether the default
@@ -197,7 +199,9 @@ rises), so the metric is the point. The cache also expires: a run that blocks on
 for longer than the cache lifetime pays full input price on its next turn, so the wizard merges
 `settings.cache.json` (`promptCacheTtl` and `subagentPromptCacheTtl`, both `"1h"`) into
 `.claude/settings.json`. A 1-hour cache write is billed at a higher rate than a 5-minute one, so
-this pays off only where runs do wait that long; removing the two keys undoes it.
+this pays off only where runs do wait that long; removing the two keys undoes it. Not checked:
+that every Claude Code version reads the two keys from a project's settings file, and what the
+Actions lanes do with them.
 
 ### Two layers, on purpose
 
@@ -231,9 +235,9 @@ because `/adlc-init` copies workflows and scripts into your repo as frozen files
 `.adlc/VERSION` records which release they came from, and `.adlc/scripts/adlc-doctor.sh` tells
 you when it differs from the installed plugin. The refresh copies through the plugin's
 `adlc-refresh.sh`, which prints a diff of each copy that differs and writes only when told to.
-To keep your own version of a copy, put `adlc: host-owned` in a comment within its first five
-lines (`# adlc: host-owned`): the script then skips that file and lists it, and bringing it up
-to date with the plugin is yours to do.
+To keep your own version of a script, a workflow, an agent copy or the hook, put
+`adlc: host-owned` in a comment within its first five lines (`# adlc: host-owned`): the script
+then skips that file and lists it, and bringing it up to date with the plugin is yours to do.
 
 To work on the plugin itself, load a checkout instead — `claude --plugin-dir
 /path/to/adlc-pipeline` — and `/reload-plugins` picks up edits. That loads your working
@@ -365,9 +369,10 @@ Everything that makes a change safe is kept:
   approval — autopilot auto-approves Gate 1 into the *full* pipeline only.
 - **Author/verifier separation** — an independent adversarial + security review still runs.
 - **A deterministic cap** — `adlc-triage.sh` re-checks the *real* diff (≤ 5 files / ≤ 40 lines by
-  default, nothing touching migrations, auth, infra, CI, deps (`.gitmodules` included) or secrets,
-  and no change to a submodule's pointer, which is one line in a diff however much code it
-  brings in). Over-cap or sensitive ⇒ the change is **bounced back to the full pipeline**
+  default, nothing touching migrations, auth, infra, CI (the local battery `.adlc/local-ci.txt`
+  included), deps (`.gitmodules` included) or secrets, and no change to a submodule's pointer,
+  which is one line in a diff however much code it brings in). Over-cap or sensitive ⇒ the
+  change is **bounced back to the full pipeline**
   (`stage:design`). So a mis-triage — or a crafted issue arguing it's "trivial" — can't smuggle a
   big change through.
   The same cap also runs from the default branch (in `adlc-diff-scope.yml`), so a PR that edits the

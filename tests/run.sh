@@ -137,6 +137,9 @@ printf 'src/a.py\nsrc/b.py\nREADME.md\n'      | bash "$S/adlc-triage.sh" >/dev/n
 printf 'src/a.py\ndb/migrations/003.sql\n'    | bash "$S/adlc-triage.sh" >/dev/null 2>&1; check 1 "migrations force full" $?
 printf '.github/workflows/x.yml\n'            | bash "$S/adlc-triage.sh" >/dev/null 2>&1; check 1 "CI config forces full" $?
 printf '.adlc/scripts/adlc-triage.sh\n'       | bash "$S/adlc-triage.sh" >/dev/null 2>&1; check 1 "the guard scripts themselves force full" $?
+printf '.adlc/local-ci.txt\n'                 | bash "$S/adlc-triage.sh" >/dev/null 2>&1; check 1 "the local CI battery file forces full (a fast-lane PR may not choose what adlc-local-ci.sh runs on it)" $?
+printf '1\t3\t.adlc/local-ci.txt\n'           | bash "$S/adlc-triage.sh" >/dev/null 2>&1; check 1 "…in numstat form too" $?
+printf 'docs/local-ci.txt\n'                  | bash "$S/adlc-triage.sh" >/dev/null 2>&1; check 0 "a file merely named like it elsewhere is not" $?
 printf 'package.json\n'                       | bash "$S/adlc-triage.sh" >/dev/null 2>&1; check 1 "dependency manifest forces full" $?
 printf '.gitmodules\n'                        | bash "$S/adlc-triage.sh" >/dev/null 2>&1; check 1 ".gitmodules is a dependency manifest: forces full (it names where submodules come from)" $?
 printf '2\t1\t.gitmodules\n'                  | bash "$S/adlc-triage.sh" >/dev/null 2>&1; check 1 "…in numstat form too (a url or branch change leaves the pointer alone)" $?
@@ -1699,11 +1702,14 @@ ADLC-ADV: PASS' 'ADLC-ARCH: PASS'
   OUT=$( cd "$MX/repo" && env PATH="$MX/bin:$PATH" MX_PRS="$MX/prs.json" MX_RUNS="$MX/only-infra.json" MX_JOBS="$MX/jobs" MX_CALLS="$MX/calls" bash "$S/adlc-metrics.sh" 30 2>&1 )
   eq "iterations_to_green: every CI run of the window's merged PRs failed in a setup step (1 runs); no test signal" "only setup failures: says there is no test signal instead of dividing by zero" "$(printf '%s\n' "$OUT" | grep '^iterations_to_green:')"
   # Issue 34: a host whose Actions is blocked, running the battery with adlc-local-ci.sh. PR 20: two runs GitHub
-  # failed in 3 s with no step (no job at all; a job with no step), and two local CI comments, FAIL then PASS.
-  # PR 21: no Actions run, two PASS markers wearing markup. PR 22: a run that failed in 3 s but RAN its steps (a
+  # failed in 3 s with no step (no job at all; a job with no step), and two local CI comments, FAIL then PASS
+  # (the second ends in blank lines). PR 21: no Actions run, two PASS markers wearing markup, the second on a
+  # last line that holds a FAIL marker before it (the last one is read). PR 22: a run that failed in 3 s but RAN its steps (a
   # real failure), a green one, and a comment that quotes a FAIL marker and ends in PASS (one PASS). PR 23: a fast
   # failure gh cannot describe and a no-step failure that took five minutes both stay failures; its four
-  # near-markers (PASSED, a short sha, another word ending in ADLC-CI, no "head") are none. PR 24: one blocked
+  # near-markers (PASSED, a short sha, another word ending in ADLC-CI, no "head") are none, and neither are two
+  # comments that QUOTE a real marker (QA's verdict does): one in the prose of its only line, one on a line that
+  # is not the comment's last. PR 24: one blocked
   # run (exactly 60 s; its only steps skipped or never concluded) and nothing else: no test signal from it.
   H1=1111111111111111111111111111111111111111; H2=2222222222222222222222222222222222222222
   {
@@ -1713,11 +1719,16 @@ ADLC-ADV: PASS' 'ADLC-ARCH: PASS'
 |---|---|---|---|
 | tests | FAIL | 1 | 12 |
 
-ADLC-CI: FAIL head $H1" "ADLC-CI: PASS head $H2"
-    mxpr 21 "$now" "**ADLC-CI: PASS** head \`$H1\`" "\`ADLC-CI: PASS head $H2\`"
+ADLC-CI: FAIL head $H1" "ADLC-CI: PASS head $H2
+
+  "
+    mxpr 21 "$now" "**ADLC-CI: PASS** head \`$H1\`" "\`ADLC-CI: FAIL head $H1\` \`ADLC-CI: PASS head $H2\`"
     mxpr 22 "$now" "The marker reads \`ADLC-CI: FAIL head $H1\`; this run:
 ADLC-CI: PASS head $H2"
-    mxpr 23 "$now" "ADLC-CI: PASSED head $H1" 'ADLC-CI: PASS head abc1234' "MY-ADLC-CI: PASS head $H1" "ADLC-CI: PASS $H1"
+    mxpr 23 "$now" "ADLC-CI: PASSED head $H1" 'ADLC-CI: PASS head abc1234' "MY-ADLC-CI: PASS head $H1" "ADLC-CI: PASS $H1" \
+      "QA: the local run says ADLC-CI: PASS head $H1" "ADLC-CI: FAIL head $H1
+
+That is the local run; the battery is red, so the verdict is CHANGES."
     mxpr 24 "$now"
   } | jq -s . > "$MX/prs2.json"
   jq -n --arg at "$now" 'def r(id; br; c; s): {databaseId: id, workflowName: "ADLC CI", headBranch: br, status: "completed", conclusion: c, createdAt: $at, updatedAt: ($at | fromdate + s | todate)};
@@ -1732,7 +1743,7 @@ ADLC-CI: PASS head $H2"
   OUT=$( cd "$MX/repo" && env PATH="$MX/bin:$PATH" MX_PRS="$MX/prs2.json" MX_RUNS="$MX/runs2.json" MX_JOBS="$MX/jobs2" MX_CALLS="$MX/calls" bash "$S/adlc-metrics.sh" 30 2>&1 ); check 0 "blocked runs + local CI markers: the script runs to the end" $?
   eq "iterations_to_green: avg 2.5 CI runs per merged PR; failed_first: 3 / 4" "a run GitHub failed within 60 s with no step is not a red test run, and a local CI marker comment is a CI run (FAIL = red): a PR with only blocked runs and markers is counted from its markers, one with markers and no Actions run too, one with only blocked runs not at all; a fast failure whose steps ran, one gh cannot describe and a slow no-step failure stay red" "$(printf '%s\n' "$OUT" | grep '^iterations_to_green:')"
   eq "blocked: 3 / 8 CI runs were failed by GitHub within 60 s with no step run (what an exhausted Actions budget looks like); not counted above" "blocked: its own line, against every Actions CI run of the merged PRs (60 s is still within; a skipped step and one with no conclusion did not run)" "$(printf '%s\n' "$OUT" | grep '^blocked:')"
-  eq "local_ci: 5 ADLC-CI marker comments on 3 merged PRs (1 FAIL), counted above as CI runs" "local_ci: one per comment, by its last marker (a quoted FAIL before a PASS is a PASS); bold and backtick markup read; PASSED, a short sha, a longer word ending in ADLC-CI and a marker with no 'head' are not markers" "$(printf '%s\n' "$OUT" | grep '^local_ci:')"
+  eq "local_ci: 5 ADLC-CI marker comments on 3 merged PRs (1 FAIL), counted above as CI runs" "local_ci: one per comment whose last non-blank line starts with the marker (trailing blank lines allowed; the last marker on that line is read; a FAIL quoted on an earlier line does not count); bold and backtick markup read; PASSED, a short sha, a longer word ending in ADLC-CI and a marker with no 'head' are not markers; a marker quoted in prose, or on a line that is not the last, is not a run" "$(printf '%s\n' "$OUT" | grep '^local_ci:')"
   eq "infra_failed: 0 / 8 CI runs died in a setup step (ADLC_SETUP_STEPS), before any test ran; not counted above" "…and the infra_failed line keeps its shape beside them" "$(printf '%s\n' "$OUT" | grep '^infra_failed:')"
   eq 6 "…from the run view calls the script already made: one per red run on a merged PR's branch, none added" "$(grep -c '^run view$' "$MX/calls")"
   eq 1 "…and still one pr list call: the markers come with the comments it already carries" "$(grep -c '^pr list$' "$MX/calls")"
@@ -2298,20 +2309,23 @@ SH
   # Issue 34: a blocked account. Runs 7 and 8 failed 3 s after creation with no step (no job; a job with no step):
   # blocked, the tripwire's included. Run 9 failed in 20 s but ran its steps: a real diff-scope failure. Run 10 sat
   # queued 200 s and failed 3 s after it STARTED: more than 60 s from creation, never looked up. Run 11 failed fast
-  # and gh cannot describe it: it stays a failure, and stderr says one was not read.
+  # and gh cannot describe it: it stays a failure, and stderr says one was not read. Runs 12 and 13, neither with a
+  # step: 60 s from creation is still blocked, 61 s is a failure and is never looked up.
   jq -n --arg b "$T2" 'def r(id; wf; c; q; s): {databaseId: id, workflowName: wf, headBranch: "feat/42-thing", status: "completed", conclusion: c, createdAt: ($b | fromdate - q | todate), startedAt: $b, updatedAt: ($b | fromdate + s | todate)};
     [r(7; "ADLC CI"; "failure"; 0; 3), r(8; "ADLC main tripwire"; "failure"; 0; 3), r(9; "ADLC diff-scope"; "failure"; 0; 20),
-     r(10; "ADLC CI"; "failure"; 200; 3), r(11; "ADLC CI"; "failure"; 0; 7)]' > "$CY/fx/runs-blocked.json"
+     r(10; "ADLC CI"; "failure"; 200; 3), r(11; "ADLC CI"; "failure"; 0; 7),
+     r(12; "ADLC fast lane"; "failure"; 0; 60), r(13; "ADLC fast lane"; "failure"; 0; 61)]' > "$CY/fx/runs-blocked.json"
+  echo '{"jobs": []}' > "$CY/fx/jobs-12.json"; echo '{"jobs": []}' > "$CY/fx/jobs-13.json"
   echo '{"jobs": []}' > "$CY/fx/jobs-7.json"; echo '{"jobs": [{"name": "tripwire", "conclusion": "failure", "steps": []}]}' > "$CY/fx/jobs-8.json"
   echo '{"jobs": [{"name": "scope", "conclusion": "failure", "steps": [{"name": "Check scope", "conclusion": "failure"}]}]}' > "$CY/fx/jobs-9.json"
   : > "$CY/calls"
   BL=$( cd "$CY/repo" && env PATH="$CY/bin:$PATH" CY_FX="$CY/fx" CY_RUNS="$CY/fx/runs-blocked.json" CY_CALLS="$CY/calls" ADLC_REPO=acme/shop bash "$S/adlc-run-log.sh" actions 7 2>"$CY/err" ); check 0 "actions, blocked account: runs to the end" $?
-  eq "7:blocked 8:blocked 9:failure 10:failure 11:failure" "actions: a run that failed within 60 s of its creation with no step run is blocked; one whose steps ran, one that was slow from creation, and one gh cannot describe stay failures" "$(printf '%s\n' "$BL" | jq -rs 'map((.run_id | sub("actions:"; "")) + ":" + .outcome) | join(" ")')"
-  eq "failure failure" "actions: a blocked row keeps GitHub's own conclusion beside the outcome" "$(printf '%s\n' "$BL" | jq -rs '[.[] | select(.outcome == "blocked") | .conclusion] | join(" ")')"
-  eq 4 "actions: one run view call per run that failed within 60 s of its creation, none for the queued one" "$(grep -c '^run view$' "$CY/calls")"
+  eq "7:blocked 8:blocked 9:failure 10:failure 11:failure 12:blocked 13:failure" "actions: a run that failed within 60 s of its creation with no step run is blocked (60 s included, 61 s not); one whose steps ran, one that was slow from creation, and one gh cannot describe stay failures" "$(printf '%s\n' "$BL" | jq -rs 'map((.run_id | sub("actions:"; "")) + ":" + .outcome) | join(" ")')"
+  eq "failure failure failure" "actions: a blocked row keeps GitHub's own conclusion beside the outcome" "$(printf '%s\n' "$BL" | jq -rs '[.[] | select(.outcome == "blocked") | .conclusion] | join(" ")')"
+  eq 5 "actions: one run view call per run that failed within 60 s of its creation, none for the queued one or the 61 s one" "$(grep -c '^run view$' "$CY/calls")"
   eq 1 "actions: the run it could not read is counted on stderr, not guessed" "$(grep -c '1 run(s) that failed within 60 s could not be read' "$CY/err")"
-  ( cd "$CY/repo" && env PATH="$CY/bin:$PATH" CY_FX="$CY/fx" CY_FAIL_RUNS=1 CY_CALLS="$CY/calls" ADLC_REPO=acme/shop bash "$S/adlc-run-log.sh" actions 7 >"$CY/out" 2>"$CY/err" ); check 1 "actions: a failed run listing is an error, not an empty ledger" $?
-  eq "0 1" "…no row on stdout, and stderr says what failed" "$(wc -l < "$CY/out" | tr -d ' ') $(grep -c 'could not list the workflow runs' "$CY/err")"
+  ( cd "$CY/repo" && env PATH="$CY/bin:$PATH" CY_FX="$CY/fx" CY_FAIL_RUNS=1 CY_CALLS="$CY/calls" ADLC_REPO=acme/shop bash "$S/adlc-run-log.sh" actions 7 >"$CY/out" 2>"$CY/err" ); check 1 "actions: a failed run listing exits 1" $?
+  eq "0 1" "…with no row on stdout, and a line on stderr that says what failed" "$(wc -l < "$CY/out" | tr -d ' ') $(grep -c 'could not list the workflow runs' "$CY/err")"
   printf '%s\n' "$BL" >> "$CY/repo/.adlc/metrics/runs.jsonl"
   # --- cycle: issue 7 goes intake (10 min) → gate:stories (5 min) → design → build; PR 9 references it and drew one changes-requested
   tl() { jq -cn --arg t "$1" --arg e "$2" --arg l "$3" '{event: $e, created_at: $t, label: (if $l == "" then null else {name: $l} end), actor: {login: "bot"}}'; }
@@ -2374,6 +2388,7 @@ SH
   eq "builder          1               1      0.2       100%        60       100%  82%" "report: the per-stage spend table (agent runs only; cached share of the prompt)" "$(printf '%s\n' "$OUT" | grep '^builder ')"
   eq "adlc-ci: runs=5 avg_sec=20 failed=3 blocked=1" "report: guard lanes by name; a blocked run is in runs= and blocked=, not in failed= and not in avg_sec ((30+40+3+7)/4)" "$(printf '%s\n' "$OUT" | grep '^adlc-ci:')"
   eq "adlc-main-tripwire: runs=1 avg_sec=- failed=0 blocked=1" "report: a lane whose every run was blocked has no avg and no failure" "$(printf '%s\n' "$OUT" | grep '^adlc-main-tripwire:')"
+  eq "fast: runs=2 avg_sec=61 failed=1 blocked=1" "report: 60 s with no step is blocked, 61 s is the lane's failure" "$(printf '%s\n' "$OUT" | grep '^fast:')"
   eq "adlc-diff-scope: runs=1 avg_sec=20 failed=1 blocked=0" "report: a fast failure that ran its steps is the lane's failure" "$(printf '%s\n' "$OUT" | grep '^adlc-diff-scope:')"
   # a ledger written before the outcome field existed: the conclusion is read, nothing is called blocked
   jq -c 'select(.source == "actions") | del(.outcome)' "$CY/repo/.adlc/metrics/runs.jsonl" > "$CY/old.jsonl"; cp "$CY/repo/.adlc/metrics/runs.jsonl" "$CY/new.jsonl"; cp "$CY/old.jsonl" "$CY/repo/.adlc/metrics/runs.jsonl"
@@ -2396,8 +2411,9 @@ echo "adr-check (an ADR's Scope is the scope file; each Guarantees row names a t
 AC="$(mktemp -d)"; mkdir -p "$AC/docs/adr" "$AC/tests" "$AC/.adlc/scope" "$AC/bare"
 printf 'def test_expired_token_rejected():\n    pass\nclass TestLogin:\n    def test_ok(self): pass\n' > "$AC/tests/test_login.py"
 adrc() { ( cd "$AC" && bash "$S/adlc-adr-check.sh" "$@" ) >"$AC/out" 2>"$AC/err"; }
-adr() { # <file> <issue|''> <Scope block lines (%b) | - for no section | nofence> <Guarantees rows (%b) | - for no section>
-  { printf '# ADR: x\n\n**Status:** Proposed  ·  **Author:** Architect'; [ -z "$2" ] || printf '  ·  **Issue:** #%s' "$2"
+adr() { # <file> <issue number | header text (%s) | ''> <Scope block lines (%b) | - for no section | nofence> <Guarantees rows (%b) | - for no section>
+  { printf '# ADR: x\n\n**Status:** Proposed  ·  **Author:** Architect'
+    case "$2" in '') ;; *[!0-9]*) printf '  ·  %s' "$2" ;; *) printf '  ·  **Issue:** #%s' "$2" ;; esac
     printf '\n\n## Context\n\nx\n\n'
     case "$3" in -) ;; nofence) printf '## Scope\n\n- src/login/\n\n' ;; *) printf '## Scope\n\nprose\n\n```\n%b```\n\n' "$3" ;; esac
     [ "$4" = - ] || printf '## Guarantees\n\n| Claim | Pinned by |\n|---|---|\n%b\n' "$4"
@@ -2412,19 +2428,24 @@ adr 0007-login.md 12 'src/login/\n# a comment\n\ntests/\n' "$GOOD"
 printf 'docs/adr/0007-login.md\ndocs/guide.md\nsrc/login/\ntests/\n' > "$AC/.adlc/scope/12.txt"
 adrc; check 0 "a resolvable ADR passes (path::node, Class::method, a [param] id, a | in the claim, unenforced with a reason)" $?
 eq 0 "…with nothing on stderr" "$(errs)"
-eq 1 "…and says how many it checked" "$(grep -c 'OK — 1 ADR(s) checked in docs/adr' "$AC/out")"
+eq "adr-check: OK — checked in docs/adr: 0007-login.md" "…and its last line names the ADR it checked (a run on another branch's checkout cannot read as this ADR passing)" "$(tail -1 "$AC/out")"
 adrc docs/adr/; check 0 "the directory can be named, with a trailing slash" $?
 # older ADRs: neither section → skipped and listed; template.md is never an ADR (its placeholder rows would fail)
 printf '# ADR-0001: adopt\n\n## Context\n\nold\n\n## Decision\n\nIn a block, not a section:\n\n```\n## Scope\n## Guarantees\n| a | b |\n```\n' > "$AC/docs/adr/0001-adopt.md"
 cp "$ROOT/templates/adr-template.md" "$AC/docs/adr/template.md"
 adrc; check 0 "an ADR with neither section (written before the template had them) does not fail; nor does template.md" $?
 eq 1 "…it is listed as skipped (a heading inside a fenced block is not a section)" "$(grep -c 'skipped.*: 0001-adopt.md$' "$AC/out")"
+eq "adr-check: OK — checked in docs/adr: 0007-login.md" "…and is not on the checked list" "$(tail -1 "$AC/out")"
+mv "$AC/docs/adr/0007-login.md" "$AC/hold.md"
+adrc; check 0 "only skipped ADRs in the checkout: exit 0" $?
+eq "adr-check: no ADR checked in docs/adr — nothing was verified" "…and the last line says nothing was verified, not OK" "$(tail -1 "$AC/out")"
+mv "$AC/hold.md" "$AC/docs/adr/0007-login.md"
 eq 0 "…and template.md is not mentioned" "$(cat "$AC/out" "$AC/err" | grep -c 'template.md')"
 # the template is in the format the script reads: as an ADR it IS checked, and only its unfilled rows fail
 cp "$ROOT/templates/adr-template.md" "$AC/docs/adr/0002-from-template.md"
 adrc; check 1 "the template, copied unfilled as an ADR, fails" $?
-eq "0002-from-template.md: Guarantees row '<what must stay true>': tests/<file> does not exist|0002-from-template.md: Guarantees row '<a claim no test holds>': unenforced, with no reason|" \
-   "…on its two placeholder rows and nothing else (its sections, block and table parse)" "$(sed 's|^docs/adr/||' "$AC/err" | tr '\n' '|')"
+eq "0002-from-template.md: the header names no issue — write **Issue:** #N above the first '## ' heading, or **Issue:** none|0002-from-template.md: Guarantees row '<what must stay true>': tests/<file> does not exist|0002-from-template.md: Guarantees row '<a claim no test holds>': unenforced, with no reason|" \
+   "…on its unfilled #N and its two placeholder rows, and nothing else (its sections, block and table parse)" "$(sed 's|^docs/adr/||' "$AC/err" | tr '\n' '|')"
 grep -q '\*\*Issue:\*\* #N' "$ROOT/templates/adr-template.md" && ok "the template's header names the issue" || bad "adr-template.md: the header must carry **Issue:** #N"
 rm "$AC/docs/adr/0002-from-template.md"
 # each failure kind, one at a time (the passing ADR above is each one's control)
@@ -2461,9 +2482,9 @@ eq 1 "…with the count on stdout" "$(grep -c '^adr-check: 5 problem(s)' "$AC/ou
 adr 0007-login.md 12 'src/login/\n' "$GOOD"; adr 0008-login-ui.md 12 'tests/\n' "$GOOD"; printf 'src/login/\ntests/\n' > "$AC/.adlc/scope/12.txt"
 adrc; check 0 "two ADRs of one issue: the scope file is compared with the union of their Scopes" $?
 rm "$AC/docs/adr/0008-login-ui.md"
-adr 0007-login.md '' 'src/anything/\n' "$GOOD"
-adrc; check 0 "an ADR that names no issue: Scope is not compared" $?
-eq 1 "…and stdout says so" "$(grep -c '0007-login.md names no issue' "$AC/out")"
+adr 0007-login.md '**Issue:** none' 'src/anything/\n' "$GOOD"
+adrc; check 0 "an ADR tied to no issue says so (**Issue:** none): Scope is not compared" $?
+eq 1 "…and stdout says so" "$(grep -c '0007-login.md is tied to no issue' "$AC/out")"
 adr 0007-login.md 99 'src/anything/\n' "$GOOD"
 adrc; check 0 "no scope file yet (design time): Scope is not compared" $?
 eq 1 "…and stdout says so" "$(grep -c 'no .adlc/scope/99.txt yet' "$AC/out")"
@@ -2472,6 +2493,52 @@ adrc; check 0 "an empty Scope block against a scope file holding only the design
 adr 0007-login.md 12 'src/login/\ntests/\n' "$GOOD"; printf 'docs/adr/0007-login.md\nsrc/login/\ntests/\n' > "$AC/.adlc/scope/12.txt"
 sed 's/$/\r/' "$AC/docs/adr/0007-login.md" > "$AC/crlf" && mv "$AC/crlf" "$AC/docs/adr/0007-login.md"
 adrc; check 0 "a CRLF ADR reads the same" $?
+eq "adr-check: OK — checked in docs/adr: 0007-login.md" "…it is checked, not skipped" "$(tail -1 "$AC/out")"
+# Review fixes. A scope file whose last line has no newline: diff-scope honours that line, so the comparison must too.
+adr 0007-login.md 12 'src/login/\n' "$GOOD"; printf 'src/login/\nsecrets/' > "$AC/.adlc/scope/12.txt"
+adrfail "a scope file's last line with no newline after it is compared (an extra prefix there fails)" ".adlc/scope/12.txt: 'secrets/' is in no Scope section"
+adr 0007-login.md 12 'src/login/\nsecrets/\n' "$GOOD"
+adrc; check 0 "…and counts as present when the ADR's Scope lists it" $?
+# near-miss spellings are read or fail; none of them switches the check off
+printf 'src/login/\nsecrets/\n' > "$AC/.adlc/scope/12.txt"
+for h in '**Issue**: #12' '**Issue:** [#12](https://example.test/i/12)' '**Issue:** #012'; do
+  adr 0007-login.md "$h" 'src/login/\n' "$GOOD"; adrfail "the issue is read from '$h' (the scope file is compared)" ".adlc/scope/12.txt: 'secrets/' is in no Scope section"
+done
+for h in '' 'Issue: #12' '**Issue:** #N' '**Issue:** TBD'; do
+  adr 0007-login.md "$h" 'src/login/\n' "$GOOD"; adrfail "a header that names no issue ('$h') fails" "0007-login.md: the header names no issue"
+done
+{ printf '# ADR: x\n\n## Context\n\n**Issue:** #12 is where this began.\n\n## Scope\n\n```\nsrc/login/\nsecrets/\n```\n\n'
+  printf '## Guarantees\n\n| Claim | Pinned by |\n|---|---|\n%b' "$GOOD"; } > "$AC/docs/adr/0007-login.md"
+adrfail "an issue named below the first '## ' is not the header's" "0007-login.md: the header names no issue"
+nearmiss() { # <Scope heading> <Guarantees heading> → an ADR with one bogus row under those headings
+  printf '# ADR: x\n\n**Issue:** #12\n\n## Context\n\nx\n\n%s\n\n```\nsrc/login/\nsecrets/\n```\n\n%s\n\n| Claim | Pinned by |\n|---|---|\n| x | prose |\n' "$1" "$2" > "$AC/docs/adr/0007-login.md"
+}
+nearmiss '## Scope (declared)' '## Guarantees we make'
+adrfail "'## Scope (declared)' is not the section, and the ADR is checked, not skipped" "0007-login.md: no '## Scope' section (the heading '## Scope (declared)' is not it)"
+eq 1 "…the same for '## Guarantees we make'" "$(grep -c "no '## Guarantees' section (the heading '## Guarantees we make' is not it)" "$AC/err")"
+nearmiss '### Scope' '#### guarantees:'
+adrfail "a Scope / Guarantees heading at another level is checked and fails" "0007-login.md: no '## Scope' section (the heading '### Scope' is not it)"
+nearmiss '## Scope:' '##  Guarantees'
+adrfail "a trailing colon and extra spaces are let through: the sections are read (the bogus row fails)" "Guarantees row 'x': 'prose' is neither"
+eq 1 "…and nothing else is reported" "$(errs)"
+printf '# ADR: x\n\n**Status:** Proposed  ·  **Issue:** #12\n\n## Context\n\nx\n' > "$AC/docs/adr/0007-login.md"
+adrfail "**Issue in the header alone makes it a checked ADR (both sections are missing)" "0007-login.md: no '## Guarantees' section"
+# fences: an inline span that opens a line is not a fence; a longer fence is not closed by a shorter one; an open one fails
+fenced() { # <lines before the sections (%b)>
+  { printf '# ADR: x\n\n**Issue:** #12\n\n## Context\n\n%b\n' "$1"
+    printf '## Scope\n\n```\nsrc/login/\nsecrets/\n```\n\n## Guarantees\n\n| Claim | Pinned by |\n|---|---|\n| x | prose |\n'; } > "$AC/docs/adr/0007-login.md"
+}
+fenced '```code``` at the start of a line is an inline span.\n'
+adrfail "a line that opens with an inline triple-backtick span does not swallow the rest" "Guarantees row 'x': 'prose' is neither"
+fenced '````\n```\n## Scope\n````\n'
+adrfail "a four-backtick block holding a triple-backtick line closes where it should" "Guarantees row 'x': 'prose' is neither"
+eq 1 "…and nothing else is reported (the heading inside it is text)" "$(errs)"
+fenced '~~~\n```\n~~~\n'
+adrfail "a tilde block is not closed by backticks" "Guarantees row 'x': 'prose' is neither"
+printf '# ADR-0003: old\n\n## Context\n\n```\nnever closed\n\n## Decision\n\nx\n' > "$AC/docs/adr/0003-open.md"
+adrfail "a fenced block that is never closed fails, even in an ADR with no section (it may hide them)" "0003-open.md: the fenced block opened on line 5 is never closed"
+rm "$AC/docs/adr/0003-open.md"
+adr 0007-login.md 12 'src/login/\ntests/\n' "$GOOD"; printf 'docs/adr/0007-login.md\nsrc/login/\ntests/\n' > "$AC/.adlc/scope/12.txt"
 # bad arguments, and a file that cannot be read
 adrc docs/adr extra;          check 2 "two arguments is an error" $?
 adrc --fix;                   check 2 "an option is an error" $?
@@ -2481,6 +2548,9 @@ if [ "$(id -u)" != 0 ]; then
   adrc; check 1 "an ADR that cannot be read is a failure, not a skip" $?
   eq 1 "…named on stderr" "$(grep -c '0007-login.md: could not be read' "$AC/err")"
   chmod 644 "$AC/docs/adr/0007-login.md"
+  chmod 000 "$AC/.adlc/scope/12.txt"
+  adrfail "a scope file that cannot be read is a failure, not 'no scope file yet'" "0007-login.md: .adlc/scope/12.txt could not be read"
+  chmod 644 "$AC/.adlc/scope/12.txt"
 fi
 adrc; check 0 "…and the fixture passes again once readable" $?
 rm -rf "$AC"
@@ -2493,7 +2563,10 @@ grep -q 'not among your granted commands' "$RA" && ok "role-architect says the A
 eq 0 "…and no lane grants it or calls it (the grants are as they were)" "$(cat "$ROOT"/templates/github/adlc-*.yml | grep -c 'adlc-adr-check')"
 grep -q '\.adlc/scripts/adlc-adr-check\.sh' "$ROOT/templates/RUNBOOK.md.tmpl" && ok "RUNBOOK's conformance stage names the script" || bad "RUNBOOK must name adlc-adr-check.sh"
 grep -q '`adlc-adr-check`' "$ROOT/skills/bootstrap/SKILL.md" && ok "bootstrap lists it among the scripts it copies" || bad "bootstrap must list adlc-adr-check"
-grep -q "leave the" "$ROOT/skills/bootstrap/SKILL.md" && grep -q 'template.s `## Scope` and `## Guarantees` out of it' "$ROOT/skills/bootstrap/SKILL.md" && ok "bootstrap seeds the first ADR without the two sections (so it is skipped, not failed)" || bad "bootstrap must leave Scope/Guarantees out of the seeded ADR"
+grep -q 'leave the template.s `\*\*Issue:\*\*`, `## Scope` and `## Guarantees` out of it' "$ROOT/skills/bootstrap/SKILL.md" && ok "bootstrap seeds the first ADR without the issue field and the two sections (so it is skipped, not failed)" || bad "bootstrap must leave **Issue:**, Scope and Guarantees out of the seeded ADR"
+grep -q 'is not among the ADRs its last line names' "$RA" && ok "role-architect: an ADR missing from the checked list means the check did not run" || bad "role-architect must say what a missing ADR on the checked list means"
+grep -q 'cannot switch branches' "$RA" && ok "role-architect says it cannot check the PR branch out itself" || bad "role-architect must say it cannot switch branches"
+grep -q 'gh pr checkout <n>' "$ROOT/templates/RUNBOOK.md.tmpl" && ok "RUNBOOK Stage 4 checks the PR branch out before the Architect is invoked" || bad "RUNBOOK Stage 4 must check out the PR branch first"
 grep -q 'adlc-adr-check\.sh  ' "$ROOT/README.md" && ok "README's layout tree lists the script" || bad "README layout tree must list adlc-adr-check.sh"
 
 echo "security-gate (text classifiers over LLM output):"
@@ -2541,7 +2614,9 @@ bud 23 4.6 20; check 1 "a decimal runs-per-PR is taken (4.6 is the measured figu
 eq "estimate: 2116 CI minutes/month (23 min/run x 4.6 runs/PR x 20 PRs/month)" "…and the product is exact to the minute (2116, not 2117 from a binary tail)" "$(printf '%s\n' "$OUT" | head -1)"
 bud 10 4 50; check 0 "an estimate equal to the included minutes fits" $?
 bud 10 4 50 1999; check 1 "one minute over does not, against an included figure given as the fourth argument" $?
-eq "OVER: 101% of the included minutes (1.0x)" "…and never reads 100%" "$(printf '%s\n' "$OUT" | tail -1)"
+eq "OVER: 101% of the included minutes (1.0x)" "…and reads 101%" "$(printf '%s\n' "$OUT" | tail -1)"
+bud 2000.001 1 1; check 1 "a thousandth of a minute over is over" $?
+eq "OVER: 101% of the included minutes (1.0x)" "…and OVER never reads 100%" "$(printf '%s\n' "$OUT" | tail -1)"
 bud 0.5 3 1 1; check 1 "a fraction of a minute is rounded up in the estimate only (1.5 against 1 is over)" $?
 for a in "" "10" "10 4" "10 4 20 2000 1" "0 4 20" "10 0 20" "10 4 0" "10 4 20 0" "0.0 4 20" "x 4 20" "10 4.6.1 20" "10 4 2.5" "10 4 20 1e3" "-10 4 20" ".5 4 20" "10 4 20 2000.5"; do
   # shellcheck disable=SC2086
@@ -2551,8 +2626,9 @@ eq "" "…and print no verdict" "$OUT"
 grep -q 'adlc-ci-budget.sh <minutes/run> <runs/PR> <PRs/month>' "$ROOT/skills/bootstrap/SKILL.md" && ok "bootstrap runs the sizing helper from the plugin's templates" || bad "bootstrap: must run adlc-ci-budget.sh in the sizing step"
 BS="$(sed -n '/^7a\. \*\*Actions minutes\*\*/,/^7b\. /p' "$ROOT/skills/bootstrap/SKILL.md")"
 [ -n "$BS" ] && ok "bootstrap has the Actions minutes step (7a)" || bad "bootstrap: the Actions minutes step (7a) is missing"
+# (a here-string, not a pipe: under pipefail a `grep -q` that exits on its match can fail the writer)
 for w in 'PRIVATE repo' '4–5' 'PRs per month' '`paths` filters' '`stage:qa`' 'adlc-local-ci.sh' 'the tripwire' 'adlc-doctor.sh'; do
-  printf '%s' "$BS" | grep -qF -- "$w" && ok "bootstrap 7a names: $w" || bad "bootstrap 7a must name: $w"
+  grep -qF -- "$w" <<<"$BS" && ok "bootstrap 7a names: $w" || bad "bootstrap 7a must name: $w"
 done
 eq "paths-heavy-local" "bootstrap 7a proposes in order: paths filters, heavy jobs later, the local recipe" "$(printf '%s' "$BS" | tr '\n' ' ' | sed -nE 's/.*\(1\)[^(]*paths.*\(2\)[^(]*heavy jobs.*\(3\)[^(]*local CI recipe.*/paths-heavy-local/p')"
 grep -q '~2,000 Actions min/month free' "$ROOT/README.md" "$ROOT/skills/bootstrap/SKILL.md" && bad "the bare '~2,000 Actions min/month free' is back" || ok "README and bootstrap no longer quote the free minutes bare"
@@ -2581,15 +2657,15 @@ SH
   git -C "$LC/repo" init -q . && git -C "$LC/repo" config user.email t@example.com && git -C "$LC/repo" config user.name t
   # the battery: a comment, a blank line, a name with a space around its colon, a command that holds colons and
   # must run from the repo root, a failing check in the middle, and a check after it that must still run
-  printf '# the battery\n\ntests: true\n  lint : echo "a: b" >/dev/null && test -f .adlc/local-ci.txt\nimage build: exit 3\nafter: cat; echo ran >> "%s/ran"\n' "$LC" > "$LC/repo/.adlc/local-ci.txt"
+  printf '# the battery\n\ntests: true\n  lint : echo "a: b" >/dev/null && test -f .adlc/local-ci.txt\nimage build: exit 3\nafter: test -z "$(cat)" && echo ran >> "%s/ran"\n' "$LC" > "$LC/repo/.adlc/local-ci.txt"
   mkdir "$LC/repo/src"; echo x > "$LC/repo/src/x"
   git -C "$LC/repo" add -A && git -C "$LC/repo" commit -qm init
   HEAD_SHA="$(git -C "$LC/repo" rev-parse HEAD)"; echo "$HEAD_SHA" > "$LC/fx/head"; : > "$LC/calls"
   lci() { ( cd "$LC/repo/src" && env PATH="$LC/bin:$PATH" LC_FX="$LC/fx" LC_CALLS="$LC/calls" bash "$S/adlc-local-ci.sh" "$@" ) >"$LC/out" 2>"$LC/err"; }   # run from a subdirectory
-  lci 7 --dry-run; check 1 "a battery with a failing check exits 1" $?
+  lci 7 --dry-run <<<"the caller's stdin"; check 1 "a battery with a failing check exits 1" $?
   eq "ADLC-CI: FAIL head $HEAD_SHA" "the LAST line of the comment is the marker, with the full sha" "$(tail -1 "$LC/out")"
-  eq "| tests | pass | 0 |,| lint | pass | 0 |,| image build | FAIL | 3 |,| after | pass | 0 |," "one table row per check: name, result, exit code (seconds follow); a command with colons runs from the repo root; a failure does not stop the checks after it" "$(grep -E '^\| (tests|lint|image build|after) ' "$LC/out" | sed -E 's/ [0-9]+ \|$//' | tr '\n' ',')"
-  eq 1 "…the check after the failure ran, once, and with no stdin to wait on" "$(wc -l < "$LC/ran" | tr -d ' ')"
+  eq "| tests | pass | 0 |,| lint | pass | 0 |,| image build | FAIL | 3 |,| after | pass | 0 |," "one table row per check: name, result, exit code (seconds follow); a command with colons runs from the repo root; a failure does not stop the checks after it; a check that reads stdin gets none of the caller's" "$(grep -E '^\| (tests|lint|image build|after) ' "$LC/out" | sed -E 's/ [0-9]+ \|$//' | tr '\n' ',')"
+  eq 1 "…the check after the failure ran, once" "$(wc -l < "$LC/ran" | tr -d ' ')"
   eq "1 0" "--dry-run reads the PR's head and posts nothing" "$(grep -c '^pr view$' "$LC/calls") $(grep -c '^pr comment$' "$LC/calls")"
   grep -q 'A record, not a gate' "$LC/out" && ok "the comment says it is a record, not a gate" || bad "the comment must say it is a record, not a gate"
   : > "$LC/calls"; lci 7; check 1 "posting: the exit code is still the battery's" $?
@@ -2620,6 +2696,23 @@ SH
   printf 'te|sts: touch "%s/ran"\n' "$LC" > "$LC/bad.txt"; refuse "a name that would break the table" 7 "$LC/bad.txt"
   printf '# nothing yet\n\n' > "$LC/bad.txt"; refuse "a commands file with no check" 7 "$LC/bad.txt"
   ( cd "$LC" && env PATH="$LC/bin:$PATH" LC_FX="$LC/fx" LC_CALLS="$LC/calls" bash "$S/adlc-local-ci.sh" 7 --dry-run "$LC/green.txt" >/dev/null 2>&1 ); check 2 "outside a git checkout: exit 2" $?
+  # a repo that hides untracked files from git status: they count all the same
+  git -C "$LC/repo" config status.showUntrackedFiles no; echo y > "$LC/repo/untracked.txt"
+  refuse "an untracked file in a repo with status.showUntrackedFiles=no" 7; rm "$LC/repo/untracked.txt"; git -C "$LC/repo" config --unset status.showUntrackedFiles
+  # a check that changes the tree: the checks after it ran on something that is not the commit the marker names.
+  # A formatter that fixes a tracked file and a generator that leaves an untracked one, each followed by a check
+  # that is green only BECAUSE of the change.
+  printf 'fmt: echo fixed >> src/x\ntests: grep -q fixed src/x\n' > "$LC/fmt.txt"
+  rm -f "$LC/fx/posted"; : > "$LC/calls"; lci 7 "$LC/fmt.txt"; check 2 "a check that rewrote a tracked file: exit 2, although every check was green" $?
+  eq "no 0" "…and nothing is posted" "$([ -f "$LC/fx/posted" ] && echo yes || echo no) $(grep -c '^pr comment$' "$LC/calls")"
+  grep -q 'the battery changed the working tree' "$LC/err" && grep -q '^ M src/x$' "$LC/err" && ok "…and stderr names the changed file" || bad "a tree the battery changed must be named"
+  lci 7 --dry-run "$LC/fmt.txt"; check 2 "…with --dry-run too" $?
+  eq "" "…which prints no comment" "$(cat "$LC/out")"
+  git -C "$LC/repo" checkout -q -- src/x
+  printf 'gen: echo y > src/gen.py\ntests: test -f src/gen.py\n' > "$LC/gen.txt"
+  rm -f "$LC/fx/posted"; : > "$LC/calls"; lci 7 "$LC/gen.txt"; check 2 "a check that left an untracked file: exit 2" $?
+  eq "no 0" "…and nothing is posted" "$([ -f "$LC/fx/posted" ] && echo yes || echo no) $(grep -c '^pr comment$' "$LC/calls")"
+  rm -f "$LC/repo/src/gen.py"
   # a check that moves HEAD: the sha the marker would name is no longer what is checked out
   printf 'tests: true\nmoves head: git commit -q --allow-empty -m moved\n' > "$LC/move.txt"
   rm -f "$LC/fx/posted"; : > "$LC/calls"; lci 7 "$LC/move.txt"; check 2 "HEAD moved during the battery: exit 2" $?
@@ -2638,11 +2731,11 @@ grep -q 'RECORD, not a gate' "$LCS" && grep -q 'Anyone who can comment on the PR
 grep -q 'per-command timeout' "$LCS" && ok "…and that there is no per-command timeout" || bad "adlc-local-ci.sh: the header must say there is no per-command timeout"
 QA="$ROOT/skills/role-qa-release-ops/SKILL.md"
 grep -q 'ADLC-CI: PASS|FAIL head <sha>' "$QA" && ok "QA's role prompt names the local CI marker" || bad "role-qa-release-ops: must name the ADLC-CI marker"
-tr '\n' ' ' < "$QA" | grep -q "only when that SHA is the PR's current head" && ok "…as the battery result only for the PR's current head" || bad "role-qa-release-ops: a local CI marker counts only for the PR's current head"
-tr '\n' ' ' < "$QA" | grep -q 'one for an older commit does not' && ok "…and not for an older commit" || bad "role-qa-release-ops: must say an older marker does not count"
+grep -q "only when that SHA is the PR's current head" <<<"$(tr '\n' ' ' < "$QA")" && ok "…as the battery result only for the PR's current head" || bad "role-qa-release-ops: a local CI marker counts only for the PR's current head"
+grep -q 'one for an older commit does not' <<<"$(tr '\n' ' ' < "$QA")" && ok "…and not for an older commit" || bad "role-qa-release-ops: must say an older marker does not count"
 grep -q 'a record, not a gate' "$QA" && ok "…and calls it a record, not a gate" || bad "role-qa-release-ops: must call the marker a record, not a gate"
 grep -q '\.adlc/scripts/adlc-local-ci\.sh <pr>' "$RB" && grep -q '\.adlc/local-ci\.txt' "$RB" && ok "RUNBOOK has the local CI recipe (script and commands file)" || bad "RUNBOOK must name adlc-local-ci.sh and .adlc/local-ci.txt"
-tr '\n' ' ' < "$RB" | grep -q 'a record, not a gate: anyone who can comment can write that line' && ok "…and says the marker is a record, not a gate" || bad "RUNBOOK: must say the marker is a record, not a gate"
+grep -q 'a record, not a gate: anyone who can comment can write that line' <<<"$(tr '\n' ' ' < "$RB")" && ok "…and says the marker is a record, not a gate" || bad "RUNBOOK: must say the marker is a record, not a gate"
 grep -q '`blocked=`' "$ROOT/skills/cycle-retro/SKILL.md" && ok "cycle-retro explains the blocked= figure" || bad "cycle-retro must explain blocked="
 echo "tripwire step (the workflow's own run: script, on a real git history + a stub gh):"
 # The step of adlc-main-tripwire.yml, pulled out of the template and run as Actions runs it
@@ -2818,12 +2911,23 @@ rf --apply "$RH" "$RF/hook" .git/hooks/pre-commit; check 0 "filled file: the hoo
 # the plugin's own copy only: a copy of the script elsewhere has no templates beside it
 mkdir -p "$RF/copy/.adlc/scripts"; cp "$R" "$RF/copy/.adlc/scripts/"
 RFOUT=$(bash "$RF/copy/.adlc/scripts/adlc-refresh.sh" "$RH" 2>&1); check 1 "a copy of the script outside the plugin refuses to run (no templates beside it)" $?
+# An exported CDPATH makes `cd` print where it went, and the script finds its templates with a
+# cd: called by a relative path it then read that output into the templates path and refused to run.
+RFOUT=$( cd "$ROOT" && CDPATH=. bash templates/scripts/adlc-refresh.sh "$RH" 2>&1 ); check 0 "an exported CDPATH and a relative path to the script: it still finds its templates" $?
+eq "$((NSCRIPTS + 1))" "…and lists every mapped file, as without CDPATH" "$(printf '%s\n' "$RFOUT" | grep -cE ' \.adlc/(scripts/adlc-[a-z-]*\.sh|LICENSE)$')"
 # the wizard uses it, and says what was skipped
 BS="$ROOT/skills/bootstrap/SKILL.md"
 grep -q '${CLAUDE_PLUGIN_ROOT}/templates/scripts/adlc-refresh.sh "${CLAUDE_PROJECT_DIR}"' "$BS" && ok "bootstrap runs the refresh script from the plugin" || bad "bootstrap: step 8b must run \${CLAUDE_PLUGIN_ROOT}/templates/scripts/adlc-refresh.sh"
 grep -q 'adlc: host-owned' "$BS" && ok "…names the host-owned marker" || bad "bootstrap: must name the host-owned marker"
 grep -q -- '--apply' "$BS" && ok "…writes only with --apply, after showing the dry run" || bad "bootstrap: must run the dry run first, then --apply"
 grep -q 'tell the user which files it skipped' "$BS" && ok "…and tells the user what was skipped" || bad "bootstrap: must tell the user which files the refresh skipped"
+# the marker is honoured by the script, so the rule may promise it only for the script's targets
+grep -q 'A file copied from `templates/` whose' "$BS" && bad "bootstrap: the host-owned rule must not cover every file copied from templates/ (the script has a fixed list of targets)" || ok "…the host-owned rule is not promised for every file copied from templates/"
+grep -q 'In the generated docs and skills (RUNBOOK, charter, ADR template, project skills) the marker' "$BS" && ok "…and says the marker does nothing in the generated docs and skills" || bad "bootstrap: must say the marker does nothing outside the script's targets"
+printf 'x\n' > "$RF/doc"
+for t in docs/adlc/RUNBOOK.md docs/adlc/CHARTER.md docs/adr/template.md .claude/skills/project-conventions/SKILL.md .claude/skills/release-ops/SKILL.md CLAUDE.md; do
+  rf --apply "$RH" "$RF/doc" "$t"; check 2 "…which is so: '$t' is not a target the script writes" $?
+done
 grep -q 'adlc-refresh.sh "${CLAUDE_PROJECT_DIR}" <scratch file> <target>' "$BS" && ok "…with the filled files (workflows, agent copies, the hook) going through the same script" || bad "bootstrap: filled files must go through adlc-refresh.sh"
 grep -q 'copy `templates/scripts/\*.sh` to' "$BS" && bad "bootstrap must not copy templates/scripts/*.sh by hand any more" || ok "…and no longer copies templates/scripts/*.sh by hand"
 for f in "$S"/*.sh; do grep -q "${f##*/}" "$ROOT/README.md" || bad "README layout tree does not list ${f##*/}"; done
@@ -2849,6 +2953,17 @@ grep -q '^## Scope files' "$ROOT/templates/RUNBOOK.md.tmpl" && ok "RUNBOOK state
 SCT="$(mktemp -d)"; mkdir -p "$SCT/.adlc/scope"; printf 'src/\n' > "$SCT/.adlc/scope/12.txt"
 ( cd "$SCT" && printf '.adlc/scope/7.txt\n.adlc/scope/8.txt\n' | bash "$S/adlc-diff-scope.sh" build .adlc/scope/12.txt ) >/dev/null 2>&1; check 1 "…a lane PR cannot prune other issues' scope files (the diff-scope check refuses it)" $?
 ( cd "$SCT" && printf '.adlc/scope/7.txt\n.adlc/scope/8.txt\n' | bash "$S/adlc-diff-scope.sh" other ) >/dev/null 2>&1; check 0 "…a PR tied to no lane issue can (the check skips it)" $?
+# …and a merged scope file is still read: adlc-adr-check.sh compares it with the Scope of the ADR naming its issue
+RBS="$(sed -n '/^## Scope files/,/^## Isolated-worktree/p' "$ROOT/templates/RUNBOOK.md.tmpl")"
+case "$RBS" in *"nothing reads"*) bad "RUNBOOK must not say nothing reads a merged scope file (adlc-adr-check.sh does)" ;; *) ok "RUNBOOK does not say nothing reads a merged scope file" ;; esac
+case "$RBS" in *"adlc-adr-check.sh"*"A pruned file turns that ADR comparison off"*) ok "…it names adlc-adr-check.sh as a reader, and what pruning does to that check" ;; *) bad "RUNBOOK scope files: must name adlc-adr-check.sh and say pruning turns its comparison off" ;; esac
+mkdir -p "$SCT/docs/adr" "$SCT/tests"; printf 'def test_x(): pass\n' > "$SCT/tests/t.py"
+printf '# ADR 2\n\n**Issue:** #5\n\n## Scope\n\n```\nsrc/a/\n```\n\n## Guarantees\n\n| Claim | Enforced by |\n|---|---|\n| x | tests/t.py::test_x |\n' > "$SCT/docs/adr/0002-x.md"
+printf 'src/a/\nsrc/b/\n' > "$SCT/.adlc/scope/5.txt"
+( cd "$SCT" && bash "$S/adlc-adr-check.sh" ) >/dev/null 2>&1; check 1 "…as the code does: a scope file left after its merge still fails the ADR check when it differs from the ADR's Scope" $?
+rm "$SCT/.adlc/scope/5.txt"
+SCOUT=$( cd "$SCT" && bash "$S/adlc-adr-check.sh" 2>&1 ); check 0 "…and with the file pruned the check passes" $?
+case "$SCOUT" in *"its Scope is not compared"*) ok "…saying the Scope is not compared" ;; *) bad "adr-check must say the Scope is not compared once the scope file is gone (got: $SCOUT)" ;; esac
 rm -rf "$RF" "$SCT"
 echo "follow-up chains (issue 37; adlc-chains.sh, labels.sh and adlc-metrics.sh against a stub gh):"
 # On one host 91 of 224 issue titles were follow-ups, in chains four to seven issues deep, each issue a pipeline
@@ -2856,7 +2971,7 @@ echo "follow-up chains (issue 37; adlc-chains.sh, labels.sh and adlc-metrics.sh 
 # from one issue list, and a chain three or more deep is put to the Principal as a decision; the label
 # adlc:accepted-risk on a chain's root records it. The fixture holds every way an issue names its parent.
 if command -v jq >/dev/null 2>&1; then
-  CH="$(mktemp -d)"; mkdir -p "$CH/bin" "$CH/fx" "$CH/fx2" "$CH/fx3" "$CH/repo"
+  CH="$(mktemp -d)"; mkdir -p "$CH/bin" "$CH/fx" "$CH/fx2" "$CH/fx3" "$CH/fx4" "$CH/fx5" "$CH/repo"
   cat > "$CH/bin/gh" <<'SH'
 #!/usr/bin/env bash
 # stub gh: `issue list` serves $CH_FX/issues.json and `pr list` $CH_FX/prs.json (through the call's --jq when it
@@ -2865,7 +2980,7 @@ echo "$*" >> "$CH_CALLS"
 case "$1 $2" in
   "issue list") k=issue ;; "pr list") k=pr ;; "run list") k=run ;;
   "label create") echo "$3" >> "$CH_CALLS.labels"; exit 0 ;;
-  "label list") exit 0 ;;   # no labels: adlc-metrics.sh then prints its change_failures zero and goes on
+  "label list") [ -f "$CH_FX/labels" ] && cat "$CH_FX/labels"; exit 0 ;;   # the repo's label names, one per line (no file: none, and adlc-metrics.sh prints its notes and goes on)
   *) exit 2 ;;
 esac
 [ "${CH_FAIL:-}" = "$k" ] && { echo "gh: HTTP 502" >&2; exit 1; }
@@ -2908,7 +3023,7 @@ SH
     CH_OUT=$(env PATH="$CH/bin:$PATH" CH_FX="$CH/fx" CH_CALLS="$CH/calls" ${envs[@]+"${envs[@]}"} bash "$S/adlc-chains.sh" "$@" 2>"$CH/err"); CH_RC=$?
   }
   chains -- report; check 0 "report: exits 0" $CH_RC
-  eq "depth=4  #34 → #67 → #85 → #116  (issues: 6, open: 1)" "report: the one undecided chain of depth 3 or more — marker links and phrase links (title, body, a bold marker over a phrase); a parent with three follow-ups is ONE chain: its longest path, every issue under the root counted" "$(printf '%s\n' "$CH_OUT" | grep '^depth=')"
+  eq "depth=4  #34 → #67 → #85 → #116  (issues: 6, open: 1)" "report: the one undecided chain of depth 3 or more — marker links and phrase links (title, body, a bold marker over a phrase); a parent with three follow-ups is ONE chain: its longest path, and the issues in the chain counted, the root included" "$(printf '%s\n' "$CH_OUT" | grep '^depth=')"
   eq "decided  depth=4  #60 → #88 → #118 → #215  (issues: 4, open: 1)  root carries adlc:accepted-risk" "report: a chain whose root carries adlc:accepted-risk is listed apart as decided (one link resolved through the PR that closes the parent)" "$(printf '%s\n' "$CH_OUT" | grep '^decided')"
   eq 0 "report: a chain two deep is not flagged at the default depth" "$(printf '%s\n' "$CH_OUT" | grep -c '#40')"
   eq "issue list --state all --limit 1000 --json number,title,body,labels,state|pr list --state all --limit 1000 --json number,body|" "report: ONE issue list call (1000 issues by default), and one pr list call because a reference names a number that is not an issue" "$(tr '\n' '|' < "$CH/calls")"
@@ -2941,6 +3056,25 @@ SH
   eq 1 "…says there is no undecided chain when the only deep one is decided" "$(printf '%s\n' "$CH_OUT" | grep -c '^no undecided chain of depth >= 3$')"
   eq "decided  depth=3  #1 → #2 → #3  (issues: 3, open: 1)  root carries adlc:accepted-risk" "…and still lists the decided one" "$(printf '%s\n' "$CH_OUT" | grep '^decided')"
   eq "" "…with nothing on stderr" "$(cat "$CH/err")"
+  # fx4: one fixture line per rule the header states (each fails when the rule is taken out of the script), newest first
+  # as gh lists them: the marker counts only at the start of a line; a phrase in the title wins over one in the body; a
+  # PR resolves to the FIRST issue its body closes; of two paths of the same length the lower numbers are shown.
+  { chi 5 "Cache: cold start (from PR #20)" "" OPEN
+    chi 4 "Docs: the marker" "Say that QA writes ADLC-FOLLOW-UP: #2 in a follow-up's body." OPEN
+    chi 3 "Follow-up of #1: empty input" "Not a follow-up of #2." CLOSED
+    chi 2 "Search" "" CLOSED; chi 1 "Cache" "" CLOSED; } | jq -s . > "$CH/fx4/issues.json"
+  jq -n '[{number: 20, body: "Closes #1\n\nAlso fixes #2 on the way."}]' > "$CH/fx4/prs.json"
+  chains CH_FX="$CH/fx4" -- report 2
+  eq "depth=2  #1 → #3  (issues: 3, open: 1)|" "report: issues = the issues in the chain, the root included; of two paths of the same length the lower numbers are shown, whatever order gh lists them in" "$(printf '%s\n' "$CH_OUT" | grep '^depth=' | tr '\n' '|')"
+  eq 1 "…and the header line says what 'issues' counts" "$(printf '%s\n' "$CH_OUT" | grep -c 'issues = the issues in the chain, the root included')"
+  chains CH_FX="$CH/fx4" -- root 3; eq "0 root=#1 depth=2 open" "a phrase in the title wins over one in the body" "$CH_RC $CH_OUT"
+  chains CH_FX="$CH/fx4" -- root 4; eq "0 root=#4 depth=1 open" "the marker in the middle of a line is prose, not a link" "$CH_RC $CH_OUT"
+  chains CH_FX="$CH/fx4" -- root 5; eq "0 root=#1 depth=2 open" "a PR resolves to the first issue its body closes, not a later one" "$CH_RC $CH_OUT"
+  # the chains cannot be built (the pull request list is not a list): exit 1, never an empty report read as "no chain"
+  cp "$CH/fx/issues.json" "$CH/fx5/issues.json"; echo '{"message":"Bad credentials"}' > "$CH/fx5/prs.json"
+  chains CH_FX="$CH/fx5" -- report; eq "1 " "a pull request answer that is not a list exits 1 with nothing on stdout" "$CH_RC $CH_OUT"
+  eq 1 "…and says the chains could not be built" "$(grep -c 'could not build the chains' "$CH/err")"
+  chains CH_FX="$CH/fx5" -- root 85; eq "1 " "…for root too" "$CH_RC $CH_OUT"
   chains ADLC_CHAINS_LIMIT=20 -- root 7; check 0 "ADLC_CHAINS_LIMIT: exits 0" $CH_RC
   eq 1 "…is the --limit of the read" "$(grep -c '^issue list --state all --limit 20 ' "$CH/calls")"
   eq 1 "…and a list that comes back full is reported: older issues may not have been read" "$(grep -c 'read 20 issues, the limit' "$CH/err")"
@@ -2956,20 +3090,25 @@ SH
   for l in adlc:follow-up adlc:accepted-risk; do
     eq 1 "labels.sh creates $l" "$(grep -cx "$l" "$CH/calls.labels")"
   done
-  # adlc-metrics.sh: the share of the window's issues that carry adlc:follow-up (fx: 4 of 20, all opened just now; no merged PR)
-  echo '[]' > "$CH/fx/prs.json"; echo '[]' > "$CH/fx/runs.json"
+  # adlc-metrics.sh: the share of the window's issues that carry adlc:follow-up (fx: 4 of 20, all opened just now; no merged PR).
+  # What is counted is the LABEL: the line says so, and on a repo without the label it says that instead of a bare 0.
+  echo '[]' > "$CH/fx/prs.json"; echo '[]' > "$CH/fx/runs.json"; printf '%s\n' bug adlc:follow-up > "$CH/fx/labels"
   OUT=$( cd "$CH/repo" && env PATH="$CH/bin:$PATH" CH_FX="$CH/fx" CH_CALLS="$CH/calls" bash "$S/adlc-metrics.sh" 30 2>/dev/null )
-  eq "follow_ups_filed: 4 / 20 issues opened" "metrics: follow-ups against all issues opened in the window" "$(printf '%s\n' "$OUT" | grep '^follow_ups_filed:')"
+  eq "follow_ups_filed: 4 / 20 issues opened are labelled adlc:follow-up" "metrics: the issues labelled adlc:follow-up against all issues opened in the window (16 of the 20 are in a chain; the phrase-linked ones carry no label and are not counted)" "$(printf '%s\n' "$OUT" | grep '^follow_ups_filed:')"
   jq '.[0].createdAt = "2000-01-01T00:00:00Z" | .[2].createdAt = "2000-01-01T00:00:00Z"' "$CH/fx/issues.json" > "$CH/fx/i2" && mv "$CH/fx/i2" "$CH/fx/issues.json"
   OUT=$( cd "$CH/repo" && env PATH="$CH/bin:$PATH" CH_FX="$CH/fx" CH_CALLS="$CH/calls" bash "$S/adlc-metrics.sh" 30 2>/dev/null )
-  eq "follow_ups_filed: 3 / 18 issues opened" "…an issue opened before the window counts on neither side" "$(printf '%s\n' "$OUT" | grep '^follow_ups_filed:')"
+  eq "follow_ups_filed: 3 / 18 issues opened are labelled adlc:follow-up" "…an issue opened before the window counts on neither side" "$(printf '%s\n' "$OUT" | grep '^follow_ups_filed:')"
+  : > "$CH/calls"; printf 'bug\n' > "$CH/fx/labels"; jq 'map(.labels = [])' "$CH/fx/issues.json" > "$CH/fx/i2" && mv "$CH/fx/i2" "$CH/fx/issues.json"
+  OUT=$( cd "$CH/repo" && env PATH="$CH/bin:$PATH" CH_FX="$CH/fx" CH_CALLS="$CH/calls" bash "$S/adlc-metrics.sh" 30 2>/dev/null )
+  eq "follow_ups_filed: 0 / 18 issues opened are labelled adlc:follow-up (this repo has no adlc:follow-up label, so no issue carries it — run the plugin's templates/github/labels.sh)" "…a repo without the label: the 0 comes with the reason, not bare" "$(printf '%s\n' "$OUT" | grep '^follow_ups_filed:')"
+  eq 1 "…from the one label list call the change_failures line already makes" "$(grep -c '^label list ' "$CH/calls")"
   rm -rf "$CH"
 else
   echo "  · skipped the follow-up chain checks (no jq here)"
 fi
 # The prompts that file, look up and present: static, as for every other skill text.
 QA="$ROOT/skills/role-qa-release-ops/SKILL.md"
-for t in 'ONE follow-up issue per PR' 'labelled `adlc:follow-up`' '`ADLC-FOLLOW-UP: #<the issue this PR closes>`' '.adlc/scripts/adlc-chains.sh root <that issue>' '`accepted-risk`' 'file nothing' 'a Low stays a'; do
+for t in 'ONE follow-up issue per PR' 'labelled `adlc:follow-up`' '`ADLC-FOLLOW-UP: #<the issue this PR closes>`' '.adlc/scripts/adlc-chains.sh root <that issue>' '`accepted-risk`' 'file nothing' 'a Low stays a' 'The lookup fails, or `gh` refuses' 'file anyway (without the label if the repo lacks it) and say so on the card' 'Your only label action on the issue under QA is'; do
   grep -qF -- "$t" "$QA" && ok "QA prompt: $t" || bad "QA prompt must say: $t"
 done
 grep -F '| **Medium** |' "$ROOT/skills/security-gate/SKILL.md" | grep -F 'adlc:follow-up' | grep -qF 'adlc:accepted-risk' && ok "security-gate: the Medium row (where the follow-up rule lives) names both labels" || bad "security-gate: the Medium row must name adlc:follow-up and adlc:accepted-risk"
@@ -2985,6 +3124,10 @@ for f in role-adversarial-reviewer role-product-analyst role-architect role-buil
   grep -q 'adlc-chains' "$ROOT/skills/$f/SKILL.md" && bad "$f: must not be told to run adlc-chains.sh" || ok "$f is not told to run adlc-chains.sh"
 done
 grep -q 'adlc-chains.sh' "$ROOT/README.md" && ok "README names adlc-chains.sh" || bad "README: the layout tree must name adlc-chains.sh"
+grep -q 'QA is told to file no more follow-ups' "$ROOT/templates/github/labels.sh" && ok "the accepted-risk label describes a prompt rule as one (QA is told), not as a fact" || bad "labels.sh: adlc:accepted-risk must not state the prompt rule as a fact"
+for f in retro cycle-retro; do
+  grep -q 'counts only the issues' "$ROOT/skills/$f/SKILL.md" && grep -q 'labelled `adlc:follow-up`' "$ROOT/skills/$f/SKILL.md" && ok "$f: follow_ups_filed is the labelled issues, not every follow-up" || bad "$f: must say follow_ups_filed counts only the labelled issues"
+done
 grep -q "ADLC-FOLLOW-UP: #" "$ROOT/templates/github/labels.sh" && ok "the label's description names the marker the script reads" || bad "labels.sh: adlc:follow-up should name the marker"
 
 echo ""
