@@ -47,9 +47,11 @@ file and the breakdown's `ADLC-BREAKDOWN:` line exist.
 Compare `gh pr diff` against the ADR and task breakdown. The PR's `.adlc/scope/<issue>.txt`
 must match the breakdown's declared scope (the design lane's own lines aside: the ADR and any
 other `docs/` file it committed) — CI enforces that file, so a wider one is a finding.
-Run `.adlc/scripts/adlc-adr-check.sh` on the PR's checkout: each line it prints on stderr (the
+Run `.adlc/scripts/adlc-adr-check.sh`: each line it prints on stderr (the
 ADR's Scope and the scope file differ, a Guarantees row names a test that is not there) is a
-finding, and so is this PR's ADR on its skipped list. In the Actions review lane the script is
+finding, and so is this PR's ADR on its skipped list. It reads the checkout you are in, and you
+cannot switch branches: if this PR's ADR is not among the ADRs its last line names, the check
+did not run — say so and ask for the PR branch to be checked out. In the Actions review lane the script is
 not among your granted commands (QA runs it there): read the two sections against the scope
 file and the named tests yourself.
 In the Actions review lane `gh pr review` is not granted (a bot cannot review its own PR):
