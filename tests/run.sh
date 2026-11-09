@@ -2937,6 +2937,117 @@ for f in role-adversarial-reviewer role-product-analyst role-architect role-buil
 done
 grep -q 'adlc-chains.sh' "$ROOT/README.md" && ok "README names adlc-chains.sh" || bad "README: the layout tree must name adlc-chains.sh"
 grep -q "ADLC-FOLLOW-UP: #" "$ROOT/templates/github/labels.sh" && ok "the label's description names the marker the script reads" || bad "labels.sh: adlc:follow-up should name the marker"
+echo "local autopilot + context budget (issue 36: the two skills' pins, and the autopilot's cap command on a real git history):"
+# /adlc:autopilot is a prompt, so what can be pinned is its text: the scripts, markers and labels
+# it shares with the Actions lanes, and the lines that keep the gates where they are. The one
+# command it carries in full, the fast-lane cap, is run as written. Nothing here runs the
+# orchestrator itself: that needs a model and a GitHub repository.
+AP="$ROOT/skills/autopilot/SKILL.md"; CB="$ROOT/skills/context-budget/SKILL.md"; RD="$ROOT/README.md"
+for k in autopilot context-budget; do
+  f="$ROOT/skills/$k/SKILL.md"
+  [ -f "$f" ] && ok "skills/$k/SKILL.md exists" || { bad "skills/$k/SKILL.md missing"; continue; }
+  eq "$k" "$k: the skill's name" "$(fm "$f" | sed -n 's/^name: *//p')"
+  fm "$f" | grep -q '^description: ' && ok "$k: has a description" || bad "$k: no description"
+  grep -qE "^  $k/ +# " "$RD" && ok "README layout tree lists skills/$k/" || bad "README layout tree must list skills/$k/"
+  eq "" "$k: says neither tested nor proven (it has not been run from the plugin)" "$(grep -niE 'tested|proven' "$f" || true)"
+done
+grep -q '^| `/adlc:autopilot <issue>` | ' "$RD" && ok "README commands table lists /adlc:autopilot <issue>" || bad "README commands table must list /adlc:autopilot <issue>"
+grep '^| `/adlc:autopilot <issue>` | ' "$RD" | grep -q '`adlc:context-budget`' && ok "…and that row names the context-budget skill" || bad "README commands table: the autopilot row must name adlc:context-budget"
+grep -q 'has not yet been run' "$RD" && ok "README says the local autopilot has not yet been run end to end from the plugin" || bad "README must say the local autopilot has not yet been run from the plugin"
+grep -q 'has not yet been run from the plugin' "$ROOT/CHANGELOG.md" && ok "…and so does the CHANGELOG" || bad "CHANGELOG must say the autopilot has not yet been run from the plugin"
+grep -q '/adlc:autopilot <issue>' "$ROOT/templates/RUNBOOK.md.tmpl" && ok "RUNBOOK points at /adlc:autopilot" || bad "RUNBOOK must point at /adlc:autopilot <issue>"
+grep -q '/adlc:autopilot <issue>' "$ROOT/skills/bootstrap/SKILL.md" && ok "bootstrap's local recipe points at /adlc:autopilot" || bad "bootstrap must point at /adlc:autopilot <issue>"
+# Gate 1 auto-approval is the Principal's opt-in: only a typed command may start the orchestrator.
+# The budget is the opposite: subagents load it with the Skill tool, and no wrapper preloads it.
+fm "$AP" | grep -qE '^disable-model-invocation: *true' && ok "autopilot: only a typed /adlc:autopilot starts it (disable-model-invocation)" || bad "autopilot: must set disable-model-invocation: true"
+fm "$CB" | grep -qE '^disable-model-invocation: *true' && bad "context-budget: disable-model-invocation would stop a subagent's Skill load" || ok "context-budget: a subagent may load it"
+eq "" "no agent wrapper preloads context-budget (it is opt-in)" "$(grep -l 'context-budget' "$ROOT"/agents/*.md "$ROOT"/templates/agents/*.tmpl 2>/dev/null || true)"
+grep -q 'load `adlc:context-budget` first' "$AP" && ok "autopilot: every brief names adlc:context-budget" || bad "autopilot: the brief must name adlc:context-budget"
+# the scripts it relies on: each one named, and every script either skill names is one the wizard copies
+for sc in adlc-relabel.sh adlc-verdict.sh adlc-triage.sh adlc-fix-cap.sh adlc-run-log.sh; do
+  grep -q "\.adlc/scripts/$sc" "$AP" && ok "autopilot names .adlc/scripts/$sc" || bad "autopilot must name .adlc/scripts/$sc"
+done
+for sc in $(grep -ohE 'adlc-[a-z-]+\.sh' "$AP" "$CB" | sort -u); do
+  [ -f "$S/$sc" ] && ok "…$sc exists in templates/scripts/" || bad "a skill names $sc, which templates/scripts/ does not hold"
+done
+for wf in $(grep -ohE 'adlc-[a-z-]+\.yml' "$AP" | sort -u); do
+  [ -f "$ROOT/templates/github/$wf" ] && ok "…$wf exists in templates/github/" || bad "autopilot names $wf, which templates/github/ does not hold"
+done
+# one subagent per role: this repo's copies, the names the RUNBOOK uses
+for a in $ROLES; do grep -q "\`adlc-$a\`" "$AP" && ok "autopilot runs adlc-$a" || bad "autopilot must run the adlc-$a copy"; done
+grep -q 'never run a role on its' "$AP" && ok "autopilot: no role runs on its own output" || bad "autopilot must say no role runs on its own output"
+# markers, read the way the lanes read them
+for m in 'ADLC-ADV: PASS|CHANGES' 'ADLC-ARCH:' 'ADLC-TRIAGE:' 'ADLC-BREAKDOWN:'; do grep -qF "$m" "$AP" && ok "autopilot names the $m marker" || bad "autopilot must name the $m marker"; done
+tr='ADLC-TRIAGE:[[:space:]]*(FAST|FULL)'
+grep -qF "$tr" "$AP" && grep -qF "$tr" "$ROOT/templates/github/adlc-intake.yml" && ok "autopilot reads the triage verdict with the intake lane's expression" || bad "autopilot and adlc-intake.yml must read ADLC-TRIAGE the same way"
+vr="--json comments --jq '.comments[].body'"
+grep -qF -- "$vr" "$AP" && grep -qF -- "$vr" "$ROOT/templates/github/adlc-review.yml" && ok "…and the review verdicts from the PR's comments, as the review lane does" || bad "autopilot and adlc-review.yml must read the PR comments the same way"
+grep -q 'adlc-verdict.sh ADLC-ADV' "$AP" && ok "…through adlc-verdict.sh" || bad "autopilot must read the verdict with adlc-verdict.sh"
+grep -q 'empty included, is not a pass' "$AP" && ok "…where an empty answer is not a pass" || bad "autopilot must treat an empty verdict as not-PASS"
+grep -qF '`adlc-adversarial-reviewer` and, after it, `adlc-architect` (conformance duty)' "$AP" && ok "…adversarial first, then conformance (the review lane's order)" || bad "autopilot: the adversarial review must come before the conformance review"
+# the gates
+grep -q 'you never merge, deploy or run a migration' "$AP" && grep -q 'Gate 2' "$AP" && ok "autopilot: Gate 2 is never automated (no merge, deploy or migration)" || bad "autopilot must say Gate 2 / the merge is never automated"
+grep -q 'only the Principal applies `stage:fast`' "$AP" && ok "autopilot: only the Principal applies stage:fast" || bad "autopilot must leave stage:fast to the Principal"
+grep -q '`FULL` ⇒ `gh issue edit N --add-label adlc:autopilot`, `.adlc/scripts/adlc-relabel.sh N stage:design`' "$AP" && ok "autopilot: Gate 1 is auto-approved on a FULL verdict, with adlc:autopilot on the issue and the relabel script" || bad "autopilot: the Gate 1 auto-approval must be FULL-only, label adlc:autopilot, and relabel through the script"
+grep -q '`FAST` ⇒ start nothing' "$AP" && ok "…and a FAST verdict starts nothing" || bad "autopilot: a FAST verdict must start nothing"
+grep -q "/security-review" "$AP" && ok "autopilot leaves /security-review with the Principal" || bad "autopilot must leave /security-review with the Principal"
+grep -q "author is not the Principal" "$AP" && grep -q 'docs/adlc/CHARTER.md' "$AP" && ok "autopilot: the author gate reads the Principal's handle from the charter" || bad "autopilot: the author gate must read the handle from docs/adlc/CHARTER.md"
+grep -q '^\*\*Status:\*\* .*\*\*Principal:\*\* {{PRINCIPAL}}' "$ROOT/templates/charter.md.tmpl" && ok "…which the charter template still carries on its Principal: line" || bad "charter.md.tmpl lost the **Principal:** {{PRINCIPAL}} field the autopilot's author gate reads"
+# stops and labels: every label it puts on something is one labels.sh creates
+grep -q 'label `needs:human`' "$AP" && ok "autopilot: a stop labels needs:human" || bad "autopilot must label needs:human when it stops"
+for l in needs:human adlc:autopilot adlc:changes-requested lane:fast; do
+  grep -q "\`$l\`\|--add-label $l" "$AP" && grep -q "^create \"$l\"" "$ROOT/templates/github/labels.sh" && ok "…$l is a label labels.sh creates" || bad "autopilot names $l, which it or labels.sh lacks"
+done
+# state labels: through the relabel script only (the same two greps as the lanes and the RUNBOOK, issue 38)
+eq "" "autopilot: moves state labels through adlc-relabel.sh, never a hand-spelled pair" "$(grep -nE -- '--(add|remove)-label `?(stage|gate):' "$AP" || true)"
+eq "" "autopilot: no step tells anyone to \"add\" a state label" "$(grep -nE '\badds? `?(stage|gate):[a-z]+' "$AP" || true)"
+eq "" "context-budget: nor does the budget" "$(grep -nE -- '--(add|remove)-label `?(stage|gate):|\badds? `?(stage|gate):[a-z]+' "$CB" || true)"
+# the fix cycle
+grep -q 'adlc-fix-cap.sh --pr <pr>' "$AP" && grep -q 'only a printed `GO` sends the PR back' "$AP" && ok "autopilot: the cap is asked before each return to the Builder, and only GO returns it" || bad "autopilot must run adlc-fix-cap.sh --pr <pr> and go on only on GO"
+grep -q -- '--pr' "$S/adlc-fix-cap.sh" && ok "…and adlc-fix-cap.sh has the --pr form" || bad "adlc-fix-cap.sh must keep the --pr form: the autopilot's cap call depends on it"
+grep -q 'FIX DELTA' "$AP" && grep -q 'break the fixes, do not confirm them' "$AP" && ok "autopilot: round 2 is an adversarial pass over the fix delta" || bad "autopilot: round 2 must be a pass over the fix delta, to break the fixes"
+grep -q 'each subject starting `adlc-fix:`' "$AP" && ok "autopilot: fix commits carry the adlc-fix: prefix, as the fix lane's do" || bad "autopilot: fix commits must start adlc-fix:"
+grep -q 'run `adlc-architect` ONCE to amend the ADR' "$AP" && ok "autopilot: one ADR amendment pass" || bad "autopilot: the ADR amendment must be one pass"
+[ "$(grep -n 'ONCE to amend' "$AP" | cut -d: -f1)" -lt "$(grep -n 'adlc-relabel.sh N stage:qa' "$AP" | cut -d: -f1)" ] 2>/dev/null && ok "…before the issue moves to stage:qa" || bad "autopilot: the amendment must come before stage:qa"
+grep -q "does not re-run the reviewers'" "$AP" && ok "autopilot: QA trusts the recorded verdicts" || bad "autopilot: QA must not re-run the reviewers' reproductions"
+# the context budget
+grep -q '## Context budget' "$CB" && grep -q 'project-conventions' "$CB" && ok "context-budget: a repo's own caps live under ## Context budget in project-conventions" || bad "context-budget must say where a repo overrides a cap"
+grep -q 'adlc-run-log.sh' "$CB" && grep -q 'Do not record or report your own token use' "$CB" && ok "context-budget: tokens are measured (adlc-run-log.sh), never self-reported" || bad "context-budget must send token figures to adlc-run-log.sh"
+eq "" "context-budget: no token ledger of its own, and no percentage promised" "$(grep -nE 'tokens\.jsonl|[0-9] ?%' "$CB" || true)"
+for r in 'Analyst' 'Architect (design)' 'Builder' 'Adversarial reviewer' 'Architect (conformance)' 'QA'; do grep -qF "| $r |" "$CB" || bad "context-budget: the read table has no row for $r"; done
+grep -q 'A cap never trims evidence' "$CB" && ok "context-budget: a cap never trims evidence (efficient-runs' exception)" || bad "context-budget must keep quoted evidence out of the caps"
+# The cap: the autopilot's command takes the diff with the fast lane's flags, and is run here as
+# written (its fenced block, with <base> and <branch> filled in) in a clone with an origin.
+fl='git -c core.quotePath=false diff --numstat --no-renames --raw --ignore-submodules=none'
+grep -qF -- "$fl" "$AP" && grep -qF -- "$fl" "$ROOT/templates/github/adlc-fast.yml" && ok "autopilot takes the fast-lane diff with adlc-fast.yml's flags" || bad "autopilot and adlc-fast.yml must take the diff the same way"
+if command -v git >/dev/null 2>&1; then
+  AC="$(mktemp -d)"
+  agit() { env GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 git -c user.name=t -c user.email=t@example.com -c commit.gpgsign=false -c core.hooksPath=/dev/null "$@"; }
+  awk '/^```bash$/ {f=1; next} /^```$/ {f=0} f' "$AP" > "$AC/cap.tmpl"
+  eq 3 "the cap command is the skill's one fenced block" "$(grep -c . "$AC/cap.tmpl")"
+  {
+    agit init -q "$AC/seed"; agit -C "$AC/seed" symbolic-ref HEAD refs/heads/main
+    mkdir -p "$AC/seed/src"; echo 'x = 1' > "$AC/seed/src/a.py"; agit -C "$AC/seed" add -A; agit -C "$AC/seed" commit -q -m init
+    agit -C "$AC/seed" checkout -q -b feat/1-small main; echo 'y = 2' >> "$AC/seed/src/a.py"; agit -C "$AC/seed" commit -q -am small
+    agit -C "$AC/seed" checkout -q -b feat/2-auth main; mkdir -p "$AC/seed/auth"; echo 'k = 1' > "$AC/seed/auth/login.py"; agit -C "$AC/seed" add -A; agit -C "$AC/seed" commit -q -m auth
+    agit -C "$AC/seed" checkout -q -b feat/3-empty main; agit -C "$AC/seed" commit -q --allow-empty -m nothing
+    agit -C "$AC/seed" checkout -q main             # main moves on by more files than the cap allows
+    for f in m1 m2 m3 m4 m5 m6; do echo x > "$AC/seed/src/$f.py"; done; agit -C "$AC/seed" add -A; agit -C "$AC/seed" commit -q -m 'main moves on'
+    agit clone -q "$AC/seed" "$AC/work"; mkdir -p "$AC/work/.adlc/scripts"; cp "$S/adlc-triage.sh" "$AC/work/.adlc/scripts/"; chmod +x "$AC/work/.adlc/scripts/adlc-triage.sh"
+  } >/dev/null 2>&1
+  apcap() { # <base> <branch> → what the command prints
+    sed -e "s|<base>|$1|g" -e "s|<branch>|$2|g" "$AC/cap.tmpl" > "$AC/cap.sh"
+    ( cd "$AC/work" && env -u ADLC_FAST_MAX_FILES -u ADLC_FAST_MAX_LINES -u ADLC_FAST_DENY GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 bash "$AC/cap.sh" 2>/dev/null )
+  }
+  eq FAST "autopilot cap: a small change prints FAST, measured from the merge base (main has moved on by 6 files)" "$(apcap main feat/1-small)"
+  eq FULL "autopilot cap: a sensitive path prints FULL" "$(apcap main feat/2-auth)"
+  eq ""   "autopilot cap: an empty diff prints nothing (the skill stops; the script alone would say FAST)" "$(apcap main feat/3-empty)"
+  eq ""   "autopilot cap: a base branch the clone does not have prints nothing" "$(apcap gone feat/1-small)"
+  grep -q 'Nothing printed (the diff could not be taken, or is empty) ⇒ stop' "$AP" && ok "…and the skill reads nothing printed as a stop, never as fast" || bad "autopilot must stop when the cap command prints nothing"
+  rm -rf "$AC"
+else
+  bad "autopilot cap command tests need git"
+fi
 
 echo ""
 echo "== $pass passed, $fail failed =="

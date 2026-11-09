@@ -12,6 +12,12 @@ written by `/adlc-init`. Each file's `model:` line is the model that agent runs 
 prints them all or changes one, and a model named in the call itself still wins for that call.
 The Actions lanes run the plugin's own `adlc:<role>` agents, which keep the plugin's defaults.
 
+Unattended, one issue at a time: `/adlc:autopilot <issue>` drives the stages below from your own
+session, one subagent per role, and stops when a QA-approved PR waits at Gate 2 or when it needs
+you (`needs:human`, with a comment saying why). It auto-approves Gate 1 for a `FULL` triage
+verdict only; choosing the fast lane, `/security-review`, accepting the ADR and all of Gate 2
+stay yours.
+
 ## Stage 1 — Intake → triage → stories (Product Analyst)
 
 1. Run `/adlc-intake` — from an idea, a PRD, an existing issue, a bug, or a Notion/Linear

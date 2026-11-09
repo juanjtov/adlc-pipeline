@@ -32,9 +32,39 @@ reports them missing until you run it again), and the `adlc-metrics.sh` copy gai
 `follow_ups_filed` line. From issues 35 and 13: `adlc-rounds.sh` is new, and the `adlc-fix.yml`,
 `adlc-fix-cap.sh` and `adlc-cycle.sh` copies call it (the three come together: the new
 `adlc-fix.yml` beside an older `adlc-fix-cap.sh` fails its cap step, it does not run uncapped),
-and the RUNBOOK copy gains the capped fix cycle. The security-gate, code-review and efficient-runs
-skills, the retro and cycle-retro recipes, the role prompts and the guard hook live in the plugin,
-which every session loads from the installed plugin, so those parts need no refresh.
+and the RUNBOOK copy gains the capped fix cycle. From issue 36: the RUNBOOK template gains a
+paragraph pointing at `/adlc:autopilot`; the two new skills themselves live in the plugin. The
+security-gate, code-review and efficient-runs skills, the retro and cycle-retro recipes, the role
+prompts and the guard hook live in the plugin, which every session loads from the installed
+plugin, so those parts need no refresh.
+
+- **A local orchestrator and a context budget, as plugin skills: `/adlc:autopilot <issue>` and
+  `context-budget`** (issue 36). The README described autopilot only as the Actions lanes and
+  the bootstrap's local recipe was the RUNBOOK by hand, while the one host that has run the
+  plugin end to end installed no agent lane and put every PR through two skills it wrote for
+  itself. Both are now in the plugin, generalized. The `autopilot` skill runs the RUNBOOK stages
+  on one issue from the Principal's own session, one subagent per role (the repo's `adlc-<role>`
+  copies): an author gate against the charter's `Principal:` line; Gate 1 auto-approved for a
+  `FULL` triage verdict only (it puts `adlc:autopilot` on the issue and moves it with
+  `adlc-relabel.sh`; a `FAST` verdict waits for the Principal); the adversarial review, then the
+  conformance review, read with `adlc-verdict.sh`; `adlc-fix-cap.sh --pr <pr>` before each
+  return to the Builder; round 2 as a review of the fix delta; one ADR amendment pass before
+  `stage:qa`; a QA that trusts the recorded verdicts; the fast lane, with `adlc-triage.sh` on
+  the real diff, once the Principal has applied `stage:fast`; and `needs:human` plus a comment
+  at every stop. It never merges or deploys, `/security-review` and accepting the ADR stay with
+  the Principal, and only a typed `/adlc:autopilot` starts it (`disable-model-invocation`). The
+  `context-budget` skill holds the generic rules: what each role reads, a size cap per artifact
+  (stated defaults), one fix series per round, one amendment pass, stop when the verdict is
+  posted. It is opt-in: the agent wrappers are unchanged, the autopilot's brief to each subagent
+  names it, and a repo overrides a cap under `## Context budget` in its `project-conventions`.
+  It tells agents to keep no token ledger: spend comes from `adlc-run-log.sh`. Not done: this is
+  the generalization of one host's working skill and **has not yet been run from the plugin**,
+  and the README says so. That host's own ledger showed 38 % fewer tokens per acceptance
+  criterion on its first two chains; that is one host's self-recorded figure, not a measurement
+  of this release. With a copy of `adlc-fix-cap.sh` that has no `--pr` form the autopilot stops
+  at the first return to the Builder (the script's error is read as not-`GO`). No
+  `/adlc-autopilot` alias was added, and the explainer still describes the local recipe as by
+  hand only.
 
 - **The fix-loop cap counts rounds, not commits, and the local recipe runs it too** (issue 35).
   The cap was written as "3 rounds" and counted as `adlc-fix:` commits on the PR's branch.
