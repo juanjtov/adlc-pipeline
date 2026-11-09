@@ -39,5 +39,9 @@ everything after at full price. To keep the discount:
   expansion); the rest is on you to keep out — verify with the hit-rate below.
 - **Don't switch model or tool set mid-run** — both sit at the front of the prefix; changing
   either rebuilds the cache from scratch. Each role already has a fixed model and `tools:`.
+- **A wait longer than the cache lifetime re-prices the next turn.** The lifetime is 5
+  minutes or 1 hour (`promptCacheTtl` / `subagentPromptCacheTtl` in `.claude/settings.json`);
+  after one blocking tool call that outlasts it, the next turn pays full input price for the
+  whole session. Run a long command in the background, or keep each wait under the lifetime.
 - **Verify it, don't assume it.** With telemetry on, `adlc-cache.sh` reports cache-read %
   per agent; a lane reading 0 from cache means a silent invalidator crept into the prefix.

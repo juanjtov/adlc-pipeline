@@ -65,6 +65,7 @@ templates/                     # what the wizard fills into the host repo
   settings.deny.json           # harness deny rules (no push-to-main / no self-merge)
   settings.telemetry.json      # opt-in OTel env for per-agent token/cost/latency
   settings.mission-control.json   # opt-in OTel env that sends the same data straight to Mission Control
+  settings.cache.json          # prompt-cache lifetime: promptCacheTtl + subagentPromptCacheTtl at 1h
   github/labels.sh · adlc-builder.yml · adlc-qa.yml · adlc-review.yml · adlc-fix.yml
   github/adlc-intake.yml · adlc-design.yml        # auto-start (autopilot) lanes
   github/adlc-fast.yml                            # ← fast lane for trivial changes
@@ -75,6 +76,7 @@ templates/                     # what the wizard fills into the host repo
             adlc-cache.sh · adlc-triage.sh · adlc-pr-stage.sh · adlc-branch-issue.sh   # deterministic logic
             adlc-run-log.sh · adlc-cycle.sh                                            # the cycle-retro's two ledgers
             adlc-relabel.sh                                                            # one state per issue: move to a stage:/gate: label in one call
+            adlc-adr-check.sh                                                          # an ADR's Scope = the scope file; each Guarantees row names a test that exists
             #   adlc-cache.sh        = prompt-cache hit-rate rollup
             #   adlc-run-log.sh      = run ledger: tokens · cost · seconds per agent run (Mission Control / OTel / Actions)
             #   adlc-cycle.sh        = cycle time per stage + fix rounds per issue, from the label timeline; the ranked report
@@ -107,7 +109,11 @@ hook**, so your machine and Actions run the same code. The Builder declares each
 in `.adlc/scope/<issue>.txt`; the diff-scope check fails a lane PR that strays outside it or
 declares none. That check and the fast-lane cap run on `pull_request_target` — the workflow and
 scripts come from the default branch and the PR is only read as data — so a PR cannot edit the
-guards that judge it. `adlc-doctor.sh` validates a host repo's setup (deny rules, unfilled
+guards that judge it. `adlc-adr-check.sh` holds an ADR to its own words: its `## Scope` must
+match that scope file (the `docs/` lines the design lane puts there aside), and each row of its `## Guarantees` table must name a test that
+exists (`path::node`) or say `unenforced — <reason>`; the Builder, the Architect's local review
+and QA run it, no workflow does, and ADRs with neither section (older ones) are skipped.
+`adlc-doctor.sh` validates a host repo's setup (deny rules, unfilled
 placeholders, lanes that can't run their agent, skills, the five agent copies and their model
 lines, labels, whether GitHub is still running the workflows at all, and whether the default
 branch has a merge gate). Judgment guardrails
@@ -165,7 +171,11 @@ guards keep the discount: `adlc-doctor.sh` fails a setup that leaves the unambig
 smells (an unfilled placeholder, a live CI run-id expansion) in a context file, and `adlc-cache.sh`
 rolls up the `cacheRead` share per agent from the same telemetry — a lane reading 0 from cache
 flags a silent invalidator. Caching regressions are silent (requests still succeed, the bill just
-rises), so the metric is the point.
+rises), so the metric is the point. The cache also expires: a run that blocks on a test suite
+for longer than the cache lifetime pays full input price on its next turn, so the wizard merges
+`settings.cache.json` (`promptCacheTtl` and `subagentPromptCacheTtl`, both `"1h"`) into
+`.claude/settings.json`. A 1-hour cache write is billed at a higher rate than a 5-minute one, so
+this pays off only where runs do wait that long; removing the two keys undoes it.
 
 ### Two layers, on purpose
 

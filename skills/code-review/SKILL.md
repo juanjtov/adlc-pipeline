@@ -16,6 +16,9 @@ Use it in the `adversarial-reviewer` agent, in the QA gate, or to guide a human 
    contradictions, ordering/off-by-one, vulnerability exploits (each `adlc:security-gate`
    attack class), and **hallucinated APIs** — symbols/params/imports/flags that don't exist
    in this repo or its dependencies. Confirm every unfamiliar symbol against the code.
+   A regex or word list over **model text** that gates a write, a retry or a user-visible
+   claim gets the input-shape probes of `adlc:security-gate` §7 each time the diff adds or
+   changes one — the list lives there, once.
 2. **Enforce contracts.** Strict adherence to the ADR + task breakdown (declared diff scope,
    designed approach) and to the architectural + security constraints in
    `project-conventions` / `adlc:security-gate`. Unjustified deviation is a finding.

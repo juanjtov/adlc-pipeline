@@ -161,6 +161,11 @@ Create/write:
    own guard hook, which needs nothing installed in the host repo. Do **not** add
    `permissions.allow` rules here — they would apply to every role alike. Each Actions lane
    grants its own tools in its workflow (Phase 3).
+   In the same write, merge the two keys of `templates/settings.cache.json` (`promptCacheTtl`
+   and `subagentPromptCacheTtl`, both `"1h"`; not its `_comment`), keeping a value the file
+   already has for either. Tell the user in one line: the prompt cache is asked to live 1 hour,
+   so a wait on a long test suite does not re-price the next turn at full input; cache writes
+   are billed higher; removing the two keys undoes it.
 
 4. `docs/adlc/CHARTER.md`
    — from `templates/charter.md.tmpl`. This is the per-project charter: it references the
@@ -174,7 +179,9 @@ Create/write:
 
 6. `docs/adr/template.md` and `docs/adr/0001-adopt-agentic-sdlc.md`
    — from `templates/adr-template.md` and a seeded first ADR recording the adoption
-   decision and the answers from Phase 1.
+   decision and the answers from Phase 1. The seeded ADR decides no code: leave the
+   template's `## Scope` and `## Guarantees` out of it (`adlc-adr-check.sh` checks only an
+   ADR that has one of the two, so ADRs written before this template are not held to it).
 
 7. `CLAUDE.md`
    — if none exists, create one from `templates/host-CLAUDE.md.tmpl`: the one-liner, the
@@ -191,7 +198,7 @@ Create/write:
 
 8b. `.adlc/scripts/` + the local guard — copy `templates/scripts/*.sh` to `.adlc/scripts/`
    (chmod +x). These are the **deterministic guardrails** (`adlc-diff-scope`, `adlc-tripwire-check`,
-   `adlc-fix-cap`, `adlc-verdict`, `adlc-relabel`, `adlc-metrics`, `adlc-run-log`, `adlc-cycle`, `adlc-doctor`) that the workflows and the local
+   `adlc-fix-cap`, `adlc-verdict`, `adlc-relabel`, `adlc-adr-check`, `adlc-metrics`, `adlc-run-log`, `adlc-cycle`, `adlc-doctor`) that the workflows and the local
    hook call — one unit-tested source of truth, not prose. Also write the plugin's version to
    `.adlc/VERSION` (one line): read `.version` from `${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json`.
    That stamp says which plugin release these frozen copies came from, so `adlc-doctor.sh` can tell

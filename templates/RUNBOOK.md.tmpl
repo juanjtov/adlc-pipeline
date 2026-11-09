@@ -69,6 +69,8 @@ directly to a fresh issue (your own triage) or after the Analyst recommends FAST
    `.claude/agents/adlc-architect.md`).
 2. It reviews for diff-scope + design conformance and submits `--approve` /
    `--request-changes`. On approval, you (or CI) advance the issue `stage:build → stage:qa`.
+   It runs `.adlc/scripts/adlc-adr-check.sh` (you can too): the ADR's `## Scope` against the
+   scope file, and every `## Guarantees` row against the test it names.
 
 ## Stage 5 — QA gate (QA & Release/Ops)
 

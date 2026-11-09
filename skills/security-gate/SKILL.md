@@ -1,6 +1,6 @@
 ---
 name: security-gate
-description: Portable secure-coding checklist and security gate — tenant/scope isolation, parameterized SQL, auth/session validation, secrets, middleware, uploads, severity rubric. Builder loads it generatively (write safe code); QA/Ops loads it adversarially (break the PR).
+description: Portable secure-coding checklist and security gate — tenant/scope isolation, parameterized SQL, auth/session validation, secrets, middleware, uploads, text classifiers over model output, severity rubric. Builder loads it generatively (write safe code); QA/Ops loads it adversarially (break the PR).
 ---
 
 # Security — one skill, two modes
@@ -65,6 +65,26 @@ the CSRF/public-path allowlist, or CSRF 403s them before their own guard runs.
 PUT (upload) and GET (download) signed URLs are separate; the DB stores object paths,
 never signed URLs; retrieval regenerates fresh GET URLs. Object paths are scope-prefixed;
 adversarial: try fetching another tenant's object path.
+
+## 7. Text classifiers over LLM output
+
+Trigger: the diff adds or changes a regex or word list whose input is **model text** and
+whose result gates a write, a retry or a user-visible claim ("is this a bare question?",
+"does this claim completion?"). These detectors keep falling to the same input shapes, so
+probe every one, in each of the project's languages (an inverted `¿`/`¡` after a comma or a
+courtesy word included): an emoji or check mark used as a status (`✅ Who is notified?`) ·
+an em-dash or comma join (`Happy to help — adding the task now. Who…?`) · a claim in a
+parenthetical before the question · a claim and a question in one sentence · an idiom with
+no verb (`All set!`) · negation (`Nothing was saved`) · markup and curly quotes around the
+matched words · and a positive control: a string the detector must reject.
+
+- Generative: those shapes are the detector's tests. If the project keeps a shared phrasing
+  corpus, the tests load it; a detector with its own fresh list repeats the last one's holes.
+- Adversarial: put each shape to the changed detector (run it where you have a shell, trace
+  the pattern by hand where you do not), and run it against the project's shared phrasing
+  corpus if one exists. A shape that flips the gate is a finding, classed `missing-edge-case`
+  or `logic-contradiction` (never a class of its own), with the severity of what the gate
+  then lets through.
 
 ## Severity rubric (gate criteria)
 

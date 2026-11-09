@@ -518,6 +518,8 @@ g D $RV feat 'git checkout main'
 g A $AR feat 'gh issue list --label stage:build --state open'
 g A $AR feat 'gh issue edit 5 --remove-label stage:design --add-label stage:build'
 g A $AR feat '.adlc/scripts/adlc-relabel.sh 5 stage:build'
+g A $AR feat '.adlc/scripts/adlc-adr-check.sh'                              # a script that calls neither gh nor git: the role limits do not reach it
+g A adlc-architect feat 'bash .adlc/scripts/adlc-adr-check.sh docs/adr'
 g A $AR feat 'gh pr review 5 --request-changes --body x'
 g D $AR feat 'gh pr create --title x'
 g D $AR feat 'git commit -m adr'

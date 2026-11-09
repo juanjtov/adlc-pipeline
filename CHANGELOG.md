@@ -11,9 +11,60 @@ it differs from the installed plugin.
 
 Tooling refresh needed: **yes** — `adlc-relabel.sh` is new and the lanes call it; the `adlc-log-findings.sh` copy gains the backtick-wrapped
 marker, the per-comment time, the skipped-line report and the closed class list below, the `adlc-cycle.sh` copy the
-verdict-based round count and the next-label end of a stage interval, the `adlc-doctor.sh` copy the Actions check, and the `adlc-metrics.sh` copy the `infra_failed` line. The retro and cycle-retro recipes, the role prompts and the guard hook live in the plugin,
+verdict-based round count and the next-label end of a stage interval, the `adlc-doctor.sh` copy the Actions check, and the `adlc-metrics.sh` copy the `infra_failed` line;
+`adlc-adr-check.sh` is new, `docs/adr/template.md` gains `## Scope` and `## Guarantees` (the wizard shows the
+difference and asks before it replaces yours), the RUNBOOK's Stage 4 names the check, and the wizard merges the
+new `settings.cache.json` into `.claude/settings.json`. The security-gate, code-review and efficient-runs skills,
+the retro and cycle-retro recipes, the role prompts and the guard hook live in the plugin,
 which every session loads from the installed plugin, so those parts need no refresh.
 
+- **The wizard sets the prompt-cache lifetime to 1 hour** (issue 57). On one host 321 of 8,491
+  pipeline calls in 30 days came more than 5 minutes after the previous call of the same run,
+  93% of them behind a blocking wait on a test suite, a lock or a CI run; they read 7% of their
+  prompt from cache against 97.7% for calls under 2 minutes apart, and were 38% of the spend.
+  New `templates/settings.cache.json` holds `promptCacheTtl` and `subagentPromptCacheTtl`, both
+  `"1h"`, and the wizard merges the two keys into `.claude/settings.json` with the deny rules,
+  keeping a value already there and saying in one line what they do; removing them undoes it.
+  The trade-off is in the file: a 1-hour cache write is billed at a higher rate than a 5-minute
+  one (2× base input against 1.25× when the issue was written), so a repo whose runs never
+  wait longer than 5 minutes pays more with the keys than without. `efficient-runs` gains one
+  rule: a blocking call that outlasts the cache lifetime re-prices the next turn at full input,
+  so wait in the background or keep each wait under it. Not checked: that every Claude Code
+  version reads the two keys from a project's settings file (the issue reports 2.1.318 or
+  newer), and what the Actions lanes do with them. The doctor does not look for the keys: a
+  repo that took them out on purpose would be told about it on every run.
+- **An ADR states its scope and what pins each guarantee, and `adlc-adr-check.sh` holds it to
+  both** (issue 55). The template had Context / Decision / Alternatives / Consequences only, so
+  a Decision could promise more than the tests deliver and nothing failed when the promise
+  rotted: one host logged an ADR claim stronger than the guard it described, stale text and a
+  wrong citation in two ADRs, and an ADR amended with no conformance check, in ten days. The
+  template gains `**Issue:** #N` in its header, `## Scope` (a fenced block of path prefixes,
+  the lines of `.adlc/scope/<issue>.txt`) and `## Guarantees` (a table: claim → the
+  `path::node` of the test that pins it, or `unenforced — <reason>`). New
+  `adlc-adr-check.sh [adr-dir]` reports every problem, one line each, and exits 1: a missing
+  section, a Scope with no block, a row that is neither form, a path that does not exist, a
+  node that is not in that file as a whole word, an `unenforced` with no reason, and, where
+  the ADR names its issue and the scope file exists, any difference between the two (`docs/`
+  lines of the scope file aside: the design lane puts the files it commits there). An ADR
+  with neither section is skipped and listed, so ADRs written before this template keep
+  passing with no cut-off to maintain; the cost is that a new ADR with both left out is
+  skipped too, which the Architect's review is told to treat as a finding. The Builder runs
+  the script before opening the PR, the Architect in its conformance review, and QA with the
+  battery; in the Actions review lane the Architect has no grant for it and reads the two
+  sections instead. Not done: no workflow runs it (`adlc-diff-scope.yml` never checks out the
+  PR head, and `adlc-ci.yml` has no guards job), the design lane does not write the scope file
+  from the ADR's Scope, and the node check is a word search, not a test collector.
+- **A security-gate attack class for text classifiers over LLM output** (issue 54). On one
+  host a chat agent gated writes on regex and word-list predicates over model text; five PRs in
+  ten days each wrote a fresh detector, and each fell to input shapes an earlier review had
+  already found, about 28 findings in all. `security-gate` gains §7: when a diff adds or
+  changes a regex or word list whose input is model text and whose result gates a write, a
+  retry or a user-visible claim, probe it in each of the project's languages with an emoji or
+  check mark as status, em-dash and comma joins, a claim in a parenthetical, a claim and a
+  question in one sentence, an idiom with no verb, negation, markup and curly quotes, and a
+  positive control it must reject, and run it against the project's shared phrasing corpus if
+  one exists. `code-review` points at that list rather than repeating it. Findings use the
+  closed class list (`missing-edge-case`, `logic-contradiction`); there is no new class.
 - **One state per issue: `adlc-relabel.sh`, and the cycle clock ends a stage at the next
   label** (issue 38, the rest of it; PR 46 added the doctor check). Every lane and role prompt
   spelled out its own label pair, and the pairs drifted: QA's said "add `gate:deploy`" and
