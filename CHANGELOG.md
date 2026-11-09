@@ -7,6 +7,27 @@ because those are frozen copies that only change on a refresh. Your repo's `.adl
 says which release its copies came from, and `.adlc/scripts/adlc-doctor.sh` tells you when
 it differs from the installed plugin.
 
+## Unreleased (on `main` after 0.3.1)
+
+Tooling refresh needed: **no** — the change ships in the plugin's hook script and Mission
+Control, which every session and every start use from the installed plugin.
+
+- **One Mission Control shows every adopted repo on the machine, and says so** (issue 52).
+  It always could: the hook sends each event with its working directory, the server maps that
+  to a repo, and the page's repo menu switches between them. But a repo reached the menu only
+  once a pipeline agent had run in it, and a second `adlc-mission-control` in another repo
+  answered "already running, stop it first", with `--open` landing on the first repo's line.
+  Now the hook script also forwards a session starting; when the session's folder is an
+  adopted repo (the guard's own rule: `.adlc/scripts/`, `.adlc/VERSION` or
+  `docs/adlc/CHARTER.md` at or above it) the server puts that repo on the menu, and keeps
+  nothing from any other session, not even its path. A second start prints the running copy's
+  address on the repo it was run from (`?repo=owner/name`) and `--open` opens that; a repo the
+  copy has not heard of is named, not linked, since the page would show another repo's line.
+  The documented way to run a copy per repo (`ADLC_MC_HOME` and `--port` for each) stays, with
+  its limit now written down: a repo's runs land in the per-repo copy only from sessions that
+  have that `ADLC_MC_HOME` set; the rest go to the default folder's copy. `--demo` still
+  writes nothing; the guard and the server's Host and Origin checks are untouched.
+
 ## 0.3.1
 
 Covers everything on `main` after the v0.3.0 tag (`a8ddd97`) up to and including this release

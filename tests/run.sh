@@ -1450,6 +1450,15 @@ eq "" "no lane runs a repo copy" "$(grep -hoE -- '--agent adlc-[a-z-]+' "$ROOT"/
 # the guard's docstring and the reporter name both spellings
 grep -q 'adlc-<role>' "$ROOT/hooks/adlc_guard.py" && ok "the guard documents the adlc-<role> spelling" || bad "adlc_guard.py: document the vendored copies' name"
 grep -q 'adlc\[:-\]' "$ROOT/mission-control/hook.sh" && ok "Mission Control's reporter forwards adlc-<role> events" || bad "mission-control/hook.sh: must match adlc-<role> too"
+# a session starting is sent too: that is how a repo gets on the page's menu before any agent runs in it
+grep -q '"SessionStart"' "$ROOT/mission-control/hook.sh" && ok "Mission Control's reporter forwards a session starting" || bad "mission-control/hook.sh: must forward SessionStart"
+python3 -c 'import json,sys; assert "SessionStart" in json.load(open(sys.argv[1]))["hooks"]' "$ROOT/hooks/hooks.json" 2>/dev/null \
+  && ok "hooks.json fires the reporter on SessionStart" || bad "hooks.json: the reporter must run on SessionStart"
+# Mission Control decides "adopted" by the guard's markers; the two must name the same three
+for m in '.adlc/scripts' '.adlc/VERSION' 'docs/adlc/CHARTER.md'; do
+  grep -q "$m" "$ROOT/hooks/adlc-guard.sh" && grep -q "$(printf '%s' "$m" | sed "s#/#', '#g")" "$ROOT/mission-control/mc/ingest.py" \
+    && ok "guard and Mission Control both know the marker $m" || bad "marker $m: hooks/adlc-guard.sh and mission-control/mc/ingest.py must agree"
+done
 
 echo "guard hook (merge / push-to-main / force-push / role limits):"
 if command -v python3 >/dev/null 2>&1 && command -v git >/dev/null 2>&1; then
