@@ -50,13 +50,17 @@ plugin, so those parts need no refresh.
   `forced <before> <after>`) and files nothing while an open `adlc:tripwire` issue carries the
   same line (one host got the same four commits twice, a minute apart). A failed listing files
   anyway; a repo without the label gets the alert unlabelled. The RUNBOOK template now says what
-  becomes of `.adlc/scope/<n>.txt`: they stay as the record, nothing reads one after its PR
-  merges unless a later PR is tied to the same issue, and pruning is the Principal's, outside
-  the lanes (the diff-scope check refuses a lane PR that touches another issue's scope file).
+  becomes of `.adlc/scope/<n>.txt`: they stay as the record; after the merge
+  `adlc-adr-check.sh` still compares one with the Scope of each ADR naming its issue, and a
+  later PR tied to the same issue is held to it; pruning is the Principal's, outside the lanes
+  (the diff-scope check refuses a lane PR that touches another issue's scope file), and turns
+  that ADR comparison off.
   Not done: the script does not fill placeholders itself, `.adlc/VERSION` is restamped also when
   files were skipped, an alert closed and then re-triggered is filed again, two tripwire runs
   that list the open alerts at the same moment can still both file, and a force-push's commits
-  are not checked one by one.
+  are not checked one by one. The duplicate check trusts the line wherever it is: an open
+  alert issue whose body already holds the exact key line holds back a new alert for that set
+  of commits (the run still fails).
 
 - **`bug` means any defect; the change-failure metric counts `adlc:change-failure`** (issue
   21). Four parts used `bug` and meant different things: `labels.sh` described it as an

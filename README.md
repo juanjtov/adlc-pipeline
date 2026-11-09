@@ -212,9 +212,9 @@ because `/adlc-init` copies workflows and scripts into your repo as frozen files
 `.adlc/VERSION` records which release they came from, and `.adlc/scripts/adlc-doctor.sh` tells
 you when it differs from the installed plugin. The refresh copies through the plugin's
 `adlc-refresh.sh`, which prints a diff of each copy that differs and writes only when told to.
-To keep your own version of a copy, put `adlc: host-owned` in a comment within its first five
-lines (`# adlc: host-owned`): the script then skips that file and lists it, and bringing it up
-to date with the plugin is yours to do.
+To keep your own version of a script, a workflow, an agent copy or the hook, put
+`adlc: host-owned` in a comment within its first five lines (`# adlc: host-owned`): the script
+then skips that file and lists it, and bringing it up to date with the plugin is yours to do.
 
 To work on the plugin itself, load a checkout instead — `claude --plugin-dir
 /path/to/adlc-pipeline` — and `/reload-plugins` picks up edits. That loads your working

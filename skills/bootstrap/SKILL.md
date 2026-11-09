@@ -15,13 +15,15 @@ stand up the pipeline end-to-end with minimal friction. Bundled templates live u
   review and commit. (This matches the charter's propose-before-write / no-auto-commit.)
 - **Confirm before any GitHub write** (`gh label create`, creating issues) and before
   **overwriting or editing any file that already exists** — show a diff/summary and ask.
-- **A copy the host took over is never overwritten.** A file copied from `templates/` whose
-  first five lines contain `adlc: host-owned` (the host writes it in a comment, e.g.
-  `# adlc: host-owned`) stays exactly as it is, on a first run and on every refresh. Every such
-  copy — scripts, workflows, agent copies, the hook — goes through
-  `${CLAUDE_PLUGIN_ROOT}/templates/scripts/adlc-refresh.sh` (step 8b), which checks the marker,
-  prints a diff of each file that differs, and writes only with `--apply`. Never copy one of
-  them by hand, and always tell the user which files it skipped.
+- **A copy the host took over is never overwritten.** This covers the copies that go through
+  `${CLAUDE_PLUGIN_ROOT}/templates/scripts/adlc-refresh.sh` (step 8b) and no other file: the
+  scripts, `.adlc/LICENSE`, the workflows, the issue template, the agent copies, the hook. One
+  of those whose first five lines contain `adlc: host-owned` (the host writes it in a comment,
+  e.g. `# adlc: host-owned`) stays exactly as it is, on a first run and on every refresh: the
+  script checks the marker, prints a diff of each file that differs, and writes only with
+  `--apply`. Never copy one of them by hand, and always tell the user which files it skipped.
+  In the generated docs and skills (RUNBOOK, charter, ADR template, project skills) the marker
+  does nothing; the diff-and-ask rule above is what protects them.
 - Keep momentum. Batch the questions, auto-detect everything you can, and state your
   detected defaults so the user can just confirm.
 - **Generate the minimum.** Every line you write is a tax paid on every future request.

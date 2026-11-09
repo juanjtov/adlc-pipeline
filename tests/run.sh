@@ -2576,12 +2576,23 @@ rf --apply "$RH" "$RF/hook" .git/hooks/pre-commit; check 0 "filled file: the hoo
 # the plugin's own copy only: a copy of the script elsewhere has no templates beside it
 mkdir -p "$RF/copy/.adlc/scripts"; cp "$R" "$RF/copy/.adlc/scripts/"
 RFOUT=$(bash "$RF/copy/.adlc/scripts/adlc-refresh.sh" "$RH" 2>&1); check 1 "a copy of the script outside the plugin refuses to run (no templates beside it)" $?
+# An exported CDPATH makes `cd` print where it went, and the script finds its templates with a
+# cd: called by a relative path it then read that output into the templates path and refused to run.
+RFOUT=$( cd "$ROOT" && CDPATH=. bash templates/scripts/adlc-refresh.sh "$RH" 2>&1 ); check 0 "an exported CDPATH and a relative path to the script: it still finds its templates" $?
+eq "$((NSCRIPTS + 1))" "…and lists every mapped file, as without CDPATH" "$(printf '%s\n' "$RFOUT" | grep -cE ' \.adlc/(scripts/adlc-[a-z-]*\.sh|LICENSE)$')"
 # the wizard uses it, and says what was skipped
 BS="$ROOT/skills/bootstrap/SKILL.md"
 grep -q '${CLAUDE_PLUGIN_ROOT}/templates/scripts/adlc-refresh.sh "${CLAUDE_PROJECT_DIR}"' "$BS" && ok "bootstrap runs the refresh script from the plugin" || bad "bootstrap: step 8b must run \${CLAUDE_PLUGIN_ROOT}/templates/scripts/adlc-refresh.sh"
 grep -q 'adlc: host-owned' "$BS" && ok "…names the host-owned marker" || bad "bootstrap: must name the host-owned marker"
 grep -q -- '--apply' "$BS" && ok "…writes only with --apply, after showing the dry run" || bad "bootstrap: must run the dry run first, then --apply"
 grep -q 'tell the user which files it skipped' "$BS" && ok "…and tells the user what was skipped" || bad "bootstrap: must tell the user which files the refresh skipped"
+# the marker is honoured by the script, so the rule may promise it only for the script's targets
+grep -q 'A file copied from `templates/` whose' "$BS" && bad "bootstrap: the host-owned rule must not cover every file copied from templates/ (the script has a fixed list of targets)" || ok "…the host-owned rule is not promised for every file copied from templates/"
+grep -q 'In the generated docs and skills (RUNBOOK, charter, ADR template, project skills) the marker' "$BS" && ok "…and says the marker does nothing in the generated docs and skills" || bad "bootstrap: must say the marker does nothing outside the script's targets"
+printf 'x\n' > "$RF/doc"
+for t in docs/adlc/RUNBOOK.md docs/adlc/CHARTER.md docs/adr/template.md .claude/skills/project-conventions/SKILL.md .claude/skills/release-ops/SKILL.md CLAUDE.md; do
+  rf --apply "$RH" "$RF/doc" "$t"; check 2 "…which is so: '$t' is not a target the script writes" $?
+done
 grep -q 'adlc-refresh.sh "${CLAUDE_PROJECT_DIR}" <scratch file> <target>' "$BS" && ok "…with the filled files (workflows, agent copies, the hook) going through the same script" || bad "bootstrap: filled files must go through adlc-refresh.sh"
 grep -q 'copy `templates/scripts/\*.sh` to' "$BS" && bad "bootstrap must not copy templates/scripts/*.sh by hand any more" || ok "…and no longer copies templates/scripts/*.sh by hand"
 for f in "$S"/*.sh; do grep -q "${f##*/}" "$ROOT/README.md" || bad "README layout tree does not list ${f##*/}"; done
@@ -2607,6 +2618,17 @@ grep -q '^## Scope files' "$ROOT/templates/RUNBOOK.md.tmpl" && ok "RUNBOOK state
 SCT="$(mktemp -d)"; mkdir -p "$SCT/.adlc/scope"; printf 'src/\n' > "$SCT/.adlc/scope/12.txt"
 ( cd "$SCT" && printf '.adlc/scope/7.txt\n.adlc/scope/8.txt\n' | bash "$S/adlc-diff-scope.sh" build .adlc/scope/12.txt ) >/dev/null 2>&1; check 1 "…a lane PR cannot prune other issues' scope files (the diff-scope check refuses it)" $?
 ( cd "$SCT" && printf '.adlc/scope/7.txt\n.adlc/scope/8.txt\n' | bash "$S/adlc-diff-scope.sh" other ) >/dev/null 2>&1; check 0 "…a PR tied to no lane issue can (the check skips it)" $?
+# …and a merged scope file is still read: adlc-adr-check.sh compares it with the Scope of the ADR naming its issue
+RBS="$(sed -n '/^## Scope files/,/^## Isolated-worktree/p' "$ROOT/templates/RUNBOOK.md.tmpl")"
+case "$RBS" in *"nothing reads"*) bad "RUNBOOK must not say nothing reads a merged scope file (adlc-adr-check.sh does)" ;; *) ok "RUNBOOK does not say nothing reads a merged scope file" ;; esac
+case "$RBS" in *"adlc-adr-check.sh"*"A pruned file turns that ADR comparison off"*) ok "…it names adlc-adr-check.sh as a reader, and what pruning does to that check" ;; *) bad "RUNBOOK scope files: must name adlc-adr-check.sh and say pruning turns its comparison off" ;; esac
+mkdir -p "$SCT/docs/adr" "$SCT/tests"; printf 'def test_x(): pass\n' > "$SCT/tests/t.py"
+printf '# ADR 2\n\n**Issue:** #5\n\n## Scope\n\n```\nsrc/a/\n```\n\n## Guarantees\n\n| Claim | Enforced by |\n|---|---|\n| x | tests/t.py::test_x |\n' > "$SCT/docs/adr/0002-x.md"
+printf 'src/a/\nsrc/b/\n' > "$SCT/.adlc/scope/5.txt"
+( cd "$SCT" && bash "$S/adlc-adr-check.sh" ) >/dev/null 2>&1; check 1 "…as the code does: a scope file left after its merge still fails the ADR check when it differs from the ADR's Scope" $?
+rm "$SCT/.adlc/scope/5.txt"
+SCOUT=$( cd "$SCT" && bash "$S/adlc-adr-check.sh" 2>&1 ); check 0 "…and with the file pruned the check passes" $?
+case "$SCOUT" in *"its Scope is not compared"*) ok "…saying the Scope is not compared" ;; *) bad "adr-check must say the Scope is not compared once the scope file is gone (got: $SCOUT)" ;; esac
 rm -rf "$RF" "$SCT"
 
 echo ""

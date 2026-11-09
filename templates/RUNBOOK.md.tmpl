@@ -113,11 +113,14 @@ can write that line.
 ## Scope files (`.adlc/scope/<n>.txt`)
 
 One per issue, merged with its PR. They stay on the default branch as the record of what each
-change was allowed to touch; once the PR has merged nothing reads the file again, unless a later
-PR is tied to the same issue (its branch starts with the file, and is held to it). Pruning old
-ones is yours to do, in a PR tied to no lane issue: the diff-scope check fails a lane PR that
-changes another issue's scope file, a deletion included, because such a file left on the default
-branch would be the scope a later PR is held to without that PR's diff showing it.
+change was allowed to touch. After the merge two things still read a file:
+`.adlc/scripts/adlc-adr-check.sh`, which on every run compares it with the `## Scope` of each
+ADR that names the issue, and a later PR tied to the same issue (its branch starts with the
+file, and is held to it). Pruning old ones is yours to do, in a PR tied to no lane issue: the
+diff-scope check fails a lane PR that changes another issue's scope file, a deletion included,
+because such a file left on the default branch would be the scope a later PR is held to without
+that PR's diff showing it. A pruned file turns that ADR comparison off: `adlc-adr-check.sh`
+then says the Scope is not compared.
 
 ## Isolated-worktree recipe (optional, for parallel Builder/QA)
 

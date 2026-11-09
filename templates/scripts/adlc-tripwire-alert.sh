@@ -14,7 +14,10 @@
 # exact line: the tripwire once filed the same four commits twice, a minute apart. It then
 # prints that issue's number and adds no comment to it (the workflow run fails either way). A
 # closed alert does not count: the same commits flagged again after a close are filed again.
-# A listing that fails holds nothing back: when in doubt the alert is filed.
+# A listing that fails holds nothing back: when in doubt the alert is filed. The check trusts
+# the line wherever it is: any open issue it lists whose body already holds the exact line, put
+# there by whoever could write that issue, holds back the alert for that set of commits (the
+# workflow run still fails).
 #
 # The issue is filed with the label adlc:tripwire (labels.sh creates it; a direct push is a
 # process breach, not a defect, so not `bug`). If that fails, as it does in a repo whose labels
