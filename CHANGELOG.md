@@ -31,7 +31,9 @@ two more labels (`adlc:follow-up`, `adlc:accepted-risk`; the refreshed `adlc-doc
 reports them missing until you run it again), and the `adlc-metrics.sh` copy gains the
 `follow_ups_filed` line. From issues 35 and 13: `adlc-rounds.sh` is new, and the `adlc-fix.yml`,
 `adlc-fix-cap.sh` and `adlc-cycle.sh` copies call it (the three come together: the new
-`adlc-fix.yml` beside an older `adlc-fix-cap.sh` fails its cap step, it does not run uncapped),
+`adlc-fix.yml` beside an older `adlc-fix-cap.sh` fails its cap step, it does not run uncapped;
+a PR open across the refresh can be in that state too, its branch still holding the older
+scripts, until the base branch is merged into it, as the step's comment on the PR says),
 and the RUNBOOK copy gains the capped fix cycle. The security-gate, code-review and efficient-runs
 skills, the retro and cycle-retro recipes, the role prompts and the guard hook live in the plugin,
 which every session loads from the installed plugin, so those parts need no refresh.
@@ -63,7 +65,8 @@ which every session loads from the installed plugin, so those parts need no refr
   the path: it posts `ADLC-SCOPE-REQUEST: <path prefix> | <reason>` on the PR, finishes what is
   in scope and pushes. The Architect's next review answers each open request with
   `ADLC-SCOPE: GRANT <path prefix>` or `ADLC-SCOPE: DENY <path prefix>`, a grant with a CHANGES
-  verdict, and the Builder then adds that line to the scope file. The diff-scope check is
+  verdict, and the Builder then adds that line to the scope file and to the ADR's `## Scope`
+  (the one ADR edit it may make, so `adlc-adr-check.sh` still passes). The diff-scope check is
   unchanged and reads no marker: the scope file is still what it enforces, and the marker is the
   record of the decision, not an authorization check (in the Actions lanes every agent posts
   under the same account). A granted request costs one round of the cap. Not done: in the

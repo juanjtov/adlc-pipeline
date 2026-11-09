@@ -18,7 +18,8 @@
 #   Reads commit subjects on STDIN (one per line) and prints STOP (>= max 'adlc-fix:' or
 #   'adlc-fix(<scope>):' subjects) or GO. Feed it the commits of ONE pull request, and read them
 #   in a statement of their own, not in a pipe from git: a failed read is empty input, and empty
-#   input prints GO.
+#   input prints GO. A bare number is this form's max, never a PR: `adlc-fix-cap.sh 42` with
+#   nothing on stdin prints GO. The PR form needs `--pr`.
 # A max, or a PR number, that is not a whole number is an error (exit 2), never a GO.
 set -euo pipefail
 if [ "${1:-}" = "--pr" ]; then

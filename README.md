@@ -115,7 +115,8 @@ in `.adlc/scope/<issue>.txt`; the diff-scope check fails a lane PR that strays o
 declares none. A Builder that needs a path outside it asks on the PR
 (`ADLC-SCOPE-REQUEST: <path prefix> | <reason>`), and the Architect's next review answers
 `ADLC-SCOPE: GRANT <path prefix>` or `DENY`; on a grant the Builder adds that line to the scope
-file. The markers are the record of the decision, not an authorization check (in the Actions
+file and to the ADR's `## Scope`, the one ADR edit it may make, so `adlc-adr-check.sh` still
+passes. The markers are the record of the decision, not an authorization check (in the Actions
 lanes every agent posts under the same account): the scope file stays what the check enforces.
 That check and the fast-lane cap run on `pull_request_target` — the workflow and
 scripts come from the default branch and the PR is only read as data — so a PR cannot edit the

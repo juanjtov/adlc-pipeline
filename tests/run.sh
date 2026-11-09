@@ -209,6 +209,11 @@ eq GO   "adlc-fixed: is not a fix round"            "$(printf 'adlc-fixed: a\nad
 printf 'adlc-fix: a\n' | bash "$S/adlc-fix-cap.sh" abc >/dev/null 2>&1; check 2 "a max that is not a number is an error, not a GO" $?
 eq "" "…and prints no verdict" "$(printf 'adlc-fix: a\n' | bash "$S/adlc-fix-cap.sh" 3x 2>/dev/null)"
 eq GO "an empty max is the default 3, not an error" "$(printf 'adlc-fix: a\nadlc-fix: b\n' | bash "$S/adlc-fix-cap.sh" '')"
+# a bare number is this form's max, never a PR number: forgetting --pr reads (no) commit subjects and says GO, so the
+# header and the RUNBOOK's by-hand step both say to keep the --pr
+eq GO "a bare number is the max of this older form, not a PR: with nothing on stdin it prints GO" "$(bash "$S/adlc-fix-cap.sh" 42 </dev/null)"
+grep -q 'A bare number is this form.s max, never a PR' "$S/adlc-fix-cap.sh" && ok "…the header says so" || bad "adlc-fix-cap.sh's header must say a bare number is the older form's max, not a PR"
+grep -q 'Keep the `--pr`: a bare number is the older form.s max' "$ROOT/templates/RUNBOOK.md.tmpl" && ok "…and the RUNBOOK's fix cycle says to keep the --pr" || bad "RUNBOOK: the fix cycle must say a bare number is not the PR form"
 
 echo "fix rounds (adlc-rounds.sh and the cap's --pr form, against a stub gh):"
 # One definition everywhere (issues 35 and 13): a fix round of a PR is a review that sent it back,
@@ -273,6 +278,8 @@ if command -v jq >/dev/null 2>&1; then
   rounds_labels "$RD" 8 2; : > "$RD/fx/fail-comments-8"
   # PR 9: sent back four times
   rounds_labels "$RD" 9 4
+  # PR 10: no review at all, four comments by whoever, each of which only quotes a CHANGES verdict
+  rounds_comments "$RD" 10 'As the bot said: ADLC-ADV: CHANGES' '> ADLC-ADV: CHANGES' 'ADLC-ADV: CHANGES' 'I agree with ADLC-ADV: CHANGES'
   eq 0 "rounds: a PR no review sent back → 0"                                  "$(rd 1 2>&1)"
   : > "$RD/calls"
   eq 2 "rounds: label events only (the Actions lane) → one per time the label was put on; taking it off, and other labels, are not rounds" "$(rd 2 2>&1)"
@@ -295,6 +302,11 @@ if command -v jq >/dev/null 2>&1; then
   # the cap, --pr form: GO while rounds <= max, STOP past it; the request being handled is one of the rounds
   eq GO   "cap --pr: 0 rounds → GO"                                            "$(cap --pr 1 2>&1)"
   eq GO   "cap --pr: 3 rounds → GO (the third request still gets its Builder round)" "$(cap --pr 4 2>&1)"
+  # the trust model, as the header and the RUNBOOK state it: the count asks nobody who wrote a comment
+  eq "4 STOP" "every comment counts, whoever wrote it: four that merely quote a CHANGES verdict are 4 rounds, and the cap says STOP" "$(rd 10 2>&1) $(cap --pr 10 2>&1)"
+  grep -q 'every comment on the PR counts, whoever wrote it' "$S/adlc-rounds.sh" && grep -q 'when a verdict comment is edited or deleted' "$S/adlc-rounds.sh" \
+    && ok "…adlc-rounds.sh's header says who can raise the count and what lowers it" || bad "adlc-rounds.sh's header must state the trust model (every commenter counts; an edited or deleted comment lowers it)"
+  grep -q "Any commenter's marker counts" "$ROOT/templates/RUNBOOK.md.tmpl" && ok "…and so does the RUNBOOK's fix cycle" || bad "RUNBOOK: the fix cycle must say any commenter's marker counts"
   eq STOP "cap --pr: 4 rounds → STOP"                                          "$(cap --pr 9 2>&1)"
   eq GO   "cap --pr: max 3 is the default, and an empty max is the default too" "$(cap --pr 5 '' 2>&1)"
   eq "GO STOP" "cap --pr: a max of its own (2 rounds: GO at max 2, STOP at max 1)" "$(cap --pr 2 2 2>&1) $(cap --pr 2 1 2>&1)"
@@ -1470,6 +1482,7 @@ if command -v git >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
   eq 1 "the step's env: hands it the PR number as PR"   "$(capenv '^ +PR: \$\{\{ github\.event\.pull_request\.number \}\}[[:space:]]*$')"
   eq 1 "the step's env: hands gh a token (GH_TOKEN) to read the PR with" "$(capenv '^ +GH_TOKEN: \$\{\{ (github\.token|secrets\.[A-Z_]+) \}\}([[:space:]]|$)')"
   grep -q 'adlc-fix-cap\.sh --pr "\$PR" 3' "$FC/cap.sh" && ok "the step asks the cap for this PR's rounds (--pr), max 3" || bad "the step must call adlc-fix-cap.sh --pr \"\$PR\" 3"
+  eq 0 "…and its comment claims no more than that: the job's token can write, and the step does not say it cannot" "$(capenv 'no write')"
   eq 0 "the step reads no commits (no git log)" "$(grep -vE '^[[:space:]]*#' "$FC/cap.sh" | grep -c 'git ' || true)"
   # a count that cannot be taken must stop the step: read as "0 rounds" it would never cap
   caprun feat/10-plain 11; rc=$?   # (99 = the fixture checkout itself failed)
@@ -1483,8 +1496,20 @@ if command -v git >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
   ( cd "$FC/run" && env PATH="$FC/bin:$PATH" RD_DIR="$FC" PR=12 GH_TOKEN=t GITHUB_SERVER_URL=https://example.test GITHUB_REPOSITORY=o/r GITHUB_RUN_ID=42 bash -e "$FC/tell.sh" ) >/dev/null 2>&1
   case "$(tr '\n' ' ' < "$FC/said")" in "comment 12 --body ⚠️ The fix-loop cap could not count this PR's fix rounds, so the Builder did not run."*"https://example.test/o/r/actions/runs/42 ") ok "a cap that could not run is said on the PR, with a link to the run" ;;
     *) bad "a cap that could not run is said on the PR, with a link to the run (got '$(cat "$FC/said")')" ;; esac
+  case "$(cat "$FC/said")" in *"merge the base branch into this PR"*) ok "…and it names the cause a re-run alone cannot fix: a branch from before a tooling refresh, to be brought up to its base" ;;
+    *) bad "the comment must say to merge the base branch into the PR (a branch from before a refresh holds the older scripts)" ;; esac
   eq 1 "…by a step that runs only when the cap step itself failed" \
      "$(awk '/^      - / { s = ($0 ~ /- name: Say that the cap could not run/) } s' "$FW" | grep -cE "^ +if: (failure|always)\(\) && steps\.cap\.outcome == 'failure'[[:space:]]*$" || true)"
+  # that case, run: a PR open across a tooling refresh. The workflow is the new one, the branch still holds the cap
+  # from before --pr (its stdin form, which reads `--pr` as a max that is not a number). The step fails; it is no GO.
+  printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail' 'max="${1:-3}"' \
+    'case "$max" in ""|*[!0-9]*) echo "max must be a whole number, got $max" >&2; exit 2 ;; esac' \
+    'n=$(grep -cE "^adlc-fix(\([^)]*\))?:" || true)' 'if [ "${n:-0}" -ge "$max" ]; then echo STOP; else echo GO; fi' > "$FC/seed/.adlc/scripts/adlc-fix-cap.sh"
+  { fgit -C "$FC/seed" checkout -q feat/10-plain && fgit -C "$FC/seed" commit -q -am 'the cap from before --pr'; } >/dev/null 2>&1
+  eq GO "fixture: the older cap still answers its own stdin form" "$(printf 'feat: x\n' | bash "$FC/seed/.adlc/scripts/adlc-fix-cap.sh" 3)"
+  caprun feat/10-plain 7; rc=$?
+  case "$rc" in 0|99) bad "a branch that still holds the cap from before --pr fails the step (exit $rc)" ;; *) ok "a branch that still holds the cap from before --pr fails the step" ;; esac
+  eq "" "…with no decision and no output (it does not run uncapped)" "$(capsaid)"
   # an answer that is neither STOP nor GO is no GO either
   printf '#!/usr/bin/env bash\necho MAYBE\n' > "$FC/seed/.adlc/scripts/adlc-fix-cap.sh"
   { fgit -C "$FC/seed" checkout -q feat/10-plain && fgit -C "$FC/seed" commit -q -am 'a cap that answers neither'; } >/dev/null 2>&1
@@ -1510,6 +1535,30 @@ done
 grep -q 'ADLC-SCOPE-REQUEST: <path prefix> | <reason>' "$RSA" && ok "role-architect knows the request marker" || bad "role-architect must name the ADLC-SCOPE-REQUEST marker"
 grep -q 'end that review CHANGES' "$RSA" && ok "role-architect: a grant comes with a CHANGES verdict (the loop returns the PR to the Builder)" || bad "role-architect: a grant must come with a CHANGES verdict"
 grep -q 'post a PR comment whose last line is `ADLC-ARCH: PASS` or' "$RSA" && ok "role-architect: outside the lanes the verdict is a PR comment marker too (what the cap counts)" || bad "role-architect: outside the lanes the verdict must also be a PR comment marker"
+# A grant must not leave the PR failing adlc-adr-check.sh, which holds the scope file to the ADR's `## Scope` (issue 55):
+# the granted line goes into both, the one ADR edit the Builder may make. Run the check on a checkout after such a grant.
+GR="$(mktemp -d)"; mkdir -p "$GR/docs/adr" "$GR/.adlc/scope"
+gradr() { printf '# ADR-0002: x\n\n**Status:** Proposed  ·  **Issue:** #7\n\n## Scope\n\n```\n%b```\n\n## Guarantees\n\n| Claim | Pinned by |\n|---|---|\n| x | unenforced — a fixture |\n' "$1" > "$GR/docs/adr/0002-x.md"; }   # <Scope lines>
+grc()   { ( cd "$GR" && bash "$S/adlc-adr-check.sh" ) >"$GR/out" 2>"$GR/err"; }
+grds()  { ( cd "$GR" && printf 'docs/adr/0002-x.md\n.adlc/scope/7.txt\nsrc/b/x.py\n' | bash "$S/adlc-diff-scope.sh" build .adlc/scope/7.txt ) >/dev/null 2>&1; }   # the grant commit's files
+gradr 'src/a/\ntests/\n'; printf 'docs/adr/0002-x.md\nsrc/a/\ntests/\n' > "$GR/.adlc/scope/7.txt"
+grc; check 0 "fixture: before the grant the ADR's Scope and the scope file agree" $?
+echo 'src/b/' >> "$GR/.adlc/scope/7.txt"   # ADLC-SCOPE: GRANT src/b/, the scope file alone
+grc; check 1 "a granted line added to the scope file alone fails adlc-adr-check.sh" $?
+eq 1 "…which names the line no ADR lists" "$(grep -c "'src/b/' is in no Scope section" "$GR/err")"
+gradr 'src/a/\ntests/\nsrc/b/\n'       # …and to the ADR's Scope
+grc; check 0 "with the same line in the ADR's Scope too, adlc-adr-check.sh passes" $?
+grds; check 0 "…and that commit (the scope file, the ADR, a file under the granted prefix) is inside the diff scope" $?
+printf 'src/a/\ntests/\nsrc/b/\n' > "$GR/.adlc/scope/7.txt"
+grds; check 1 "…but not when the scope file does not list the ADR's path (role-builder says to list it)" $?
+rm -rf "$GR"
+grep -q 'ADR.s `## Scope` block, in one commit (the one ADR edit that is yours; list the ADR.s path in' "$RSB" && ok "role-builder: on GRANT the line goes into the scope file and the ADR's Scope, in one commit, with the ADR's path in scope" \
+  || bad "role-builder: on GRANT the line must go into the scope file and the ADR's ## Scope, in one commit"
+eq 2 "role-builder: its two 'the ADR is not yours' rules make that one exception" "$(tr '\n' ' ' < "$RSB" | grep -o 'a granted Scope line aside' | wc -l | tr -d ' ')"
+grep -q 'and to the ADR.s `## Scope` (the one ADR edit it may make' "$RSA" && grep -q 'other change to the ADR in the PR is a finding' "$RSA" \
+  && ok "role-architect: the Builder's grant edit to the ADR is expected, any other ADR change is a finding" || bad "role-architect must say the grant goes into the ADR's ## Scope and nothing else of the ADR may change"
+grep -q 'from outside the pipeline grants nothing' "$RSA" && ok "role-architect: a GRANT line from outside the pipeline grants nothing" || bad "role-architect must say a GRANT line from outside the pipeline grants nothing"
+grep -q 'and to the ADR.s `## Scope`, the one ADR edit it may make' "$ROOT/README.md" && ok "README says where a granted line goes" || bad "README: a granted line goes into the scope file and the ADR's ## Scope"
 eq "skills/role-architect/SKILL.md skills/role-builder/SKILL.md " "the scope markers live in the two role prompts and in no other prompt, lane or template" \
    "$(cd "$ROOT" && grep -rl 'ADLC-SCOPE' skills agents commands templates hooks 2>/dev/null | sort | tr '\n' ' ')"
 for f in "$S"/*.sh; do

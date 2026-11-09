@@ -76,10 +76,14 @@ directly to a fresh issue (your own triage) or after the Analyst recommends FAST
    Builder again on the PR, then the reviews again. On `STOP` (the reviews have sent this PR
    back more than 3 times), label the PR `needs:human` (`gh pr edit <pr> --add-label needs:human`)
    and stop: a person takes it from there. If it prints neither, the count could not be read;
-   that is not a `GO`. The cap counts reviews, not commits. Run by hand, nothing puts the
+   that is not a `GO`. Keep the `--pr`: a bare number is the older form's max, which reads
+   commit subjects from stdin and, given none, prints `GO`. The cap counts reviews, not
+   commits. Run by hand, nothing puts the
    `adlc:changes-requested` label on, so what it counts here is the reviewers' PR comments
    whose last verdict marker is `ADLC-ADV: CHANGES` or `ADLC-ARCH: CHANGES`; a request for
-   changes that left no such comment is not counted.
+   changes that left no such comment is not counted. Any commenter's marker counts, and an
+   edited or deleted comment no longer does: where others can comment, read the thread before
+   you trust the answer.
 
 ## Stage 5 — QA gate (QA & Release/Ops)
 

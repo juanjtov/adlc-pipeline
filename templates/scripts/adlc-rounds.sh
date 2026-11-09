@@ -21,6 +21,10 @@
 # re-posts its CHANGES comment within one round, or when a thread's last marker is a quoted
 # CHANGES, which the lane and adlc-metrics.sh read the same way. A label put on by hand counts
 # as a round: it starts the fix loop too.
+# Trust: every comment on the PR counts, whoever wrote it. Anyone who can comment (on a public
+# repo, anyone) can raise the count and so bring the cap's STOP forward. Nobody can take it below
+# the label events; the part only comments carry (all of it in a repo run by hand) goes down
+# when a verdict comment is edited or deleted.
 #
 # Usage:  adlc-rounds.sh <pr>       prints a whole number
 # Exit 2 on a bad argument. Exit 1, with a line on stderr and nothing on stdout, when the

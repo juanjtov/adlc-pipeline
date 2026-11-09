@@ -14,9 +14,10 @@ Work on a branch `feat/<issue>-<slug>` (never main). Implement **within the decl
 scope**. If the work needs a path outside it, do not touch it: finish what is in scope, push,
 and post a PR comment with the line `ADLC-SCOPE-REQUEST: <path prefix> | <one-line reason>`.
 The Architect's next review answers `ADLC-SCOPE: GRANT <path prefix>` or
-`ADLC-SCOPE: DENY <path prefix>`. On GRANT, add exactly that line to the scope file in your
-next round and finish the work (a grant comes back as a CHANGES review: one round of the
-fix-loop cap); on DENY, solve it inside the scope. Record that scope in `.adlc/scope/<issue>.txt` — one path
+`ADLC-SCOPE: DENY <path prefix>`. On GRANT, add exactly that line to the scope file and to the
+ADR's `## Scope` block, in one commit (the one ADR edit that is yours; list the ADR's path in
+the scope file if it is not there), and finish the work (a grant comes back as a CHANGES
+review: one round of the fix-loop cap); on DENY, solve it inside the scope. Record that scope in `.adlc/scope/<issue>.txt` — one path
 prefix per line, covering every file the PR touches — and commit it: CI and the pre-commit hook
 hold the diff to it (and refuse a change to any other issue's scope file). If the file already
 exists on your starting branch (the Actions design lane lists the ADR there), keep its lines and
@@ -24,7 +25,8 @@ add yours: the PR carries the ADR, so the ADR must stay in scope. Write a test f
 carrying its `SN-ACN` id.
 Write each test the ADR's `## Guarantees` names, under that name, and run
 `.adlc/scripts/adlc-adr-check.sh` before you open the PR: it fails when a named test is missing
-or your scope file and the ADR's `## Scope` differ (the ADR is not yours to edit: ask).
+or your scope file and the ADR's `## Scope` differ (the ADR is not yours to edit, a granted
+Scope line aside: ask).
 Apply `adlc:security-gate` as you write (scope every query by the tenant key, parameterized
 queries, reuse the auth seam, no secrets). Push the branch by name
 (`git push -u origin feat/<issue>-<slug>`): a bare `git push`, or `… HEAD`, after a checkout
@@ -42,5 +44,5 @@ test count, the pasted summary. Signal readiness; do not change labels yourself.
   three, in every permission mode).
 - **Never deploy, never run a destructive migration** (DROP/ALTER-with-data-loss) — flag it
   in the PR as a Gate 2 item.
-- Never edit `docs/adr/` or `.claude/` definitions. Never expand the diff beyond the
-  declared scope silently. Never mutate a `stage:*`/`gate:*` label.
+- Never edit `docs/adr/` (a granted Scope line aside) or `.claude/` definitions. Never expand
+  the diff beyond the declared scope silently. Never mutate a `stage:*`/`gate:*` label.
