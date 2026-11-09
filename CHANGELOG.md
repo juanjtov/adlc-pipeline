@@ -46,12 +46,18 @@ plugin, so those parts need no refresh.
   on one issue from the Principal's own session, one subagent per role (the repo's `adlc-<role>`
   copies): an author gate against the charter's `Principal:` line; Gate 1 auto-approved for a
   `FULL` triage verdict only (it puts `adlc:autopilot` on the issue and moves it with
-  `adlc-relabel.sh`; a `FAST` verdict waits for the Principal); the adversarial review, then the
-  conformance review, read with `adlc-verdict.sh`; `adlc-fix-cap.sh --pr <pr>` before each
-  return to the Builder; round 2 as a review of the fix delta; one ADR amendment pass before
-  `stage:qa`; a QA that trusts the recorded verdicts; the fast lane, with `adlc-triage.sh` on
-  the real diff, once the Principal has applied `stage:fast`; and `needs:human` plus a comment
-  at every stop. It never merges or deploys, `/security-review` and accepting the ADR stay with
+  `adlc-relabel.sh`; a `FAST` verdict waits for the Principal); a PR taken by its head branch
+  `feat/<issue>-…` and only when the Principal opened it; the adversarial review, then the
+  conformance review, read with `adlc-verdict.sh` from the comments of the current round only
+  (a reviewer that posted none stops the run); `adlc-fix-cap.sh --pr <pr>` before each return
+  to the Builder, each labelled `adlc:changes-requested` so the cap counts QA and red-check
+  returns too, and each followed by the reviews again; round 2 as a re-check of every earlier
+  finding plus the fix delta; one ADR amendment pass before `stage:qa`; a QA that trusts the
+  recorded verdicts and still runs its own security gate; the fast lane (the cap with
+  `adlc-triage.sh` on the real diff, then the adversarial review; no QA) once the Principal has
+  applied `stage:fast`; and `needs:human` plus a comment at a stop (a `FAST` verdict, a charter
+  with no Principal handle and installed agent lanes end the run with a report and no label).
+  It never merges or deploys, `/security-review` and accepting the ADR stay with
   the Principal, and only a typed `/adlc:autopilot` starts it (`disable-model-invocation`). The
   `context-budget` skill holds the generic rules: what each role reads, a size cap per artifact
   (stated defaults), one fix series per round, one amendment pass, stop when the verdict is
@@ -62,7 +68,8 @@ plugin, so those parts need no refresh.
   and the README says so. That host's own ledger showed 38 % fewer tokens per acceptance
   criterion on its first two chains; that is one host's self-recorded figure, not a measurement
   of this release. With a copy of `adlc-fix-cap.sh` that has no `--pr` form the autopilot stops
-  at the first return to the Builder (the script's error is read as not-`GO`). No
+  at the first return to the Builder (the script's error is read as not-`GO`). The budget never
+  outranks a role skill, and under it QA still attempts every security-gate class. No
   `/adlc-autopilot` alias was added, and the explainer still describes the local recipe as by
   hand only.
 

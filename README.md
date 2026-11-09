@@ -48,7 +48,7 @@ skills/
   ablation/                    # periodic context reset so the setup doesn't rot append-only
   bootstrap/                   # ← the dual-mode adoption WIZARD
   intake/                      # start a request: idea / PRD / issue / Notion-Linear ticket → sharpened stage:intake issue
-  autopilot/                   # local orchestrator: one issue → QA-approved PR at Gate 2, one subagent per role (never merges)
+  autopilot/                   # local orchestrator: one issue → reviewed PR at Gate 2, one subagent per role (never merges)
   context-budget/              # opt-in read / write / round caps per role; the autopilot's briefs name it
 commands/adlc-init.md          # friendly alias that launches the wizard
 commands/adlc-intake.md        # friendly alias that starts a request (the intake interview)
@@ -323,7 +323,7 @@ Try it with made-up data: `adlc-mission-control --demo --open`.
 | `/adlc-intake` | starts a request: interview, preview, then a `stage:intake` issue |
 | `/adlc-mission-control` | opens the live view of the line |
 | `/adlc-model [<role> <model>]` | prints which model each of this repo's five agent copies runs on, or sets one (the `model:` line of `.claude/agents/adlc-<role>.md`; nothing is committed) |
-| `/adlc:autopilot <issue>` | runs the whole chain on one issue from your own session, one subagent per role, until a QA-approved PR waits at Gate 2; Gate 1 is auto-approved for a `FULL` triage verdict only, and nothing is merged or deployed; its subagents load the opt-in `adlc:context-budget` skill ([Automation modes](#automation-modes)) |
+| `/adlc:autopilot <issue>` | runs the whole chain on one issue from your own session, one subagent per role, until its PR waits at Gate 2 (QA-approved on the full lane; on the fast lane, adversarially reviewed, with no QA); Gate 1 is auto-approved for a `FULL` triage verdict only, and nothing is merged or deployed; its briefs tell each subagent to load the opt-in `adlc:context-budget` skill ([Automation modes](#automation-modes)) |
 | `/adlc:retro` | runs the self-improvement review now and proposes durable fixes |
 | `/adlc:cycle-retro [DAYS]` | ranks where a run's time and money go (per agent, per stage, fix rounds, gate waits) and proposes pipeline-shape fixes |
 | `/adlc:ablation` | starts the periodic context reset: on a branch it empties the persistent context, re-adds only what earns its place back, and logs that in `CONTEXT-LOG.md` |
@@ -514,11 +514,15 @@ subagent per role (this repo's `adlc-<role>` copies), and calls the scripts the 
 `adlc-relabel.sh` for every state label, `adlc-verdict.sh` for the two review markers,
 `adlc-triage.sh` on the real diff of a fast-lane PR, `adlc-fix-cap.sh` before each return to the
 Builder. It runs only on an issue the Principal filed (the handle `/adlc-init` wrote into
-`docs/adlc/CHARTER.md`), auto-approves Gate 1 for a `FULL` verdict only, putting
-`adlc:autopilot` on the issue as the record, and ends at a QA-approved PR with its Action Card,
-or at `needs:human` with a comment saying why (the author gate, an Analyst that asked questions,
-a red check that is not the Builder's to fix, a cap that did not say `GO`). What it does not do:
-merge, deploy or run a migration; start the fast lane (it runs that lane only once you have
+`docs/adlc/CHARTER.md`) and on a PR the Principal's account opened from `feat/<issue>-…`,
+auto-approves Gate 1 for a `FULL` verdict only, putting `adlc:autopilot` on the issue as the
+record, and sends every Builder fix, QA's included, back through the reviews. It ends at a PR
+with its Action Card (QA-approved on the full lane; the fast lane has the adversarial review and
+no QA), or at `needs:human` with a comment saying why (an author gate, an Analyst that asked
+questions, a reviewer that posted no verdict for the round, a red check that is not the
+Builder's to fix, a cap that did not say `GO`). Three endings carry no label, only a word to
+you: a `FAST` verdict, a charter with no Principal handle, and agent lanes found installed. What
+it does not do: merge, deploy or run a migration; start the fast lane (it runs that lane only once you have
 applied `stage:fast`, and a `FAST` recommendation waits for you); run `/security-review`; accept
 the ADR. It is a prompt, not a workflow: the scripts are deterministic, the order they are called
 in is a model following the skill. It is the generalization of a skill one adopting repo wrote
@@ -526,7 +530,7 @@ for itself and ran its pull requests through; as shipped in the plugin it has no
 end to end. Use it or the Actions agent lanes on a repo, not both: where the lanes are
 installed, the label moves it makes start them as well. Its briefs tell each subagent to load
 the opt-in `context-budget` skill (what each role reads, size caps per artifact, one ADR
-amendment pass, round 2 as a review of the fix delta); spend is still measured by
+amendment pass, round 2 as a re-check of the earlier findings plus the fix delta); spend is still measured by
 `adlc-run-log.sh`, never reported by an agent.
 
 ## Licensing

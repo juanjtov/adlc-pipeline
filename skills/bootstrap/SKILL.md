@@ -102,7 +102,7 @@ detected values pre-selected as the recommended option. Cover:
    - **Local recipe (recommended to start)** — agents run manually by the Principal per the
      RUNBOOK; labels track state; no Actions. Once a run by hand has worked,
      `/adlc:autopilot <issue>` drives the same stages for one issue from the Principal's session,
-     up to a QA-approved PR at Gate 2.
+     up to a reviewed PR at Gate 2.
    - **Full automation · public repo** — label transitions auto-trigger the lanes; the merge
      gate is real **branch protection** (free on public repos); unlimited Actions minutes.
    - **Full automation · private repo (Free plan)** — lanes still auto-trigger, on the plan's

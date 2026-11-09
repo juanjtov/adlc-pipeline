@@ -13,8 +13,9 @@ prints them all or changes one, and a model named in the call itself still wins 
 The Actions lanes run the plugin's own `adlc:<role>` agents, which keep the plugin's defaults.
 
 Unattended, one issue at a time: `/adlc:autopilot <issue>` drives the stages below from your own
-session, one subagent per role, and stops when a QA-approved PR waits at Gate 2 or when it needs
-you (`needs:human`, with a comment saying why). It auto-approves Gate 1 for a `FULL` triage
+session, one subagent per role, and stops when the PR waits at Gate 2 (QA-approved; on the fast
+lane, adversarially reviewed) or when it needs you (it says why, and most such stops label
+`needs:human`). It auto-approves Gate 1 for a `FULL` triage
 verdict only; choosing the fast lane, `/security-review`, accepting the ADR and all of Gate 2
 stay yours.
 

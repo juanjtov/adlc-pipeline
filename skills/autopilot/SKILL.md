@@ -1,11 +1,11 @@
 ---
 name: autopilot
-description: "The local orchestrator, /adlc:autopilot <issue>: from the Principal's own session, run the ADLC chain on ONE issue unattended, one subagent per role, until a QA-approved PR waits at Gate 2. Gate 1 is auto-approved for a FULL triage verdict only; nothing is merged or deployed. The local counterpart of the Actions lanes under the adlc:autopilot label. Only the Principal starts it."
+description: "The local orchestrator, /adlc:autopilot <issue>: from the Principal's own session, run the ADLC chain on ONE issue unattended, one subagent per role, until its PR waits at Gate 2 (QA-approved on the full lane, adversarially reviewed on the fast lane). Gate 1 is auto-approved for a FULL triage verdict only; nothing is merged or deployed. The local counterpart of the Actions lanes under the adlc:autopilot label. Only the Principal starts it."
 argument-hint: "<issue number>"
 disable-model-invocation: true
 ---
 
-# Autopilot (local) — one issue → a QA-approved PR waiting at Gate 2
+# Autopilot (local) — one issue → a reviewed PR waiting at Gate 2
 
 You are the Principal's own session, driving the RUNBOOK stages on issue `N` (the argument; none
 ⇒ ask) as the Actions lanes do, with the same scripts. You orchestrate only: you write no story,
@@ -21,19 +21,26 @@ and "load `adlc:context-budget` first"; it does not re-explain the pipeline. Spe
 `.adlc/scripts/adlc-relabel.sh <issue> <label>`.
 
 **Stop** = label `needs:human` (the PR; the issue while there is no PR), comment why, report to
-the Principal, run nothing more. Stop when: the issue's author is not the Principal; the Analyst
-did not reach `gate:stories`; a role left its artefact or its label move undone; a check is red
-and the fix is not the Builder's to make (a file outside the declared scope — an
-`ADLC diff-scope` failure on one included — a destructive migration, a weakened check); the cap
-does not say `GO` (step 6).
+the Principal, run nothing more. Stop when: the issue's or the PR's author is not the Principal;
+the Analyst did not reach `gate:stories`; a role left its artefact, its verdict or its label move
+undone; a check is red and the fix is not the Builder's to make (a path outside the declared
+scope that no `ADLC-SCOPE-REQUEST:` asks for, a destructive migration, a weakened check); the
+cap does not say `GO` (step 6).
+
+**The PR** of issue N is the one open PR whose head branch starts `feat/N-`
+(`gh pr list --state open --json number,headRefName,author`), never one found by its
+`Closes #N`. Its author is not the Principal, or two match ⇒ stop.
 
 0. **Author gate.** The Principal's handle is on the `**Principal:**` line of
    `docs/adlc/CHARTER.md` (`/adlc-init` writes it); none there ⇒ ask, touch nothing.
    `gh issue view N --json author,labels`: another author ⇒ stop. An Actions agent lane in
    `.github/workflows/` (`adlc-design.yml`, `adlc-review.yml`, …) is started by your label moves
-   too: say so and wait for the Principal's word. Then enter at the issue's state label:
-   `stage:intake` 1 · `gate:stories` 2 · `stage:design` 3 · `stage:build` 4 (5 when its PR is
-   open) · `stage:qa` 8 · `stage:fast` the fast lane.
+   too: say so and wait for the Principal's word. A `needs:human` from an earlier run: take it
+   off (the Principal running you again is the answer). Then enter at the issue's state label:
+   `stage:intake` 1 · `gate:stories` 2 · `stage:design` 3 · `stage:build` 4 · `stage:fast` the
+   fast lane · `gate:deploy` 9 · none ⇒ say so and end. With the PR already open, `stage:build`
+   and `stage:qa` enter at 5 and `stage:fast` at its cap, the review as a first round (the whole
+   diff: what an earlier run reviewed is unknown).
 1. **Analyst.** `adlc-product-analyst` on N. Not at `gate:stories` afterwards ⇒ stop (it asked
    questions: the Principal answers with `/adlc-intake N` and runs you again).
 2. **Gate 1.** Read the last triage verdict as the intake lane does:
@@ -48,41 +55,45 @@ does not say `GO` (step 6).
 4. **Build.** `adlc-builder` on N with the ADR path: it commits the ADR on `feat/<N>-<slug>`,
    lists the ADR's path beside the breakdown's prefixes in `.adlc/scope/<N>.txt`, and opens a PR
    whose body starts `Closes #N`. Then `gh pr checks <pr> --watch`, one blocking call (a repo
-   with no checks: go on). Red and the Builder's to fix ⇒ step 6 with the failing log; the same
-   check red after that fix ⇒ stop.
-5. **Review.** `git fetch origin` (the reviewers' git is read-only), then
+   with no checks: go on). Red and the Builder's to fix ⇒ step 6 with the failing log; red with
+   an unanswered `ADLC-SCOPE-REQUEST:` on the PR ⇒ step 5, where the Architect answers it; the
+   same check red after a fix for it ⇒ stop.
+5. **Review.** `git fetch origin` (the reviewers' git is read-only) and note `n`, the PR's
+   comment count (`gh pr view <pr> --json comments --jq '.comments | length'`). Then
    `adlc-adversarial-reviewer` and, after it, `adlc-architect` (conformance duty) on the PR. Each
    posts ONE PR comment whose last line is exactly `ADLC-ADV: PASS|CHANGES` / `ADLC-ARCH:
-   PASS|CHANGES` — a comment, not `gh pr review`: every local role acts under your `gh` login,
-   and nobody can approve their own PR on GitHub. Read them as the review lane does:
-   `bodies=$(gh pr view <pr> --json comments --jq '.comments[].body')`, then
-   `printf '%s\n' "$bodies" | .adlc/scripts/adlc-verdict.sh ADLC-ADV` (and `ADLC-ARCH`). Anything
-   but `PASS`, empty included, is not a pass. Both `PASS` ⇒ step 7. From round 2 on, both
-   reviewers get the FIX DELTA (`git diff <the head they reviewed>..<the new head>`) and one
-   order: break the fixes, do not confirm them.
-6. **Fix.** On a verdict that is not `PASS`, label the PR `adlc:changes-requested`. Before EVERY
-   return to the Builder (a review, a red check, QA) run
-   `.adlc/scripts/adlc-fix-cap.sh --pr <pr>`: only a printed `GO` sends the PR back; `STOP`, or
-   no answer (it could not read), ⇒ stop. On `GO` take `adlc:changes-requested` off and run
-   `adlc-builder` on the same branch with ALL the findings of both comments (or the log): one
-   commit series, each subject starting `adlc-fix:`, pushed to the branch by name. Then the
-   checks and step 5 again. No polish pass: what a `PASS` leaves over is QA's.
+   PASS|CHANGES` — a comment, not `gh pr review`: all roles share your `gh` login, and nobody
+   approves their own PR on GitHub. Read THIS round's comments only:
+   `bodies=$(gh pr view <pr> --json comments --jq '.comments[<n>:][].body')`, then
+   `printf '%s\n' "$bodies" | .adlc/scripts/adlc-verdict.sh ADLC-ADV` (and `ADLC-ARCH`). An empty
+   answer ⇒ stop: that reviewer posted no verdict this round, and an older comment never stands
+   in. `CHANGES` from either ⇒ step 6. Both `PASS` ⇒ step 7. From round 2 on, each reviewer gets
+   the FIX DELTA (`git diff <the head it reviewed>..<the new head>`) and its own earlier findings:
+   an earlier finding with no fix is `CHANGES` again; then break the fixes, do not confirm them.
+6. **Fix.** EVERY return to the Builder — a `CHANGES` verdict, QA findings, a red check — goes
+   through here. Label the PR `adlc:changes-requested` (that label event is what the cap counts
+   for a QA or red-check return), then `.adlc/scripts/adlc-fix-cap.sh --pr <pr>`: only a printed
+   `GO` sends the PR back; `STOP`, or no answer (it could not read), ⇒ stop. On `GO` take the
+   label off and run `adlc-builder` on the same branch with ALL the findings (both comments,
+   QA's, or the log): one commit series, each subject starting `adlc-fix:`, pushed to the branch
+   by name. Then the checks, and ALWAYS step 5 again: no fix reaches QA or Gate 2 unreviewed. No
+   polish pass: what a `PASS` leaves over is QA's.
 7. **Amend, once.** If the PR declares a deviation or a review named drift from the ADR: check
    out the PR branch, run `adlc-architect` ONCE to amend the ADR with all of it (it writes under
    `docs/` and cannot commit), commit that one file yourself and
    `git push origin feat/<N>-<slug>`. Then `.adlc/scripts/adlc-relabel.sh N stage:qa`.
 8. **QA.** `adlc-qa-release-ops` on the PR with links to the two verdict comments: the reviews
    have run, and QA trusts the recorded verdicts — it does not re-run the reviewers'
-   reproductions. Its verdict is a comment, not `gh pr review`. Clean ⇒ QA moves the issue to
-   `gate:deploy` (`adlc-relabel.sh`) and posts the Proposed Action Card. Findings ⇒ step 6, then
-   QA again.
+   reproductions; its own security gate still runs in full. Its verdict is a comment, not
+   `gh pr review`. Clean ⇒ QA moves the issue to `gate:deploy` (`adlc-relabel.sh`) and posts the
+   Proposed Action Card. Findings ⇒ step 6; QA runs again only once step 5 has passed again.
 9. **Report** to the Principal: the PR, the Action Card, and what stays theirs before the merge
    — run `/security-review` on the branch, accept the ADR (`Proposed → Accepted`), then Gate 2
    as the RUNBOOK has it (the behind-the-base check, the merge, the deploy).
 
 **Fast lane** (issue at `stage:fast`): `adlc-builder` on the change brief (no ADR;
-`.adlc/scope/<N>.txt`; `Closes #N`), label the PR `lane:fast`, the checks as in step 4. Then the
-cap on the REAL diff, taken as `adlc-fast.yml` takes it:
+`.adlc/scope/<N>.txt`; `Closes #N`), then label the PR `lane:fast`. Before the checks (an over-cap
+PR fails `ADLC diff-scope`), the cap on the REAL diff, taken as `adlc-fast.yml` takes it:
 
 ```bash
 git fetch origin && base=$(git merge-base refs/remotes/origin/<base> refs/remotes/origin/<branch>) &&
@@ -92,8 +103,8 @@ d=$(git -c core.quotePath=false diff --numstat --no-renames --raw --ignore-submo
 
 Nothing printed (the diff could not be taken, or is empty) ⇒ stop; never read that as fast.
 `FULL` ⇒ comment the reasons it printed, take `lane:fast` off the PR,
-`.adlc/scripts/adlc-relabel.sh N stage:design`, go on from step 3 (the Builder opens a new PR;
-this one stays open as its reference). `FAST` ⇒ `adlc-adversarial-reviewer` only (there is no
-ADR): not `PASS` ⇒ step 6, then the cap and the review again; `PASS` ⇒ you move the issue with
-`.adlc/scripts/adlc-relabel.sh N gate:deploy`, post the Proposed Action Card (format:
-`adlc:charter`) on the PR, and report (step 9).
+`.adlc/scripts/adlc-relabel.sh N stage:design`, go on from step 3 (the Builder continues on this
+branch and PR). `FAST` ⇒ the checks as in step 4, then `adlc-adversarial-reviewer` only (there is
+no ADR), its `ADLC-ADV` read as in step 5: `CHANGES` ⇒ step 6, then the cap, the checks and the
+review again; `PASS` ⇒ you move the issue with `.adlc/scripts/adlc-relabel.sh N gate:deploy`,
+post the Proposed Action Card (format: `adlc:charter`) on the PR, and report (step 9).

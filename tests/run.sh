@@ -1510,8 +1510,10 @@ done
 grep -q 'ADLC-SCOPE-REQUEST: <path prefix> | <reason>' "$RSA" && ok "role-architect knows the request marker" || bad "role-architect must name the ADLC-SCOPE-REQUEST marker"
 grep -q 'end that review CHANGES' "$RSA" && ok "role-architect: a grant comes with a CHANGES verdict (the loop returns the PR to the Builder)" || bad "role-architect: a grant must come with a CHANGES verdict"
 grep -q 'post a PR comment whose last line is `ADLC-ARCH: PASS` or' "$RSA" && ok "role-architect: outside the lanes the verdict is a PR comment marker too (what the cap counts)" || bad "role-architect: outside the lanes the verdict must also be a PR comment marker"
-eq "skills/role-architect/SKILL.md skills/role-builder/SKILL.md " "the scope markers live in the two role prompts and in no other prompt, lane or template" \
+# …plus the local orchestrator, which only looks for an unanswered request (it sends that PR to the review, not to a stop)
+eq "skills/autopilot/SKILL.md skills/role-architect/SKILL.md skills/role-builder/SKILL.md " "the scope markers live in the two role prompts and the autopilot, and in no other prompt, lane or template" \
    "$(cd "$ROOT" && grep -rl 'ADLC-SCOPE' skills agents commands templates hooks 2>/dev/null | sort | tr '\n' ' ')"
+eq "" "…and the autopilot names the request only: the answer stays the Architect's" "$(grep -n 'ADLC-SCOPE:' "$ROOT/skills/autopilot/SKILL.md" || true)"
 for f in "$S"/*.sh; do
   grep -q "$(basename "$f")" "$ROOT/README.md" || bad "README's layout tree does not list $(basename "$f")"
 done
@@ -2943,6 +2945,12 @@ echo "local autopilot + context budget (issue 36: the two skills' pins, and the 
 # command it carries in full, the fast-lane cap, is run as written. Nothing here runs the
 # orchestrator itself: that needs a model and a GitHub repository.
 AP="$ROOT/skills/autopilot/SKILL.md"; CB="$ROOT/skills/context-budget/SKILL.md"; RD="$ROOT/README.md"
+# A gate is pinned as the sentence that holds it, matched on the skill's text with its line breaks
+# folded: a rewrap cannot hide one, and each sentence is one a mutation of that gate changes
+# ("Both PASS" → "Either PASS", "⇒ stop" → "⇒ go on", a step dropped or moved).
+apt="$(tr '\n' ' ' < "$AP" | tr -s ' ')"; cbt="$(tr '\n' ' ' < "$CB" | tr -s ' ')"
+aps() { case "$apt" in *"$2"*) ok "$1" ;; *) bad "$1 — autopilot must say: $2" ;; esac; }        # <name> <sentence>
+cbs() { case "$cbt" in *"$2"*) ok "$1" ;; *) bad "$1 — context-budget must say: $2" ;; esac; }
 for k in autopilot context-budget; do
   f="$ROOT/skills/$k/SKILL.md"
   [ -f "$f" ] && ok "skills/$k/SKILL.md exists" || { bad "skills/$k/SKILL.md missing"; continue; }
@@ -2980,18 +2988,46 @@ grep -q 'never run a role on its' "$AP" && ok "autopilot: no role runs on its ow
 for m in 'ADLC-ADV: PASS|CHANGES' 'ADLC-ARCH:' 'ADLC-TRIAGE:' 'ADLC-BREAKDOWN:'; do grep -qF "$m" "$AP" && ok "autopilot names the $m marker" || bad "autopilot must name the $m marker"; done
 tr='ADLC-TRIAGE:[[:space:]]*(FAST|FULL)'
 grep -qF "$tr" "$AP" && grep -qF "$tr" "$ROOT/templates/github/adlc-intake.yml" && ok "autopilot reads the triage verdict with the intake lane's expression" || bad "autopilot and adlc-intake.yml must read ADLC-TRIAGE the same way"
-vr="--json comments --jq '.comments[].body'"
-grep -qF -- "$vr" "$AP" && grep -qF -- "$vr" "$ROOT/templates/github/adlc-review.yml" && ok "…and the review verdicts from the PR's comments, as the review lane does" || bad "autopilot and adlc-review.yml must read the PR comments the same way"
-grep -q 'adlc-verdict.sh ADLC-ADV' "$AP" && ok "…through adlc-verdict.sh" || bad "autopilot must read the verdict with adlc-verdict.sh"
-grep -q 'empty included, is not a pass' "$AP" && ok "…where an empty answer is not a pass" || bad "autopilot must treat an empty verdict as not-PASS"
+grep -q 'adlc-verdict.sh ADLC-ADV' "$AP" && ok "…and the review verdicts through adlc-verdict.sh" || bad "autopilot must read the verdict with adlc-verdict.sh"
+# A verdict is this round's or none (review finding 3): round 1 ADV CHANGES + ARCH PASS, round 2 the reviewer posts
+# PASS and the Architect posts nothing. Read over every comment, adlc-verdict.sh says PASS twice, for the old head.
+aps "the review counts the PR's comments before the reviewers run" "note \`n\`, the PR's comment count (\`gh pr view <pr> --json comments --jq '.comments | length'\`)"
+aps "…and reads this round's comments only" "Read THIS round's comments only: \`bodies=\$(gh pr view <pr> --json comments --jq '.comments[<n>:][].body')\`"
+aps "…where a reviewer with no verdict this round stops the run" "An empty answer ⇒ stop: that reviewer posted no verdict this round, and an older comment never stands in."
+aps "…CHANGES from either reviewer returns the PR" "\`CHANGES\` from either ⇒ step 6."
+aps "…and only two PASS verdicts go on" "Both \`PASS\` ⇒ step 7."
+if command -v jq >/dev/null 2>&1; then
+  stale='{"comments":[{"body":"One High.\nADLC-ADV: CHANGES"},{"body":"Conforms.\nADLC-ARCH: PASS"},{"body":"Fixed.\nADLC-ADV: PASS"}]}'
+  thisround() { printf '%s' "$stale" | jq -r "$(printf '%s' "$apt" | sed -n "s/.*--jq '\(\.comments\[<n>:\]\[\]\.body\)'.*/\1/p" | sed "s/<n>/$1/")" | bash "$S/adlc-verdict.sh" "$2"; }
+  eq "PASS PASS" "fixture: read over every comment, the stale ARCH PASS of round 1 stands" "$(thisround 0 ADLC-ADV) $(thisround 0 ADLC-ARCH)"
+  eq "PASS:" "the skill's own expression, from this round's first comment on, gives the new ADV verdict and no ARCH verdict" "$(thisround 2 ADLC-ADV):$(thisround 2 ADLC-ARCH)"
+else
+  echo "  · skipped running the autopilot's this-round expression (needs jq)"
+fi
 grep -qF '`adlc-adversarial-reviewer` and, after it, `adlc-architect` (conformance duty)' "$AP" && ok "…adversarial first, then conformance (the review lane's order)" || bad "autopilot: the adversarial review must come before the conformance review"
 # the gates
 grep -q 'you never merge, deploy or run a migration' "$AP" && grep -q 'Gate 2' "$AP" && ok "autopilot: Gate 2 is never automated (no merge, deploy or migration)" || bad "autopilot must say Gate 2 / the merge is never automated"
 grep -q 'only the Principal applies `stage:fast`' "$AP" && ok "autopilot: only the Principal applies stage:fast" || bad "autopilot must leave stage:fast to the Principal"
 grep -q '`FULL` ⇒ `gh issue edit N --add-label adlc:autopilot`, `.adlc/scripts/adlc-relabel.sh N stage:design`' "$AP" && ok "autopilot: Gate 1 is auto-approved on a FULL verdict, with adlc:autopilot on the issue and the relabel script" || bad "autopilot: the Gate 1 auto-approval must be FULL-only, label adlc:autopilot, and relabel through the script"
 grep -q '`FAST` ⇒ start nothing' "$AP" && ok "…and a FAST verdict starts nothing" || bad "autopilot: a FAST verdict must start nothing"
-grep -q "/security-review" "$AP" && ok "autopilot leaves /security-review with the Principal" || bad "autopilot must leave /security-review with the Principal"
+aps "autopilot: /security-review is on the never-automated list" "only the Principal applies \`stage:fast\`; and \`/security-review\`."
+aps "…and in the report as the Principal's step" "what stays theirs before the merge — run \`/security-review\` on the branch"
+eq 2 "…and nowhere else (no step runs it)" "$(grep -o '/security-review' "$AP" | wc -l | tr -d ' ')"
+aps "autopilot: a triage comment with neither verdict stops the run" "no \`needs:human\`. Neither ⇒ stop."
 grep -q "author is not the Principal" "$AP" && grep -q 'docs/adlc/CHARTER.md' "$AP" && ok "autopilot: the author gate reads the Principal's handle from the charter" || bad "autopilot: the author gate must read the handle from docs/adlc/CHARTER.md"
+aps "…another issue author stops the run" "\`gh issue view N --json author,labels\`: another author ⇒ stop."
+# the PR gate (review finding 1): the lanes run only on a PR the Principal or the bot opened; a stranger's PR that
+# says `Closes #N` must not be the one the Builder and QA check out
+aps "autopilot: the PR is found by its head branch" "is the one open PR whose head branch starts \`feat/N-\` (\`gh pr list --state open --json number,headRefName,author\`), never one found by its \`Closes #N\`."
+aps "…and another PR author, or two candidates, stops the run" "Its author is not the Principal, or two match ⇒ stop."
+aps "…which the stop list names" "the issue's or the PR's author is not the Principal"
+# re-entry (review finding 9)
+aps "autopilot: an issue at gate:deploy, or with no state label, has an entry" "\`gate:deploy\` 9 · none ⇒ say so and end."
+aps "…a needs:human from an earlier run is taken off" "A \`needs:human\` from an earlier run: take it off"
+aps "…and an open PR is re-reviewed whole, at stage:qa too, and not rebuilt" "\`stage:build\` and \`stage:qa\` enter at 5 and \`stage:fast\` at its cap, the review as a first round (the whole diff"
+# a pending scope request is the Architect's to answer, not a stop (review finding 10)
+aps "autopilot: a red check with an unanswered scope request goes to the review" "red with an unanswered \`ADLC-SCOPE-REQUEST:\` on the PR ⇒ step 5, where the Architect answers it"
+grep -q 'ADLC-SCOPE-REQUEST: <path prefix>' "$ROOT/skills/role-builder/SKILL.md" && grep -q 'ADLC-SCOPE: GRANT <path prefix>' "$ROOT/skills/role-architect/SKILL.md" && ok "…the marker the Builder posts and the Architect's review answers" || bad "role-builder / role-architect lost the ADLC-SCOPE-REQUEST / ADLC-SCOPE markers the autopilot relies on"
 grep -q '^\*\*Status:\*\* .*\*\*Principal:\*\* {{PRINCIPAL}}' "$ROOT/templates/charter.md.tmpl" && ok "…which the charter template still carries on its Principal: line" || bad "charter.md.tmpl lost the **Principal:** {{PRINCIPAL}} field the autopilot's author gate reads"
 # stops and labels: every label it puts on something is one labels.sh creates
 grep -q 'label `needs:human`' "$AP" && ok "autopilot: a stop labels needs:human" || bad "autopilot must label needs:human when it stops"
@@ -3003,13 +3039,42 @@ eq "" "autopilot: moves state labels through adlc-relabel.sh, never a hand-spell
 eq "" "autopilot: no step tells anyone to \"add\" a state label" "$(grep -nE '\badds? `?(stage|gate):[a-z]+' "$AP" || true)"
 eq "" "context-budget: nor does the budget" "$(grep -nE -- '--(add|remove)-label `?(stage|gate):|\badds? `?(stage|gate):[a-z]+' "$CB" || true)"
 # the fix cycle
-grep -q 'adlc-fix-cap.sh --pr <pr>' "$AP" && grep -q 'only a printed `GO` sends the PR back' "$AP" && ok "autopilot: the cap is asked before each return to the Builder, and only GO returns it" || bad "autopilot must run adlc-fix-cap.sh --pr <pr> and go on only on GO"
+aps "autopilot: the cap is asked before each return to the Builder, and only GO returns it" "\`.adlc/scripts/adlc-fix-cap.sh --pr <pr>\`: only a printed \`GO\` sends the PR back"
+aps "…a STOP, or no answer, stops the run" "\`STOP\`, or no answer (it could not read), ⇒ stop."
+# Every return is counted and re-reviewed (review finding 2). A QA or red-check return leaves no CHANGES marker, so
+# the label event is all the cap can count; and a fix that skipped step 5 would reach Gate 2 unreviewed.
+aps "autopilot: every return to the Builder is labelled before the cap is asked" "EVERY return to the Builder — a \`CHANGES\` verdict, QA findings, a red check — goes through here. Label the PR \`adlc:changes-requested\` (that label event is what the cap counts for a QA or red-check return), then \`.adlc/scripts/adlc-fix-cap.sh --pr <pr>\`"
+aps "…and every fix is reviewed again" "Then the checks, and ALWAYS step 5 again: no fix reaches QA or Gate 2 unreviewed."
+aps "…QA's too" "Findings ⇒ step 6; QA runs again only once step 5 has passed again."
+if command -v jq >/dev/null 2>&1; then
+  QR="$(mktemp -d)"; rounds_stub "$QR"
+  qcap() { ( cd "$QR" && env PATH="$QR/bin:$PATH" RD_DIR="$QR" bash "$S/adlc-fix-cap.sh" --pr "$1" 2>/dev/null ); }
+  # two reviews asked for changes, then QA sent the PR back twice in comments that carry no verdict marker
+  rounds_comments "$QR" 1 'ADLC-ADV: CHANGES' 'ADLC-ADV: CHANGES' 'ADLC-ADV: PASS' 'ADLC-ARCH: PASS' 'QA: S2-AC1 has no test.' 'QA: still none.'
+  cp "$QR/fx/pr-1.json" "$QR/fx/pr-2.json"; rounds_labels "$QR" 2 4
+  eq GO   "fixture: with no label on a QA return, the cap sees 2 rounds in 4 returns" "$(qcap 1)"
+  eq STOP "labelled as the skill says, the fourth return is a STOP" "$(qcap 2)"
+  rm -rf "$QR"
+fi
 grep -q -- '--pr' "$S/adlc-fix-cap.sh" && ok "…and adlc-fix-cap.sh has the --pr form" || bad "adlc-fix-cap.sh must keep the --pr form: the autopilot's cap call depends on it"
 grep -q 'FIX DELTA' "$AP" && grep -q 'break the fixes, do not confirm them' "$AP" && ok "autopilot: round 2 is an adversarial pass over the fix delta" || bad "autopilot: round 2 must be a pass over the fix delta, to break the fixes"
+# …and over the earlier findings (review finding 4): a finding the Builder skipped has no hunk in the delta
+aps "…and a re-check of the earlier findings: one with no fix is CHANGES again" "and its own earlier findings: an earlier finding with no fix is \`CHANGES\` again"
+cbs "context-budget: round 2 re-checks every earlier finding" "Round 2 and later reviews re-check every earlier finding (one with no fix is CHANGES again), then attack the fix delta"
+eq "" "…and nowhere limits round 2 to the delta" "$(grep -n 'fix delta only\|only the findings you verify' "$CB" || true)"
 grep -q 'each subject starting `adlc-fix:`' "$AP" && ok "autopilot: fix commits carry the adlc-fix: prefix, as the fix lane's do" || bad "autopilot: fix commits must start adlc-fix:"
 grep -q 'run `adlc-architect` ONCE to amend the ADR' "$AP" && ok "autopilot: one ADR amendment pass" || bad "autopilot: the ADR amendment must be one pass"
 [ "$(grep -n 'ONCE to amend' "$AP" | cut -d: -f1)" -lt "$(grep -n 'adlc-relabel.sh N stage:qa' "$AP" | cut -d: -f1)" ] 2>/dev/null && ok "…before the issue moves to stage:qa" || bad "autopilot: the amendment must come before stage:qa"
 grep -q "does not re-run the reviewers'" "$AP" && ok "autopilot: QA trusts the recorded verdicts" || bad "autopilot: QA must not re-run the reviewers' reproductions"
+aps "…and still runs its own security gate" "its own security gate still runs in full."
+# the budget trims reading, never a check (review finding 5)
+cbs "context-budget: the role skill wins, and no check is trimmed" "The budget trims reading and prose, never a check: where it and your role skill disagree, the role skill wins, and a check that skill or \`adlc:security-gate\` asks for is made in full."
+cbs "context-budget: QA attempts every security-gate class" "It still attempts **every** \`adlc:security-gate\` class itself"
+eq "" "…with no class left to what the reviews named" "$(grep -n 'classes the reviews did not name' "$CB" || true)"
+# the fast lane (review findings 6 and 7): the cap before the checks, and never a gate:deploy without the review
+aps "autopilot fast lane: the cap runs before the checks" "then label the PR \`lane:fast\`. Before the checks (an over-cap PR fails \`ADLC diff-scope\`), the cap on the REAL diff"
+aps "…the checks and the adversarial review follow a FAST answer" "\`FAST\` ⇒ the checks as in step 4, then \`adlc-adversarial-reviewer\` only (there is no ADR), its \`ADLC-ADV\` read as in step 5: \`CHANGES\` ⇒ step 6, then the cap, the checks and the review again; \`PASS\` ⇒ you move the issue with \`.adlc/scripts/adlc-relabel.sh N gate:deploy\`"
+eq 1 "…and that PASS is the fast lane's only way to gate:deploy" "$(grep -o 'adlc-relabel.sh N gate:deploy' "$AP" | wc -l | tr -d ' ')"
 # the context budget
 grep -q '## Context budget' "$CB" && grep -q 'project-conventions' "$CB" && ok "context-budget: a repo's own caps live under ## Context budget in project-conventions" || bad "context-budget must say where a repo overrides a cap"
 grep -q 'adlc-run-log.sh' "$CB" && grep -q 'Do not record or report your own token use' "$CB" && ok "context-budget: tokens are measured (adlc-run-log.sh), never self-reported" || bad "context-budget must send token figures to adlc-run-log.sh"
