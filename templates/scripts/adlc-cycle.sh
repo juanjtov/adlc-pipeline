@@ -7,20 +7,27 @@
 #   adlc-cycle.sh issues [DAYS]   one JSONL row per issue created in the window (default 30 days):
 #       {"issue","title","created","closed","lane":"full|fast","pr","pr_opened",
 #        "intake_to_pr_seconds","rounds","dwell":{"stage:intake":s,…},"stage_seconds","gate_seconds"}
-#       dwell = seconds the issue wore each label (open intervals run to the issue's close, or now);
+#       dwell = seconds the issue wore each label as its state: from its labeled event to its
+#         unlabeled event OR to the next stage:/gate: label put on (QA adds gate:deploy without
+#         taking stage:qa off; one host had 32 issues wearing two states), whichever comes first;
+#         a label still on the issue when the one that superseded it is taken off (gate:deploy
+#         removed at Gate 2, say) is the state again from that moment; an interval still open runs
+#         to the issue's close, or now, and never past the close;
 #       stage_seconds = time in stage:* labels — queue time AND agent time (an issue can sit at
 #       stage:intake for days before the Analyst runs; the agent's own minutes are in runs.jsonl);
-#       gate_seconds = time in gate:* labels (waiting on the Principal); rounds = the
-#       `adlc:changes-requested` labels put on the linked PR (fix rounds); pr = the first PR that
+#       gate_seconds = time in gate:* labels (waiting on the Principal); rounds = the fix rounds
+#       of the linked PR: its `adlc:changes-requested` label events or its CHANGES review
+#       verdicts, whichever is more (see rounds_of; an estimate, usually low); pr = the first PR that
 #       references the issue; intake_to_pr = first stage:intake → that PR (null when no intake label
 #       precedes the PR, e.g. an issue filed from a PR).
 #   adlc-cycle.sh report [DAYS]   the ranked tables the retro reads, from .adlc/metrics/runs.jsonl
 #       and .adlc/metrics/cycle.jsonl (materialize both first; see the skill). Window filters rows.
 #
-# Cost: one `gh issue list` + one timeline call per issue (+ one per linked PR). Materialize into
+# Cost: one `gh issue list` + one timeline call per issue (+ a timeline and a `pr view` call per
+# linked PR). Materialize into
 # .adlc/metrics/cycle.jsonl the way the finding ledger is, never commit it from CI. An issue whose
 # timeline cannot be read (deleted, transferred, rate-limited) is skipped with a line on stderr and
-# the run goes on; a PR whose timeline fails gives rounds: null. Only cross-references from THIS
+# the run goes on; a PR whose timeline or comments cannot be read gives rounds: null. Only cross-references from THIS
 # repo count as the issue's PR (a host repo's issues also cite the plugin repo's PRs).
 set -euo pipefail
 cmd="${1:-}"; days="${2:-30}"
@@ -29,6 +36,28 @@ M="${CLAUDE_PROJECT_DIR:-.}/.adlc/metrics"
 NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
 timeline() { gh api "repos/{owner}/{repo}/issues/$1/timeline?per_page=100" --paginate --jq '.[]' | jq -sc .; }
+# Fix rounds of a PR. The Actions review lane marks a round by putting `adlc:changes-requested`
+# on the PR; a repo that runs the pipeline by hand (subagents from a Principal's session) never
+# applies that label, so the label count alone read 0 rounds for every issue on such a host while
+# its merged PRs drew CHANGES verdicts and carried several fix commits. So the review verdict
+# comments that asked for changes count too (`ADLC-ADV: CHANGES` / `ADLC-ARCH: CHANGES`, read as
+# adlc-metrics.sh reads them: a comment's LAST marker is its verdict), per marker, and the result
+# is the largest of the label events and either marker's count: the lane applies the label on the
+# same verdict, so adding them would count one round twice, and both reviewers asking in one round
+# is one round. The figure is an estimate, and usually low: a round the reviewers close as
+# PASS-with-findings leaves no marker on GitHub at all, and two rounds in which a different
+# reviewer asked each time read as one. It reads high when a reviewer re-posts its CHANGES
+# comment within one round, or when a thread's last marker is a quoted CHANGES, which the lane
+# and adlc-metrics.sh read the same way. The cycle-retro says so when rounds read low.
+rounds_of() {
+  local labels verdicts
+  labels="$(timeline "$1" | jq '[.[] | select(.event == "labeled" and .label.name == "adlc:changes-requested")] | length')" || return 1
+  verdicts="$(gh pr view "$1" --json comments | jq '[.comments[].body
+      | [match("ADLC-(ADV|ARCH):[*`_\\s]*(PASS|CHANGES)(?![A-Za-z0-9_])"; "g") | {m: .captures[0].string, v: .captures[1].string}]
+      | select(length > 0) | last | select(.v == "CHANGES") | .m]
+      | group_by(.) | map(length) | max // 0')" || return 1
+  if [ "$labels" -ge "$verdicts" ]; then echo "$labels"; else echo "$verdicts"; fi
+}
 # A cross-referenced event's source repo, lower-cased, in either shape GitHub sends.
 XREF_REPO='((.source.issue.repository.full_name // (.source.issue.repository_url // "" | sub(".*/repos/"; ""))) | ascii_downcase)'
 
@@ -45,8 +74,8 @@ case "$cmd" in
         pr="$(printf '%s' "$tl" | jq -r --arg repo "$REPO" "[.[] | select(.event == \"cross-referenced\" and .source.issue.pull_request != null and $XREF_REPO == \$repo)] | sort_by(.created_at) | first | .source.issue.number // empty")"
         rounds=0
         if [ -n "$pr" ]; then
-          rounds="$(timeline "$pr" | jq '[.[] | select(.event == "labeled" and .label.name == "adlc:changes-requested")] | length')" \
-            || { echo "adlc-cycle: could not read the timeline of PR #$pr (issue #$n); rounds unknown" >&2; rounds=null; }
+          rounds="$(rounds_of "$pr")" \
+            || { echo "adlc-cycle: could not read the timeline or the comments of PR #$pr (issue #$n); rounds unknown" >&2; rounds=null; }
         fi
         printf '%s' "$tl" | jq -c --argjson issue "$issue" --arg now "$NOW" --arg pr "${pr:-}" --argjson rounds "$rounds" --arg repo "$REPO" '
           def t: fromdate;
@@ -55,13 +84,27 @@ case "$cmd" in
                  | select(.label.name | test("^(stage|gate):"))
                  | {e: .event, l: .label.name, t: (.created_at | t)}] as $ev
           | ($ev | map(.l) | unique) as $labels
-          # dwell per label: each labeled→next unlabeled interval; an open interval runs to $end, and one
-          # that opens after $end (a label put on a closed issue) counts 0, never negative.
-          | ($labels | map({(.): (. as $l | [$ev[] | select(.l == $l)] | sort_by(.t)
-                | reduce .[] as $x ({open: null, sum: 0};
-                    if $x.e == "labeled" then (if .open == null then .open = $x.t else . end)
-                    else (if .open != null then .sum += ($x.t - .open) | .open = null else . end) end)
-                | .sum + (if .open != null then ([$end - .open, 0] | max) else 0 end))}) | add // {}) as $dwell
+          # dwell per label: each labeled→(its unlabeled, or the NEXT stage:/gate: label put on) interval,
+          # in time order across labels; a label superseded that way is still on the issue (.worn, with
+          # the time it was put on), and when the last open label is taken off the most recently put-on
+          # worn label is the state again from that moment. A close never runs past $end, an interval
+          # still open runs to $end, and one that opens after $end (a label put on a closed issue)
+          # counts 0, never negative.
+          | ($ev | sort_by(.t)
+             | reduce .[] as $x ({open: {}, worn: {}, sum: {}};
+                 if $x.e == "labeled" then
+                   (reduce (.open | to_entries[] | select(.key != $x.l)) as $o (.;
+                      .sum[$o.key] += ([([$x.t, $end] | min) - $o.value, 0] | max) | .worn[$o.key] = $o.value | del(.open[$o.key])))
+                   | del(.worn[$x.l])
+                   | (if .open[$x.l] == null then .open[$x.l] = $x.t else . end)
+                 else
+                   (if .open[$x.l] != null then .sum[$x.l] += ([([$x.t, $end] | min) - .open[$x.l], 0] | max) | del(.open[$x.l]) else . end)
+                   | del(.worn[$x.l])
+                   | (if (.open | length) == 0 and (.worn | length) > 0 then
+                        (.worn | to_entries | max_by(.value) | .key) as $back | .open[$back] = $x.t | del(.worn[$back])
+                      else . end)
+                 end)) as $st
+          | ($labels | map({(.): (($st.sum[.] // 0) + (if $st.open[.] != null then ([$end - $st.open[.], 0] | max) else 0 end))}) | add // {}) as $dwell
           | ([$ev[] | select(.e == "labeled" and .l == "stage:intake")] | sort_by(.t) | first | .t) as $intake
           | ([.[] | select(.event == "cross-referenced" and .source.issue.pull_request != null and '"$XREF_REPO"' == $repo)] | sort_by(.created_at) | first | .created_at) as $pr_opened
           | {issue: $issue.number, title: $issue.title, created: $issue.createdAt, closed: $issue.closedAt,

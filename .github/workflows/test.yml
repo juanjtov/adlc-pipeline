@@ -6,7 +6,14 @@ on: [push, pull_request]
 
 jobs:
   guardrail-tests:
-    runs-on: ubuntu-latest
+    # Pinned, not ubuntu-latest: the Python 3.9 step below needs a runner image that setup-python
+    # publishes 3.9 for. GitHub is rolling ubuntu-latest over to Ubuntu 26.04 between 2026-10-19
+    # and 2026-11-19 (actions/runner-images#14748); this repo's runs landed on it on 2026-11-08,
+    # and every one failed in that step, since no 3.9 build exists for 26.04 (3.9 is past its
+    # upstream end of life; 3.9.25 is the last build, for 22.04 and 24.04). Move the pin when the
+    # macOS developer tools stop shipping 3.9, together with the Mission Control promise, or
+    # earlier if GitHub retires the ubuntu-24.04 image or actions/python-versions drops 3.9.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - name: Run guardrail tests

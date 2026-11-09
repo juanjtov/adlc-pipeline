@@ -119,7 +119,7 @@ jobs:
           GH_TOKEN: ${{ secrets.ADLC_DISPATCH_TOKEN }}
           PR: ${{ github.event.pull_request.number }}
         run: |
-          chmod +x .adlc/scripts/adlc-verdict.sh
+          chmod +x .adlc/scripts/adlc-verdict.sh .adlc/scripts/adlc-relabel.sh
           bodies=$(gh pr view "$PR" --json comments --jq '.comments[].body')
           adv=$(printf '%s\n' "$bodies" | .adlc/scripts/adlc-verdict.sh ADLC-ADV)
           arch=$(printf '%s\n' "$bodies" | .adlc/scripts/adlc-verdict.sh ADLC-ARCH)
@@ -129,7 +129,7 @@ jobs:
             [ -z "$issue" ] && issue=$(gh pr view "$PR" --json body --jq '.body' | grep -oiE '#[0-9]+' | head -1 | tr -d '#')
             gh pr edit "$PR" --remove-label "adlc:changes-requested" 2>/dev/null || true
             if [ -n "$issue" ]; then
-              gh issue edit "$issue" --remove-label stage:build --add-label stage:qa
+              .adlc/scripts/adlc-relabel.sh "$issue" stage:qa
               echo "Both reviews PASS → issue #$issue advanced to stage:qa (QA lane fires)."
             fi
           else

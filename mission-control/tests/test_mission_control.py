@@ -152,7 +152,7 @@ class PipelineRules(unittest.TestCase):
         builder = pipeline.read_agent(PLUGIN, 'builder')['lanes']
         self.assertEqual(sorted(l['lane'] for l in builder), ['builder', 'fast', 'fix'])
         self.assertTrue(all('Bash' in l['tools'] for l in builder))
-        self.assertEqual(pipeline.read_agent(PLUGIN, 'analyst')['lanes'][0]['tools'][-1], '.adlc/scripts/adlc-triage.sh')
+        self.assertEqual(pipeline.read_agent(PLUGIN, 'analyst')['lanes'][0]['tools'][-2:], ['.adlc/scripts/adlc-triage.sh', '.adlc/scripts/adlc-relabel.sh'])
 
     def test_without_the_guard_the_limits_are_marked_unknown(self):
         root = tempfile.mkdtemp()
@@ -581,7 +581,7 @@ class GitHubReader(unittest.TestCase):
             if isinstance(reply, Exception):
                 raise reply
             return reply
-        poller = github.Poller(store, lambda: [REPO], lambda: changes.append(1), fetcher=fetcher)
+        poller = github.Poller(store, lambda: [REPO], lambda: changes.append(1), fetcher=fetcher, actions=lambda repo: None)   # the Actions read is a real gh call; not here
         poller.poll(REPO)
         self.assertEqual((poller.status[REPO]['ok'], poller.status[REPO]['msg']), (False, 'Reading GitHub failed (TypeError)'))
         poller.poll(REPO)
@@ -591,6 +591,67 @@ class GitHubReader(unittest.TestCase):
         self.assertEqual(len(changes), 3)
         doc = state.build(store, REPO, now=NOW, github={'ok': False, 'msg': 'rate limited', 'polled': None})
         self.assertEqual(doc['github']['msg'], 'rate limited')
+
+    def test_a_blocked_actions_account_is_read_from_the_last_runs(self):
+        # issue 34: when the budget runs out GitHub fails every run within seconds with no step run, and nothing says so
+        def gh(answers):
+            def run(cmd, **kw):
+                path = cmd[2]
+                key = 'jobs' if '/jobs' in path else 'runs'
+                return subprocess.CompletedProcess(cmd, 0, json.dumps(answers[key]), '')
+            return run
+        dead = lambda n, secs=3, conclusion='failure': {'workflow_runs': [
+            {'id': 100 + i, 'status': 'completed', 'conclusion': conclusion, 'created_at': fx.iso(i * 60), 'updated_at': fx.iso(i * 60 + secs)} for i in range(n, 0, -1)]}
+        no_steps = {'jobs': [{'name': 'test', 'conclusion': 'failure', 'steps': []}]}
+        ran = {'jobs': [{'name': 'test', 'conclusion': 'failure', 'steps': [{'name': 'Set up job', 'conclusion': 'failure'}]}]}
+        skipped = {'jobs': [{'name': 'test', 'conclusion': 'failure', 'steps': [{'name': 'Set up job', 'conclusion': 'skipped'}]}]}
+        out = github.actions_health(REPO, run=gh({'runs': dead(10), 'jobs': no_steps}))
+        self.assertEqual((out['blocked'], out['runs'], out['latest'], out['since']), (True, 10, 110, fx.iso(60)))
+        self.assertTrue(github.actions_health(REPO, run=gh({'runs': dead(10), 'jobs': skipped}))['blocked'])   # a skipped step did not run
+        self.assertFalse(github.actions_health(REPO, run=gh({'runs': dead(10), 'jobs': ran}))['blocked'])      # a workflow that fails fast on purpose
+        self.assertFalse(github.actions_health(REPO, run=gh({'runs': dead(2), 'jobs': no_steps}))['blocked'])  # too few to call
+        self.assertFalse(github.actions_health(REPO, run=gh({'runs': dead(10, secs=300), 'jobs': no_steps}))['blocked'])   # five minutes is a run
+        mixed = dead(10); mixed['workflow_runs'][3]['conclusion'] = 'success'
+        self.assertFalse(github.actions_health(REPO, run=gh({'runs': mixed, 'jobs': no_steps}))['blocked'])
+        # a lane whose job-level `if:` did not match concludes `skipped` without asking for a runner: it says nothing either way
+        diluted = dead(10); diluted['workflow_runs'][0]['conclusion'] = 'skipped'; diluted['workflow_runs'][5]['conclusion'] = 'cancelled'
+        out = github.actions_health(REPO, run=gh({'runs': diluted, 'jobs': no_steps}))
+        self.assertEqual((out['blocked'], out['runs'], out['latest']), (True, 8, 109))                 # the latest that ran, not the skipped one
+        only_skipped = dead(10, conclusion='skipped')
+        self.assertEqual(github.actions_health(REPO, run=gh({'runs': only_skipped, 'jobs': no_steps}))['runs'], 0)
+        self.assertEqual(github.actions_health(REPO, run=gh({'runs': {'workflow_runs': []}, 'jobs': no_steps}))['runs'], 0)
+        calls = []
+        def counting(cmd, **kw):
+            calls.append(cmd[2])
+            return gh({'runs': dead(2), 'jobs': no_steps})(cmd)
+        github.actions_health(REPO, run=counting)
+        self.assertEqual(len(calls), 1)                                             # the jobs are read only when the runs look blocked
+        self.assertIn('status=completed', calls[0])
+
+    def test_the_poller_carries_the_actions_word_and_keeps_it_when_a_read_fails(self):
+        store, changes = seeded(), []
+        healthy = {'blocked': False, 'runs': 10, 'latest': 1, 'since': None}
+        blocked = {'blocked': True, 'runs': 10, 'latest': 1, 'since': fx.iso(0)}
+        answers = iter([blocked, github.GhError('rate limited')])
+        def actions(repo):
+            a = next(answers)
+            if isinstance(a, Exception):
+                raise a
+            return a
+        poller = github.Poller(store, lambda: [REPO], lambda: changes.append(1), fetcher=lambda repo: fx.repo_data(), actions=actions)
+        poller.ACTIONS_EVERY = 1
+        poller.poll(REPO)
+        self.assertEqual((poller.status[REPO]['ok'], poller.status[REPO]['actions']), (True, blocked))
+        poller.poll(REPO)                                                           # the Actions read fails: the GitHub read is still ok, the word kept
+        self.assertEqual((poller.status[REPO]['ok'], poller.status[REPO]['actions']), (True, blocked))
+        doc = state.build(store, REPO, now=NOW, github=poller.status[REPO])
+        self.assertTrue(doc['github']['actions']['blocked'])
+        self.assertIsNone(state.build(store, REPO, now=NOW)['github']['actions'])     # no poller: no word, not a false alarm
+        reads = []
+        poller = github.Poller(store, lambda: [REPO], lambda: None, fetcher=lambda repo: fx.repo_data(), actions=lambda repo: reads.append(repo) or healthy)
+        for _ in range(poller.ACTIONS_EVERY + 1):
+            poller.poll(REPO)
+        self.assertEqual(len(reads), 2)                                             # the first poll and every ACTIONS_EVERY-th after it
 
     def test_a_read_that_fails_half_way_changes_nothing(self):
         store, data = seeded(), fx.repo_data()
@@ -603,6 +664,7 @@ class GitHubReader(unittest.TestCase):
         reads = []
         app = server.App(seeded(), REPO, poll=False, interval=0.05)
         app.poller.fetcher = lambda repo: reads.append(repo) or fx.repo_data()
+        app.poller.actions_fetcher = lambda repo: None                              # the Actions read is a real gh call; not here
         app.poller.start()
         try:
             time.sleep(0.3)

@@ -82,16 +82,40 @@ ADLC-FINDING: <severity> | <class> | <file>
 ```
 
 The `retro` (via `.adlc/scripts/adlc-log-findings.sh`) reads those lines from PR comments and
-**materializes** the ledger `.adlc/metrics/findings.jsonl` on demand — one object per finding:
+review bodies and **materializes** the ledger `.adlc/metrics/findings.jsonl` on demand — one
+object per finding, stamped with its comment's time:
 
 ```
 {"ts":"<ISO8601>","pr":<n>,"stage":"review|qa|security",
  "severity":"Critical|High|Medium|Low","class":"<class>","file":"<path>"}
 ```
 
-**Finding classes:** `tenant-leak` · `authz-gap` · `injection` · `secret-in-code` ·
-`hallucinated-api` · `missing-edge-case` · `logic-contradiction` · `contract-violation`
-(ADR / diff-scope) · `flaky-test` · `perf-regression` · `other`.
+**Finding classes** — a **closed** list. The retro ranks by class × frequency, so one failure
+written under five names reads as five small classes and never looks recurring (one host had 53
+names for 144 findings, 78 four days later). Reviewers pick from this list; `other` only with a
+note in the finding's prose saying what it is, so a recurring `other` can become a class here.
+
+| Class | Meaning |
+|---|---|
+| `tenant-leak` | data or an action crosses a tenant / scope boundary (`idor`, the security gate's tenant probe, maps here) |
+| `authz-gap` | a role or user can do what it must not (authn bypass included) |
+| `injection` | untrusted text reaches an interpreter: SQL, shell, HTML, a prompt |
+| `secret-in-code` | a credential, key or token in the tree or the diff |
+| `hallucinated-api` | a call to a symbol, endpoint, option or library that does not exist |
+| `missing-edge-case` | a realistic input the code does not handle (empty, null, boundary, error path) |
+| `logic-contradiction` | the code does the wrong thing on an input it does handle (wrong branch, off-by-one, race) |
+| `contract-violation` | the change breaks what a current ADR, the spec, the declared diff scope or an AC says (an ADR whose text went stale is `doc-drift`; `adr-drift` and `drift` are not mapped, since the name alone cannot tell the two apart) |
+| `test-gap` | a behaviour with no test, or a test that cannot fail (vacuous, asserts nothing) |
+| `flaky-test` | a test whose result depends on timing, order or the environment |
+| `perf-regression` | slower or heavier than before on a realistic size (N+1, unbounded scan) |
+| `doc-drift` | docs, comments or an ADR's text say something the code no longer does |
+| `other` | nothing above fits; say what it is in the finding |
+
+`adlc-log-findings.sh` lower-cases the class, turns `_` and spaces into `-`, writes a known
+synonym as its canonical name (`logic-bug` → `logic-contradiction`, `test-coverage` → `test-gap`,
+`spec-drift` → `contract-violation`, `docs` → `doc-drift`, …) and reports on stderr, once per run,
+any name outside the list, which it logs as written. `adlc-log-findings.sh classes` prints the
+list; the script's `CLASSES` line and this table are kept the same by a test.
 
 Comments are durable, per-repo, and native (never an agent self-report file). The `retro` ranks
 the materialized ledger to add durable guards; the `ablation` skill prunes context they no

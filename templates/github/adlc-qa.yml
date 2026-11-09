@@ -8,7 +8,8 @@
 # HOW THE AGENT RUNS).
 #
 # QA writes only tests, runs the full battery + adversarial security gate, and on a clean
-# verdict posts a Proposed Action Card and adds gate:deploy. It never merges or deploys.
+# verdict posts a Proposed Action Card and moves the issue to gate:deploy with
+# .adlc/scripts/adlc-relabel.sh (one call; it takes stage:qa off). It never merges or deploys.
 name: ADLC QA
 
 on:
@@ -51,5 +52,7 @@ jobs:
             skills with the Skill tool first: adlc:role-qa-release-ops, then the rest your agent
             file lists.
             Verify AC coverage, run the full test battery (paste real output), run the
-            adversarial security gate. On a clean verdict, add gate:deploy and post a
-            Proposed Action Card. Never merge, never deploy.
+            adversarial security gate. On a clean verdict, move the issue to gate:deploy with
+            `.adlc/scripts/adlc-relabel.sh <issue> gate:deploy` (one call; it takes stage:qa off,
+            never `gh issue edit --add-label`) and post a Proposed Action Card. Never merge,
+            never deploy.

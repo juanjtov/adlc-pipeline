@@ -9,8 +9,11 @@ it differs from the installed plugin.
 
 ## Unreleased (on `main` after 0.3.1)
 
-Tooling refresh needed: **no** — the change ships in the plugin's hook script and Mission
-Control, which every session and every start use from the installed plugin.
+Tooling refresh needed: **yes** — `adlc-relabel.sh` is new and the lanes call it; the `adlc-log-findings.sh` copy gains the backtick-wrapped
+marker, the per-comment time, the skipped-line report and the closed class list below, the `adlc-cycle.sh` copy the
+verdict-based round count and the next-label end of a stage interval, the `adlc-doctor.sh` copy the Actions check, and the `adlc-metrics.sh` copy the `infra_failed` line. The retro and cycle-retro recipes, the role prompts, the guard hook, Mission Control and its
+hook script live in the plugin, which every session loads from the installed plugin, so those
+parts need no refresh.
 
 - **One Mission Control shows every adopted repo on the machine, and says so** (issue 52).
   It always could: the hook sends each event with its working directory, the server maps that
@@ -29,6 +32,91 @@ Control, which every session and every start use from the installed plugin.
   its limit now written down: a repo's runs land in the per-repo copy only from sessions that
   have that `ADLC_MC_HOME` set; the rest go to the default folder's copy. `--demo` still
   writes nothing; the guard and the server's Host and Origin checks are untouched.
+- **One state per issue: `adlc-relabel.sh`, and the cycle clock ends a stage at the next
+  label** (issue 38, the rest of it; PR 46 added the doctor check). Every lane and role prompt
+  spelled out its own label pair, and the pairs drifted: QA's said "add `gate:deploy`" and
+  nothing took `stage:qa` off, so on one host 25 issues ended wearing `stage:qa` + `gate:deploy`
+  and six more `stage:fast` + `gate:deploy`, two states each for the cycle clock, Mission
+  Control's station view and any lane keyed on the older label. New `adlc-relabel.sh <issue>
+  <stage:…|gate:…>` reads the issue's labels and, in one `gh issue edit`, removes every other
+  `stage:`/`gate:` label and adds the new one; the intake, design, review and fast lanes, the
+  RUNBOOK's fast lane and QA step, and the Analyst, Architect and QA prompts (role skills and
+  lane prompts alike) call it instead of a pair, and the doctor's fix line names it. The guard hook judges the script as the `gh issue edit` it is,
+  so the adversarial reviewer, which may not move labels, may not run it either. `adlc-cycle.sh`
+  now ends a label's dwell when the next `stage:`/`gate:` label is put on, not only when the old
+  one is removed, so an issue left with two labels no longer reads as a stage that ran to its
+  close; a label superseded that way is the state again from the moment the newer one is taken
+  off (a Gate 2 rejection), and a close is never counted past the issue's close.
+
+- **The doctor and Mission Control say when GitHub has stopped running the workflows** (issue
+  34, the detection half). When a private repo's included Actions minutes or its spending limit
+  run out, GitHub still creates a run for every trigger and fails it
+  within seconds with no step executed, for every workflow at once, the tripwire that watches
+  the default branch included; the checks on a PR just read red. One host ran that way for
+  three days (about 180 dead runs, eight PRs merged with every check red) before anyone looked.
+  `adlc-doctor.sh` (gh-backed section, repos with adlc workflows only) reads the last ten
+  completed runs, skipped and cancelled ones left out (a lane whose job-level `if:` did not
+  match concludes `skipped` before a runner is asked for, so it says nothing either way): when
+  at least three remain, all failed within 60 s of being created, and the latest ran no step,
+  it reports Actions as blocked and says the tripwire is not watching; steps that ran mean a
+  failing workflow, not a block, and a run it cannot read is reported as possibly blocked.
+  Actions turned off for the repo creates no run at all, so neither reader sees that. Mission Control reads the same signal over REST about every two minutes
+  while a page is open and shows a banner. Not in this change, still on the issue: the
+  bootstrap's minutes sizing step, a local-CI marker recipe, and a `blocked` run outcome in
+  `adlc-run-log.sh`.
+- **The finding class is a closed list** (issue 28). Reviewers named classes freely, so the
+  retro, which ranks by class × frequency, saw one failure under five names as five small
+  classes: on one host 144 findings carried 53 class names (78 four days later), 30 of them
+  used once, and the ADR/code drift pattern was visible only after merging names by hand. The
+  `edd-spec` skill now holds a table of thirteen classes with a one-line meaning each
+  (`test-gap` and `doc-drift` are new; `other` only with a note), and the review skills name
+  the list where the reviewer writes the marker. `adlc-log-findings.sh` lower-cases the class,
+  turns `_` and spaces into `-`, writes a known synonym as its canonical name (`logic-bug` →
+  `logic-contradiction`, `test-coverage` → `test-gap`, `spec-drift` → `contract-violation`,
+  `docs` → `doc-drift`, …), and reports once per run on stderr a name outside the list, which
+  it logs as written rather than forcing it to `other`. `adlc-log-findings.sh classes` prints
+  the list; the retro's Step 1 ranks on the canonical class and lists the names outside the
+  list apart. Rows already in a ledger are not rewritten: rebuild the ledger (the recipe does).
+- **`adlc-metrics.sh` sets CI runs that died in a setup step apart from red test runs**
+  (issue 56). `iterations_to_green` and `failed_first` counted every failed run of a merged
+  PR's branch; on one host five of eighteen first-run reds had died creating an ephemeral
+  database, before any test ran, and the retro read a provisioning problem as a test-quality
+  one. For each red run on a merged PR's branch the script now asks `gh run view --json jobs`
+  for the first failed step across the run's failed jobs (a fail-fast matrix lists cancelled
+  legs too; they have no failed step and are passed over); a step whose name matches
+  `ADLC_SETUP_STEPS` (a case-insensitive regex; the default is a heuristic on step names,
+  anchored at the start where a word is common in test steps too: the runner's own "Set up
+  job", checkout, installs, setup actions, caches, registry logins, provisioning, and an
+  ephemeral database or branch anywhere in the name) makes the run `infra_failed`, which leaves
+  the iterations count and does not make its PR `failed_first`. A host whose test step starts
+  with one of those words sets its own regex. A new `infra_failed: N / M` line reports them against every CI run of those
+  PRs, so the cycle-retro sees the provisioning reds and the retro the test reds. A run whose
+  jobs cannot be read, or none of whose failed jobs names a failed step, stays a plain failure. Green
+  runs are never looked up; one call more per red run.
+- **The cycle ledger counts fix rounds from CHANGES review verdicts too** (issue 58).
+  `adlc-cycle.sh` counted a round as an `adlc:changes-requested` label event on the issue's PR.
+  Only the Actions review lane applies that label; a repo that runs the pipeline by hand, with
+  subagents from a Principal's session, never does, and on such a host `cycle.jsonl` read 0
+  rounds for all 55 issues of a month while 7 of its 35 merged PRs drew a CHANGES verdict. A
+  PR's rounds are now the larger of its label events and its `ADLC-ADV: CHANGES` /
+  `ADLC-ARCH: CHANGES` verdict comments counted per marker (a comment's last marker is its
+  verdict, as `adlc-metrics.sh` reads it); the larger, not the sum, because the lane puts the
+  label on the same verdict. The cycle-retro skill calls the figure an estimate that usually
+  reads low: a round closed as PASS-with-findings leaves no marker, and two rounds asked for by
+  different reviewers read as one. One `gh pr view` call more per linked PR.
+- **The finding ledger no longer drops a third of the findings** (issue 27). Measured on a host
+  with 144 markers in its PR threads, the materialized ledger held 94. Three causes, all fixed:
+  `adlc-log-findings.sh` skipped a marker wrapped in code markup
+  (`` `ADLC-FINDING: Medium | tenant-leak | app/tenancy.py` ``), 20 findings on that host; the
+  retro's recipe read `gh pr view --json comments` only, so findings posted as a GitHub review
+  body never reached the ledger, 29 more; and every row carried the time of the rebuild, so a
+  `since` window could not be applied to the ledger. The script now takes the marker after code
+  markup too (prose after the closing backtick stays out of the file field), takes the comment's
+  own time as an optional third argument, and reports on stderr every line it still could not
+  read that carries `ADLC-FINDING:` and three `|`-separated fields, so a marker placed where the
+  script does not look is a visible skip. The recipe in the `retro` skill reads comments and review bodies, stamps each
+  row with its comment's time, and lists 500 PRs instead of 50: on a repo past 50 PRs the older
+  ones fell off the end without a word (349 markers, 220 read, on the same host).
 
 ## 0.3.1
 

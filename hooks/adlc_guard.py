@@ -962,6 +962,11 @@ class Guard:
             self.check_git(args, scope, "GIT_DIR" in names or "GIT_WORK_TREE" in names)
         elif prog == "gh":
             self.check_gh(args, scope)
+        elif prog == "adlc-relabel.sh":
+            # The plugin's relabel script (.adlc/scripts/adlc-relabel.sh <issue> <label>) is
+            # `gh issue edit` by another name: judge it as that call, so a role that may not move
+            # an issue's labels cannot move them through the script.
+            self.check_gh([Word("issue"), Word("edit")] + list(args), scope)
         elif prog in ("curl", "wget"):
             self.check_http(prog, args)
         else:
@@ -1025,6 +1030,26 @@ class Guard:
                         self.opaque("a shell's `-c`")
                     self.check_text(args[k + 1].text, depth + 1, self.child_scope(scope))
                 return
+        # `bash .adlc/scripts/adlc-relabel.sh 12 stage:qa` is the relabel script all the same (a
+        # script file's contents are not read here; this one is known by name). The script is the
+        # first word that is not an option (`-x`, `+x`, `--norc`) or an option's value (`-o pipefail`);
+        # "$S/adlc-relabel.sh" is that script too, as a computed prefix with a literal last part is
+        # read everywhere else here. `bash -n script` parses and runs nothing.
+        takes_value = ("-o", "+o", "-O", "+O", "--rcfile", "--init-file")
+        skip = False
+        for k, a in enumerate(args):
+            if skip:
+                skip = False
+                continue
+            if a.text.startswith(("-", "+")):
+                if a.text in takes_value:
+                    skip = True
+                elif a.text.startswith("-") and not a.text.startswith("--") and "n" in a.text[1:]:
+                    return
+                continue
+            if base(a) == "adlc-relabel.sh" and not any(mark in a.text.rsplit("/", 1)[-1] for mark in EXPANSIONS):
+                self.check_gh([Word("issue"), Word("edit")] + list(args[k + 1:]), scope)
+            break
         if cmd.fed or any("<(…)" in a.text for a in args):
             self.opaque("a shell reading a process substitution")
         if cmd.heredocs:

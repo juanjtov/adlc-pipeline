@@ -74,6 +74,7 @@ templates/                     # what the wizard fills into the host repo
             adlc-log-findings.sh · adlc-doctor.sh · adlc-metrics.sh · adlc-cost.sh
             adlc-cache.sh · adlc-triage.sh · adlc-pr-stage.sh · adlc-branch-issue.sh   # deterministic logic
             adlc-run-log.sh · adlc-cycle.sh                                            # the cycle-retro's two ledgers
+            adlc-relabel.sh                                                            # one state per issue: move to a stage:/gate: label in one call
             #   adlc-cache.sh        = prompt-cache hit-rate rollup
             #   adlc-run-log.sh      = run ledger: tokens · cost · seconds per agent run (Mission Control / OTel / Actions)
             #   adlc-cycle.sh        = cycle time per stage + fix rounds per issue, from the label timeline; the ranked report
@@ -108,7 +109,8 @@ declares none. That check and the fast-lane cap run on `pull_request_target` —
 scripts come from the default branch and the PR is only read as data — so a PR cannot edit the
 guards that judge it. `adlc-doctor.sh` validates a host repo's setup (deny rules, unfilled
 placeholders, lanes that can't run their agent, skills, the five agent copies and their model
-lines, labels, and whether the default branch has a merge gate). Judgment guardrails
+lines, labels, whether GitHub is still running the workflows at all, and whether the default
+branch has a merge gate). Judgment guardrails
 (design conformance, security severity) stay as skills + the adversarial review — those can't
 be made deterministic without losing the point.
 

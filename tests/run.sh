@@ -348,13 +348,15 @@ here() { [ "$(pwd -P)" = "$(cd "$DFX_ROOT" && pwd -P)" ]; }
 case "$*" in
   "auth status"*) [ -e "$DFX/noauth" ] && exit 1; exit 0 ;;
   "label list"*)  here && printf '%s\n' stage:intake gate:stories stage:design stage:build stage:qa gate:deploy; exit 0 ;;
-  "repo view"*|"api "*|"issue list"*|"pr list"*) here || { echo "fake gh: asked from $PWD, not the fixture root" >&2; exit 1; } ;;
+  "repo view"*|"api "*|"issue list"*|"pr list"*|"run "*) here || { echo "fake gh: asked from $PWD, not the fixture root" >&2; exit 1; } ;;
 esac
 case "$1 $2" in
-  "issue list"|"pr list")
-    k="${1}s"; [ -e "$DFX/fail-$k" ] && { echo '{"message":"Server Error"}' >&2; exit 1; }
+  "issue list"|"pr list"|"run list"|"run view")
+    # issues / prs / runs: a JSON list in $DFX/<k> (none = an empty list); run view: $DFX/jobs (none = the call fails)
+    case "$1 $2" in "run view") k=jobs ;; *) k="${1}s" ;; esac
+    [ -e "$DFX/fail-$k" ] && { echo '{"message":"Server Error"}' >&2; exit 1; }
     f=.; while [ $# -gt 0 ]; do [ "$1" = "--jq" ] && f="$2"; shift; done
-    if [ -e "$DFX/$k" ]; then jq -r "$f" "$DFX/$k"; else echo '[]' | jq -r "$f"; fi; exit $? ;;
+    if [ -e "$DFX/$k" ]; then jq -r "$f" "$DFX/$k"; elif [ "$k" = jobs ]; then echo 'run not found' >&2; exit 1; else echo '[]' | jq -r "$f"; fi; exit $? ;;
 esac
 case "$*" in
   "repo view"*)                 k=default ;;
@@ -411,7 +413,7 @@ eq yes "…naming the issue with its state labels" "$(says_gate "issue #12: stag
 eq yes "…all three of a triple" "$(says_gate "issue #129: stage:build gate:deploy stage:fast")"
 eq yes "…and the PR" "$(says_gate "pr #30: stage:build stage:qa")"
 eq no  "…not the clean one" "$(says_gate "#13")"
-eq yes "…with the fix: keep the latest, remove the rest" "$(says_gate "keep the label it reached last and remove the rest — gh issue edit <n> --remove-label <label>")"
+eq yes "…with the fix: keep the latest, remove the rest, with the relabel script" "$(says_gate "keep the label it reached last and remove the rest — .adlc/scripts/adlc-relabel.sh <n> <that label>")"
 dl - -;                      check 0 "labels: no open issue or PR (empty lists) passes" $?
 dl "[$(L 12 stage:qa gate:deploy)]" -; touch "$FIX/fx/fail-issues"
 GATE=$(DFX="$FIX/fx" DFX_ROOT="$FIX" PATH="$FIX/bin:$PATH" bash "$S/adlc-doctor.sh" "$FIX" 2>&1); check 1 "labels: a failed issue listing is flagged, not read as clean" $?
@@ -422,6 +424,49 @@ GATE=$(DFX="$FIX/fx" DFX_ROOT="$FIX" PATH="$FIX/bin:$PATH" bash "$S/adlc-doctor.
 eq yes "…and says so" "$(says_gate "skipped label check (gh not available/authenticated)")"
 eq 0 "…no listing is made" "$(grep -cE '^(issue|pr) list ' "$FIX/fx/calls")"
 rm -f "$FIX/fx/noauth" "$FIX/fx/fail-issues" "$FIX/fx/issues" "$FIX/fx/prs"
+# is Actions alive? (issue 34): an exhausted budget fails every run within seconds with no step run
+R() { jq -cn --argjson id "$1" --arg c "$2" --argjson s "$3" '{databaseId: $id, status: "completed", conclusion: $c, createdAt: "2026-10-13T02:37:00Z", updatedAt: ("2026-10-13T02:37:00Z" | fromdate + $s | todate)}'; }
+J() { jq -cn --arg c "$1" '{jobs: [{name: "test", conclusion: "failure", steps: (if $c == "" then [] else [{name: "Set up job", conclusion: $c}] end)}]}'; }
+ac() { # <runs json | -> <jobs json | -> : a sound gate fixture, then the runs
+  gate true 1 none
+  [ "$1" = - ] || printf '%s' "$1" > "$FIX/fx/runs"
+  [ "$2" = - ] || printf '%s' "$2" > "$FIX/fx/jobs"
+  : > "$FIX/fx/calls"
+  GATE=$(DFX="$FIX/fx" DFX_ROOT="$FIX" PATH="$FIX/bin:$PATH" bash "$S/adlc-doctor.sh" "$FIX" 2>&1)
+}
+ten() { local i; for i in 1 2 3 4 5 6 7 8 9 10; do R "$((100 + i))" failure 3; done | jq -s .; }   # ten runs, each dead in 3 s
+ac "$(ten)" "$(J "")";                    check 1 "actions: ten fast failures and no step run → flagged as blocked" $?
+eq yes "…naming the cause and the tripwire" "$(says_gate "GitHub Actions looks blocked")"
+eq yes "…and what it means for main" "$(says_gate "the tripwire included")"
+eq yes "…with the run it read" "$(says_gate "(run 101)")"
+eq 1 "…from one run list of the last 10" "$(grep -c '^run list --limit 10 ' "$FIX/fx/calls")"
+eq 1 "…and one run view, of the latest" "$(grep -c '^run view 101 ' "$FIX/fx/calls")"
+ac "$(ten)" "$(J failure)";               check 0 "actions: ten fast failures whose steps ran are a failing workflow, not a block" $?
+eq yes "…and says so" "$(says_gate "their steps ran")"
+ac "$(ten)" "$(J skipped)";               check 1 "actions: a step that was skipped did not run" $?
+ac "$({ R 1 failure 3; R 2 failure 3; } | jq -s .)" "$(J "")"; check 0 "actions: two fast failures are too few to call" $?
+eq 0 "…no run view is made" "$(grep -c '^run view ' "$FIX/fx/calls")"
+ac "$({ ten | jq '.[]'; R 200 failure 300; } | jq -s .)" "$(J "")"; check 0 "actions: one run that took five minutes breaks the pattern" $?
+ac "$({ ten | jq '.[]'; R 200 success 3; } | jq -s .)" "$(J "")"; check 0 "actions: one green run breaks the pattern" $?
+eq yes "…and says Actions runs" "$(says_gate "Actions runs workflows")"
+# a lane whose job-level if: did not match concludes skipped before a runner is asked for; it says nothing either way
+ac "$({ R 200 skipped 2; ten | jq '.[]'; R 201 cancelled 2; } | jq -s .)" "$(J "")"; check 1 "actions: skipped and cancelled runs among the fast failures do not hide the block" $?
+eq yes "…counting only the runs that ran" "$(says_gate "the last 10 completed runs (skipped")"
+eq 1 "…and reading the latest run that ran, not the skipped one" "$(grep -c '^run view 101 ' "$FIX/fx/calls")"
+ac "$({ R 1 skipped 2; R 2 skipped 2; R 3 skipped 2; } | jq -s .)" "$(J "")"; check 0 "actions: only skipped runs say nothing (no completed run that ran)" $?
+eq yes "…read as no completed run yet" "$(says_gate "no completed run yet")"
+ac "$(ten)" '{"jobs":[{"name":"test","conclusion":"failure","steps":[{"name":"Set up job","conclusion":""}]}]}'; check 1 "actions: a step whose conclusion gh renders as the empty string did not run" $?
+ac '[]' -;                                check 0 "actions: no completed run yet passes" $?
+ac "$(ten)" -;                            check 1 "actions: fast failures whose latest run cannot be read are flagged as possibly blocked" $?
+eq yes "…as unknown" "$(says_gate "may be blocked")"
+ac - -; touch "$FIX/fx/fail-runs"
+GATE=$(DFX="$FIX/fx" DFX_ROOT="$FIX" PATH="$FIX/bin:$PATH" bash "$S/adlc-doctor.sh" "$FIX" 2>&1); check 1 "actions: a failed run listing is flagged, not read as alive" $?
+eq yes "…as unchecked" "$(says_gate "whether Actions is blocked is unchecked")"
+rm -f "$FIX/fx/fail-runs" "$FIX/fx/runs" "$FIX/fx/jobs"
+mv "$FIX/.github/workflows" "$FIX/wf.bak"; mkdir -p "$FIX/.github/workflows"
+ac "$(ten)" "$(J "")";                    check 0 "actions: no adlc workflows (local-recipe mode) → nothing to check" $?
+eq 0 "…and no run list is made" "$(grep -c '^run list ' "$FIX/fx/calls")"
+rm -rf "$FIX/.github/workflows"; mv "$FIX/wf.bak" "$FIX/.github/workflows"; rm -f "$FIX/fx/runs" "$FIX/fx/jobs"
 gate true 1 none; rm "$FIX/fx/default"
 DFX="$FIX/fx" DFX_ROOT="$FIX" PATH="$FIX/bin:$PATH" bash "$S/adlc-doctor.sh" "$FIX" >/dev/null 2>&1; check 1 "gate: an unreadable default branch is flagged" $?
 lane 'jobs:\n  t:\n    steps:\n      - run: echo hi\n'   # no lane runs an agent: nothing to gate
@@ -463,7 +508,7 @@ printf '%s' "$LF" | grep -q '"severity":"Critical"' && ok "parses severity" || b
 printf '%s' "$LF" | grep -q '"pr":42' && ok "tags pr number" || bad "tags pr number"
 eq "" "empty when no findings" "$(printf 'nothing here\n' | bash "$S/adlc-log-findings.sh" 1 review)"
 eq "" "the quoted format line is not a finding" "$(printf 'Use: ADLC-FINDING: <severity> | <class> | <file>\n' | bash "$S/adlc-log-findings.sh" 1 review)"
-eq "" "a mid-sentence mention is not a finding"  "$(printf 'see ADLC-FINDING: High | x | y above\n' | bash "$S/adlc-log-findings.sh" 1 review)"
+eq "" "a mid-sentence mention is not a finding"  "$(printf 'see ADLC-FINDING: High | x | y above\n' | bash "$S/adlc-log-findings.sh" 1 review 2>/dev/null)"
 eq "" "two fields are not a finding"             "$(printf 'ADLC-FINDING: High | x\n' | bash "$S/adlc-log-findings.sh" 1 review)"
 eq 2 "a numbered item and a heading are findings" "$(printf '1. ADLC-FINDING: High | a | x.py\n### ADLC-FINDING: Low | b | y.py\n' | bash "$S/adlc-log-findings.sh" 1 review | grep -c '"class"')"
 printf 'ADLC-FINDING: High | injection | src/db/*.py\n' | bash "$S/adlc-log-findings.sh" 1 review | jq -e '.file == "src/db/*.py"' >/dev/null 2>&1 && ok "a glob in the file field keeps its *" || bad "a glob in the file field keeps its *"
@@ -471,6 +516,98 @@ LB=$(printf -- '- **ADLC-FINDING:** High | `tenant-leak` | src/y.py\n' | bash "$
 eq '{"ts":"'"$(printf '%s' "$LB" | jq -r .ts)"'","pr":7,"stage":"qa","severity":"High","class":"tenant-leak","file":"src/y.py"}' "a bullet with bold + backticks parses clean" "$LB"
 printf 'ADLC-FINDING: Low | odd | src/a"b.py\n' | bash "$S/adlc-log-findings.sh" 1 review | jq -e '.file == "src/a\"b.py"' >/dev/null 2>&1 && ok "a quote in a field is valid JSON" || bad "a quote in a field breaks the JSON"
 printf 'ADLC-FINDING: High | x | y\n' | bash "$S/adlc-log-findings.sh" abc review >/dev/null 2>&1; check 2 "a PR number that is not a number is an error" $?
+# issue 27: a marker wrapped in code markup is a finding (one host lost 19 of a PR's 20 this way)
+LC=$(printf -- '`ADLC-FINDING: Medium | tenant-leak | backend/app/tenancy.py`\n' | bash "$S/adlc-log-findings.sh" 9 review 2>/dev/null)
+printf '%s' "$LC" | jq -e '.class == "tenant-leak" and .file == "backend/app/tenancy.py" and .severity == "Medium"' >/dev/null 2>&1 && ok "a code-wrapped marker is a finding, with the closing backtick off the file" || bad "a code-wrapped marker is a finding (got '$LC')"
+eq 1 "a bullet with a code-wrapped marker is a finding" "$(printf -- '- `ADLC-FINDING: High | authz-gap | src/auth.py`\n' | bash "$S/adlc-log-findings.sh" 9 review 2>/dev/null | grep -c '"class":"authz-gap"')"
+# the comment's own time, so the ledger can be windowed
+eq '2026-10-08T14:03:00Z' "a third argument is the row's ts" "$(printf 'ADLC-FINDING: High | x | y.py\n' | bash "$S/adlc-log-findings.sh" 1 review 2026-10-08T14:03:00Z | jq -r .ts)"
+printf 'ADLC-FINDING: High | x | y.py\n' | bash "$S/adlc-log-findings.sh" 1 review 2>/dev/null | jq -e '.ts | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")' >/dev/null 2>&1 && ok "no third argument: ts is now, ISO 8601" || bad "no third argument: ts is now, ISO 8601"
+printf 'ADLC-FINDING: High | x | y.py\n' | bash "$S/adlc-log-findings.sh" 1 review yesterday >/dev/null 2>&1; check 2 "a ts that is not ISO 8601 is an error, not a row" $?
+printf 'ADLC-FINDING: High | x | y.py\n' | bash "$S/adlc-log-findings.sh" 1 review 2026-10-08T14:03:00+02:00 >/dev/null 2>&1; check 2 "a ts with an offset instead of Z is an error (GitHub prints Z; the window compares text)" $?
+case "$(printf 'ADLC-FINDING: High | x | y.py\n' | bash "$S/adlc-log-findings.sh" 31 review null 2>&1 >/dev/null)" in *"PR 31"*) ok "the ts error names the PR" ;; *) bad "the ts error must name the PR" ;; esac
+eq 1 "…but an empty ts means now (a pending review has none), not an error" "$(printf 'ADLC-FINDING: High | x | y.py\n' | bash "$S/adlc-log-findings.sh" 1 review "" 2>/dev/null | grep -c '"class"')"
+printf -- '- `ADLC-FINDING: High | injection | src/db.py` fixed in abc123\n' | bash "$S/adlc-log-findings.sh" 1 review 2>/dev/null | jq -e '.file == "src/db.py"' >/dev/null 2>&1 && ok "prose after a code-wrapped marker's closing backtick is not part of the file" || bad "prose after a code-wrapped marker's closing backtick is not part of the file"
+SK2=$(printf 'see ADLC-FINDING: High | injection | templates/<name>.html above\n' | bash "$S/adlc-log-findings.sh" 32 review 2>&1 >/dev/null)
+case "$SK2" in *"PR 32"*skipped*) ok "a < in the file field does not hide a skipped line (only a <placeholder> severity is the format line)" ;; *) bad "a < in the file field must not hide a skipped line" ;; esac
+# a finding-shaped line the script cannot read is reported, never silently dropped
+SK=$(printf 'see ADLC-FINDING: High | x | y above\n' | bash "$S/adlc-log-findings.sh" 31 review 2>&1 >/dev/null)
+case "$SK" in *"PR 31"*"skipped"*"see ADLC-FINDING: High | x | y above"*) ok "a mid-line marker with three fields is reported on stderr, with the PR and the line" ;; *) bad "a mid-line marker with three fields must be reported on stderr (got '$SK')" ;; esac
+eq "" "the quoted format line is not reported"      "$(printf 'Use: ADLC-FINDING: <severity> | <class> | <file>\n' | bash "$S/adlc-log-findings.sh" 1 review 2>&1 >/dev/null)"
+eq "" "a prose mention with no fields is not reported" "$(printf 'each ADLC-FINDING: line counts\n' | bash "$S/adlc-log-findings.sh" 1 review 2>&1 >/dev/null)"
+eq "" "a plain finding writes nothing to stderr"      "$(printf 'ADLC-FINDING: High | injection | y.py\n' | bash "$S/adlc-log-findings.sh" 1 review 2>&1 >/dev/null)"
+eq 1 "a last line with no newline is still a finding" "$(printf 'ADLC-FINDING: High | x | y.py' | bash "$S/adlc-log-findings.sh" 1 review 2>/dev/null | grep -c '"class"')"
+# the retro's recipe must read both comment kinds, stamp each row with its comment's time, and not stop at 50 PRs
+RR="$ROOT/skills/retro/SKILL.md"
+grep -q -- '--json comments,reviews' "$RR" && grep -q 'ts: (.submittedAt // "")' "$RR" && grep -q 'ts: .createdAt' "$RR" && ok "retro recipe: reads comments and review bodies, with each one's time; a pending review's missing time falls back to now" || bad "retro recipe: must read comments and review bodies, with each one's time, and a null submittedAt must become empty"
+grep -q -- 'adlc-log-findings.sh "$pr" review "$(jq -r .ts <<<"$c")"' "$RR" && ok "retro recipe: passes the comment's time to the logger" || bad "retro recipe: must pass the comment's time to the logger"
+grep -q -- 'gh pr list --state all --limit 500' "$RR" && ok "retro recipe: lists 500 PRs, not 50" || bad "retro recipe: must list 500 PRs, not 50"
+# issue 28: the class is a closed vocabulary — synonyms map onto it, a name outside it is logged as written and reported once
+eq "logic-contradiction test-gap contract-violation doc-drift tenant-leak tenant-leak" "classes: known synonyms are written as their canonical name (idor is the tenant probe)" \
+   "$(printf 'ADLC-FINDING: High | logic-bug | a.py\nADLC-FINDING: Low | test-coverage | b.py\nADLC-FINDING: Low | spec-drift | c.py\nADLC-FINDING: Low | docs | d.py\nADLC-FINDING: High | Tenant_Leak | e.py\nADLC-FINDING: Critical | idor | f.py\n' | bash "$S/adlc-log-findings.sh" 3 review 2>/dev/null | jq -r .class | tr '\n' ' ' | sed 's/ $//')"
+eq "adr-drift drift" "classes: a name that could be contract-violation or doc-drift (adr-drift, drift) is not guessed: kept as written and reported" \
+   "$(printf 'ADLC-FINDING: Low | adr-drift | a.md\nADLC-FINDING: Low | drift | b.md\n' | bash "$S/adlc-log-findings.sh" 3 review 2>/dev/null | jq -r .class | tr '\n' ' ' | sed 's/ $//')"
+for c in test-gap doc-drift; do grep -q "^| $c |" "$ROOT/skills/retro/SKILL.md" && ok "retro Step 2 has a durable-fix row for $c" || bad "retro Step 2 needs a durable-fix row for $c"; done
+eq "missing-edge-case" "classes: case, spaces and underscores do not make a new class" "$(printf 'ADLC-FINDING: Low | Missing Edge_Case | a.py\n' | bash "$S/adlc-log-findings.sh" 3 review 2>/dev/null | jq -r .class)"
+UKD="$(mktemp -d)"; UK=$(printf 'ADLC-FINDING: Low | weird-thing | a.py\nADLC-FINDING: Low | Weird Thing | b.py\n' | bash "$S/adlc-log-findings.sh" 33 review 2>"$UKD/uk.err")
+eq "weird-thing weird-thing" "classes: a name outside the list is logged as written (normalized), not dropped and not forced to other" "$(printf '%s\n' "$UK" | jq -r .class | tr '\n' ' ' | sed 's/ $//')"
+eq 1 "classes: …and reported on stderr once per run, with the PR" "$(grep -c "PR 33: class 'weird-thing' is not in the list" "$UKD/uk.err")"; rm -rf "$UKD"
+eq "" "classes: a canonical name writes nothing to stderr" "$(printf 'ADLC-FINDING: Low | doc-drift | a.py\n' | bash "$S/adlc-log-findings.sh" 3 review 2>&1 >/dev/null)"
+eq 13 "classes: the subcommand prints the list, other last" "$(bash "$S/adlc-log-findings.sh" classes | wc -l | tr -d ' ')"
+eq other "…other last" "$(bash "$S/adlc-log-findings.sh" classes | tail -1)"
+# the list in the script and the table in the edd-spec skill are the same list (the reviewers read the skill, the ledger the script)
+ES="$ROOT/skills/edd-spec/SKILL.md"
+eq "$(bash "$S/adlc-log-findings.sh" classes | sort | tr '\n' ' ')" "classes: the edd-spec table names exactly the script's classes" \
+   "$(sed -n '/^| Class | Meaning |/,/^$/p' "$ES" | sed -nE 's/^\| `([a-z-]+)` \|.*/\1/p' | sort | tr '\n' ' ')"
+for c in $(bash "$S/adlc-log-findings.sh" classes); do
+  eq "$c" "classes: '$c' is canonical (maps to itself)" "$(printf 'ADLC-FINDING: Low | %s | a.py\n' "$c" | bash "$S/adlc-log-findings.sh" 3 review 2>/dev/null | jq -r .class)"
+done
+for f in "$ROOT/skills/code-review/SKILL.md" "$ROOT/skills/role-adversarial-reviewer/SKILL.md"; do
+  miss=""; for c in $(bash "$S/adlc-log-findings.sh" classes); do grep -q "\`$c\`" "$f" || miss="$miss $c"; done
+  eq "" "classes: $(basename "$(dirname "$f")") names every class of the list" "$miss"
+done
+
+echo "relabel (one state per issue):"
+RL="$(mktemp -d)"; mkdir -p "$RL/bin"
+cat > "$RL/bin/gh" <<'SH'
+#!/usr/bin/env bash
+# stub gh: `issue view N --json labels --jq …` answers from $RL_LABELS (one name per line); every call is logged
+echo "$*" >> "$RL_CALLS"
+case "$1 $2" in
+  "issue view") [ -z "${RL_FAIL_VIEW:-}" ] || { echo "gh: Not Found (HTTP 404)" >&2; exit 1; }
+                jq -R . "$RL_LABELS" | jq -s '{labels: map({name: .})}' | jq -r "${@: -1}" ;;
+  "issue edit") [ -z "${RL_FAIL_EDIT:-}" ] || { echo "gh: Validation Failed (HTTP 422)" >&2; exit 1; } ;;
+  *) exit 2 ;;
+esac
+SH
+chmod +x "$RL/bin/gh"
+relabel() { # <labels, space-separated> <issue> <new label> [ENV=val …]
+  local labels="$1"; shift
+  printf '%s\n' $labels > "$RL/labels"; : > "$RL/calls"
+  RL_OUT=$(env PATH="$RL/bin:$PATH" RL_LABELS="$RL/labels" RL_CALLS="$RL/calls" "${@:3}" bash "$S/adlc-relabel.sh" "$1" "$2" 2>"$RL/err"); RL_RC=$?
+}
+rcalls() { tr '\n' '|' < "$RL/calls"; }
+relabel "bug stage:qa lane:fast" 12 gate:deploy; check 0 "stage:qa → gate:deploy exits 0" $RL_RC
+eq "issue view 12 --json labels --jq .labels[].name|issue edit 12 --remove-label stage:qa --add-label gate:deploy|" "…one read, then ONE edit that removes the old state and adds the new; other labels untouched" "$(rcalls)"
+eq "#12: stage:qa → gate:deploy" "…and says what moved" "$RL_OUT"
+relabel "stage:build gate:deploy stage:fast" 129 stage:qa; check 0 "a triple-labelled issue exits 0" $RL_RC
+eq "issue view 129 --json labels --jq .labels[].name|issue edit 129 --remove-label stage:build --remove-label gate:deploy --remove-label stage:fast --add-label stage:qa|" "…every other state label comes off in the same call" "$(rcalls)"
+relabel "adlc:auto gate:deploy" 5 gate:deploy; check 0 "already there, alone: exits 0" $RL_RC
+eq "issue view 5 --json labels --jq .labels[].name|" "…and makes no edit" "$(rcalls)"
+eq "#5 is at gate:deploy already" "…saying so" "$RL_OUT"
+relabel "stage:qa gate:deploy" 7 gate:deploy; check 0 "already there, with a leftover: exits 0" $RL_RC
+eq "issue view 7 --json labels --jq .labels[].name|issue edit 7 --remove-label stage:qa|" "…and only removes the leftover" "$(rcalls)"
+relabel "bug" 8 stage:intake; check 0 "no state label yet: exits 0" $RL_RC
+eq "issue view 8 --json labels --jq .labels[].name|issue edit 8 --add-label stage:intake|" "…and only adds" "$(rcalls)"
+relabel "stage:qa" x gate:deploy;        check 2 "an issue that is not a number is an error (nothing read, nothing written)" $RL_RC
+eq "" "…no gh call" "$(rcalls)"
+relabel "stage:qa" 12 bug;               check 2 "a label outside stage:/gate: is an error" $RL_RC
+relabel "stage:qa" 12 "stage:";          check 2 "a bare prefix is an error" $RL_RC
+relabel "stage:qa" 12 gate:deploy RL_FAIL_VIEW=1; check 1 "a failed read exits 1" $RL_RC
+eq "issue view 12 --json labels --jq .labels[].name|" "…and writes nothing" "$(rcalls)"
+relabel "stage:qa" 12 gate:deploy RL_FAIL_EDIT=1; check 1 "a failed edit exits 1" $RL_RC
+grep -q 'gh issue edit failed for #12' "$RL/err" && ok "…and says so" || bad "…must say the edit failed"
+rm -rf "$RL"
 
 echo "cost/latency:"
 CO=$(printf 'adlc-builder 120 5000 0.10\nadlc-qa 80 3000 0.06\nadlc-builder 60 2000 0.04\n' | bash "$S/adlc-cost.sh")
@@ -536,6 +673,7 @@ step_run() { # <workflow file> <regex matching the step's `- name:` line>  → i
     inrun { if ($0 ~ /^          / || $0 ~ /^[ \t]*$/) { sub(/^          /, ""); print } else inrun=0 }' "$1"
 }
 IT="$(mktemp -d)"; ST="$IT/state"
+mkdir -p "$IT/repo/.adlc/scripts"; cp "$S/adlc-relabel.sh" "$IT/repo/.adlc/scripts/"   # the Gate 1 handoff relabels through the script (issue 38)
 step_run "$I" '- name: Read the live issue state' > "$IT/live.sh"
 step_run "$I" '- name: Gate 1 handoff'            > "$IT/gate.sh"
 cat > "$IT/gh" <<'SH'
@@ -553,7 +691,7 @@ intake() { # <script> <labels, space-separated> <comments> [ENV=val …] — run
   local script="$1" labels="$2" comments="$3"; shift 3
   rm -rf "$ST"; mkdir -p "$ST"; : > "$ST/calls"; : > "$ST/out"
   printf '%s\n' $labels > "$ST/labels"; printf '%s\n' "$comments" > "$ST/comments"
-  env PATH="$IT:$PATH" ST="$ST" N=7 GITHUB_OUTPUT="$ST/out" "$@" bash -e "$IT/$script" >/dev/null 2>&1
+  ( cd "$IT/repo" && env PATH="$IT:$PATH" ST="$ST" N=7 GITHUB_OUTPUT="$ST/out" "$@" bash -e "$IT/$script" ) >/dev/null 2>&1
 }
 outs()  { tr '\n' ' ' < "$ST/out"; }
 calls() { cut -d' ' -f1-6 "$ST/calls" | tr '\n' '|'; }
@@ -571,7 +709,9 @@ eq "" "gate: …before the note that says it was removed" "$(calls)"
 intake gate.sh "adlc:auto gate:stories" "ADLC-TRIAGE: FULL | needs design" AUTOPILOT=false
 eq "" "gate: stories posted, no autopilot → Gate 1 left to the Principal" "$(calls)"
 intake gate.sh "adlc:auto adlc:autopilot gate:stories" "ADLC-TRIAGE: FULL | needs design" AUTOPILOT=true
-eq "edit 7 --remove-label gate:stories --add-label stage:design|" "gate: autopilot + FULL → stage:design" "$(calls)"
+eq "edit 7 --remove-label gate:stories --add-label stage:design|" "gate: autopilot + FULL → stage:design, in one edit through the relabel script" "$(calls)"
+intake gate.sh "adlc:auto adlc:autopilot gate:stories stage:fast" "ADLC-TRIAGE: FULL | needs design" AUTOPILOT=true
+eq "edit 7 --remove-label gate:stories --remove-label stage:fast --add-label stage:design|" "gate: …which also takes a leftover second state label off" "$(cut -d' ' -f1-8 "$ST/calls" | tr '\n' '|')"
 intake gate.sh "adlc:auto adlc:autopilot gate:stories" "ADLC-TRIAGE: FAST | copy fix" AUTOPILOT=true
 eq "comment 7 --body 🚦 Triaged **FAST**|" "gate: autopilot + FAST → lane-approval note, never stage:fast" "$(calls)"
 intake gate.sh "adlc:auto adlc:autopilot gate:stories" "ADLC-TRIAGE: FULL | needs design" AUTOPILOT=false
@@ -1114,11 +1254,12 @@ if command -v jq >/dev/null 2>&1; then
   MX="$(mktemp -d)"; mkdir -p "$MX/bin" "$MX/repo"
   cat > "$MX/bin/gh" <<'SH'
 #!/usr/bin/env bash
-# stub gh: `pr list` serves $MX_PRS, `run list` $MX_RUNS, `issue list` an empty list; all through the call's own --jq
+# stub gh: `pr list` serves $MX_PRS, `run list` $MX_RUNS, `run view <id>` $MX_JOBS/<id>.json (none → gh's failure),
+# `issue list` an empty list; all through the call's own --jq
 echo "$1 $2" >> "$MX_CALLS"
-case "$1 $2" in "pr list") src="$MX_PRS" ;; "run list") src="$MX_RUNS" ;; "issue list") src=/dev/null ;; *) exit 2 ;; esac
+case "$1 $2" in "pr list") src="$MX_PRS" ;; "run list") src="$MX_RUNS" ;; "run view") src="$MX_JOBS/$3.json"; [ -f "$src" ] || { echo "run 1 not found" >&2; exit 1; } ;; "issue list") src=/dev/null ;; *) exit 2 ;; esac
 f=.; while [ $# -gt 0 ]; do [ "$1" = "--jq" ] && f="$2"; shift; done
-[ "$src" = /dev/null ] && echo '[]' | jq "$f" || jq "$f" "$src"
+[ "$src" = /dev/null ] && echo '[]' | jq -r "$f" || jq -r "$f" "$src"   # -r: gh --jq prints a string result raw
 SH
   chmod +x "$MX/bin/gh"
   now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -1139,24 +1280,57 @@ ADLC-ARCH:  CHANGES' 'ADLC-ARCH: PASS'
 ADLC-ADV: PASS' 'ADLC-ARCH: PASS'
     mxpr 7 "$now" '**ADLC-ADV:** CHANGES' 'ADLC-ARCH: PASS'
     mxpr 8 "$now" 'ADLC-ADV: PASSED' 'ADLC-ARCH: CHANGESET pending'
+    mxpr 9 "$now"
+    mxpr 10 "$now"
   } | jq -s . > "$MX/prs.json"
   # CI runs: PR 1's branch went green first time, PR 2's took a red run then a green one; another workflow's
-  # run is ignored, and so is a red run on PR 1's branch name from BEFORE that PR was opened (a reused name)
+  # run is ignored, and so is a red run on PR 1's branch name from BEFORE that PR was opened (a reused name).
+  # Issue 56: PR 3's first run died creating an ephemeral database, before any test ran — an infra failure,
+  # not a red test run; PR 9's red run cannot be looked up (gh fails) and stays a plain failure; PR 10's first
+  # run is a fail-fast matrix whose cancelled leg is listed before the leg that died in "Set up job".
   jq -n --arg at "$now" '[
-    {workflowName: "ADLC CI", headBranch: "feat/1", status: "completed", conclusion: "success", createdAt: $at},
-    {workflowName: "ADLC CI", headBranch: "feat/1", status: "completed", conclusion: "failure", createdAt: ($at | fromdate - 7200 | todate)},
-    {workflowName: "ADLC CI", headBranch: "feat/2", status: "completed", conclusion: "failure", createdAt: $at},
-    {workflowName: "ADLC CI", headBranch: "feat/2", status: "completed", conclusion: "success", createdAt: $at},
-    {workflowName: "ADLC diff-scope", headBranch: "feat/2", status: "completed", conclusion: "failure", createdAt: $at}]' > "$MX/runs.json"
+    {databaseId: 11, workflowName: "ADLC CI", headBranch: "feat/1", status: "completed", conclusion: "success", createdAt: $at},
+    {databaseId: 10, workflowName: "ADLC CI", headBranch: "feat/1", status: "completed", conclusion: "failure", createdAt: ($at | fromdate - 7200 | todate)},
+    {databaseId: 21, workflowName: "ADLC CI", headBranch: "feat/2", status: "completed", conclusion: "failure", createdAt: $at},
+    {databaseId: 22, workflowName: "ADLC CI", headBranch: "feat/2", status: "completed", conclusion: "success", createdAt: $at},
+    {databaseId: 23, workflowName: "ADLC diff-scope", headBranch: "feat/2", status: "completed", conclusion: "failure", createdAt: $at},
+    {databaseId: 31, workflowName: "ADLC CI", headBranch: "feat/3", status: "completed", conclusion: "failure", createdAt: $at},
+    {databaseId: 32, workflowName: "ADLC CI", headBranch: "feat/3", status: "completed", conclusion: "success", createdAt: $at},
+    {databaseId: 91, workflowName: "ADLC CI", headBranch: "feat/9", status: "completed", conclusion: "failure", createdAt: $at},
+    {databaseId: 92, workflowName: "ADLC CI", headBranch: "feat/9", status: "completed", conclusion: "success", createdAt: $at},
+    {databaseId: 101, workflowName: "ADLC CI", headBranch: "feat/10", status: "completed", conclusion: "failure", createdAt: $at},
+    {databaseId: 102, workflowName: "ADLC CI", headBranch: "feat/10", status: "completed", conclusion: "success", createdAt: $at}]' > "$MX/runs.json"
+  mkdir -p "$MX/jobs"
+  jq -n '{jobs: [{name: "backend", conclusion: "failure", steps: [{name: "Set up job", conclusion: "success"}, {name: "Checkout", conclusion: "success"}, {name: "Run tests", conclusion: "failure"}, {name: "Upload coverage", conclusion: "skipped"}]}]}' > "$MX/jobs/21.json"
+  jq -n '{jobs: [{name: "lint", conclusion: "success", steps: [{name: "Lint", conclusion: "success"}]},
+                 {name: "backend", conclusion: "failure", steps: [{name: "Set up job", conclusion: "success"}, {name: "Create ephemeral Neon branch", conclusion: "failure"}, {name: "Run tests", conclusion: "skipped"}]}]}' > "$MX/jobs/31.json"
+  jq -n '{jobs: [{name: "test (3.11)", conclusion: "cancelled", steps: [{name: "Set up job", conclusion: "success"}, {name: "Checkout", conclusion: "success"}, {name: "Run tests", conclusion: "cancelled"}]},
+                 {name: "test (3.12)", conclusion: "failure", steps: [{name: "Set up job", conclusion: "failure"}, {name: "Checkout", conclusion: "skipped"}]}]}' > "$MX/jobs/101.json"
   : > "$MX/calls"
-  OUT=$( cd "$MX/repo" && env PATH="$MX/bin:$PATH" MX_PRS="$MX/prs.json" MX_RUNS="$MX/runs.json" MX_CALLS="$MX/calls" bash "$S/adlc-metrics.sh" 30 2>&1 ); check 0 "the script runs to the end" $?
-  eq "iterations_to_green: avg 1.5 CI runs per merged PR; failed_first: 1 / 2" "iterations-to-green: CI runs per merged PR branch since the PR opened, from one run list call; other lanes and older runs on a reused branch name do not count" "$(printf '%s\n' "$OUT" | grep '^iterations_to_green:')"
+  OUT=$( cd "$MX/repo" && env PATH="$MX/bin:$PATH" MX_PRS="$MX/prs.json" MX_RUNS="$MX/runs.json" MX_JOBS="$MX/jobs" MX_CALLS="$MX/calls" bash "$S/adlc-metrics.sh" 30 2>&1 ); check 0 "the script runs to the end" $?
+  eq "iterations_to_green: avg 1.4 CI runs per merged PR; failed_first: 2 / 5" "iterations-to-green: CI runs per merged PR branch since the PR opened, from one run list call; other lanes and older runs on a reused branch name do not count; a run that died in a setup step is left out (also when a cancelled matrix leg is listed before the failed one, and when the step is the runner's own 'Set up job'), a red run gh cannot describe stays red" "$(printf '%s\n' "$OUT" | grep '^iterations_to_green:')"
+  eq "infra_failed: 2 / 9 CI runs died in a setup step (ADLC_SETUP_STEPS), before any test ran; not counted above" "infra_failed: the setup-step failures, against every CI run of the merged PRs" "$(printf '%s\n' "$OUT" | grep '^infra_failed:')"
   eq 1 "…from one gh run list call" "$(grep -c '^run list$' "$MX/calls")"
-  eq "merged_prs: 7"             "merged PRs: those in the window"                                   "$(printf '%s\n' "$OUT" | grep '^merged_prs:')"
-  eq "first_pass_approved: 4 / 7" "first pass: no comment whose last verdict is CHANGES (a later PASS comment does not undo one; a PR with no verdict counts; a CHANGES quoted in the prose of a PASS comment is not one; a bold **ADLC-ADV:** CHANGES is one, as adlc-verdict.sh reads it; PASSED and CHANGESET are no verdict)" "$(printf '%s\n' "$OUT" | grep '^first_pass_approved:')"
+  eq 4 "…and one gh run view call per red run on a merged PR's branch (none for green runs, none for the pre-PR red run)" "$(grep -c '^run view$' "$MX/calls")"
+  eq "merged_prs: 9"             "merged PRs: those in the window"                                   "$(printf '%s\n' "$OUT" | grep '^merged_prs:')"
+  eq "first_pass_approved: 6 / 9" "first pass: no comment whose last verdict is CHANGES (a later PASS comment does not undo one; a PR with no verdict counts; a CHANGES quoted in the prose of a PASS comment is not one; a bold **ADLC-ADV:** CHANGES is one, as adlc-verdict.sh reads it; PASSED and CHANGESET are no verdict)" "$(printf '%s\n' "$OUT" | grep '^first_pass_approved:')"
   eq 1 "…from one gh pr list call, whatever the number of PRs" "$(grep -c '^pr list$' "$MX/calls")"
+  OUT=$( cd "$MX/repo" && env PATH="$MX/bin:$PATH" MX_PRS="$MX/prs.json" MX_RUNS="$MX/runs.json" MX_JOBS="$MX/jobs" MX_CALLS="$MX/calls" ADLC_SETUP_STEPS='^nothing matches$' bash "$S/adlc-metrics.sh" 30 2>&1 )
+  eq "iterations_to_green: avg 1.8 CI runs per merged PR; failed_first: 4 / 5" "ADLC_SETUP_STEPS is the rule: a regex that matches no step counts every red run as a test failure" "$(printf '%s\n' "$OUT" | grep '^iterations_to_green:')"
+  eq "infra_failed: 0 / 9 CI runs died in a setup step (ADLC_SETUP_STEPS), before any test ran; not counted above" "…and reports 0 setup failures" "$(printf '%s\n' "$OUT" | grep '^infra_failed:')"
+  # the default regex: setup-shaped names match, test steps that merely contain one of its words do not
+  DEF=$(sed -n 's/^ADLC_SETUP_STEPS="${ADLC_SETUP_STEPS:-\(.*\)}"$/\1/p' "$S/adlc-metrics.sh"); [ -n "$DEF" ] && ok "the default ADLC_SETUP_STEPS is read off the script" || bad "the default ADLC_SETUP_STEPS could not be read off the script"
+  for st in "Set up job" "Post Run actions/checkout@v4" "Checkout" "Install dependencies" "Setup Python" "Restore cache" "Cache node modules" "Docker login" "Log in to the registry" "Provision database" "Create ephemeral Neon branch" "Install and test"; do
+    printf '%s' "$st" | grep -qiE "$DEF" && ok "default ADLC_SETUP_STEPS matches '$st'" || bad "default ADLC_SETUP_STEPS must match '$st'"
+  done
+  for st in "Run tests" "Run pytest" "Login flow tests" "Test cache invalidation" "Run installer tests" "Run setup tests" "Test create branch flow" "Set upstream" "Build"; do
+    printf '%s' "$st" | grep -qiE "$DEF" && bad "default ADLC_SETUP_STEPS must not match '$st'" || ok "default ADLC_SETUP_STEPS does not match '$st'"
+  done
+  jq -n --arg at "$now" '[{databaseId: 31, workflowName: "ADLC CI", headBranch: "feat/3", status: "completed", conclusion: "failure", createdAt: $at}]' > "$MX/only-infra.json"
+  OUT=$( cd "$MX/repo" && env PATH="$MX/bin:$PATH" MX_PRS="$MX/prs.json" MX_RUNS="$MX/only-infra.json" MX_JOBS="$MX/jobs" MX_CALLS="$MX/calls" bash "$S/adlc-metrics.sh" 30 2>&1 )
+  eq "iterations_to_green: every CI run of the window's merged PRs failed in a setup step (1 runs); no test signal" "only setup failures: says there is no test signal instead of dividing by zero" "$(printf '%s\n' "$OUT" | grep '^iterations_to_green:')"
   echo '[]' > "$MX/prs.json"
-  OUT=$( cd "$MX/repo" && env PATH="$MX/bin:$PATH" MX_PRS="$MX/prs.json" MX_RUNS="$MX/runs.json" MX_CALLS="$MX/calls" bash "$S/adlc-metrics.sh" 30 2>&1 )
+  OUT=$( cd "$MX/repo" && env PATH="$MX/bin:$PATH" MX_PRS="$MX/prs.json" MX_RUNS="$MX/runs.json" MX_JOBS="$MX/jobs" MX_CALLS="$MX/calls" bash "$S/adlc-metrics.sh" 30 2>&1 )
   eq "first_pass_approved: 0 / 0" "no merged PRs: 0 / 0" "$(printf '%s\n' "$OUT" | grep '^first_pass_approved:')"
   eq "iterations_to_green: no CI runs found for the merged PRs of the window" "no merged PRs: iterations-to-green says so" "$(printf '%s\n' "$OUT" | grep '^iterations_to_green:')"
   rm -rf "$MX"
@@ -1199,7 +1373,7 @@ if command -v git >/dev/null 2>&1; then
 # stub gh: the issue's comments come from $HO_COMMENTS; the write calls the handoff makes are logged
 case "$1 $2" in
   "issue view") [ -z "${HO_FAIL_VIEW:-}" ] || { echo "gh: Bad Gateway (HTTP 502)" >&2; exit 1; }
-                case "$*" in *"--json comments"*) cat "$HO_COMMENTS" ;; *) exit 2 ;; esac ;;
+                case "$*" in *"--json comments"*) cat "$HO_COMMENTS" ;; *"--json labels"*) printf '%s\n' adlc:auto stage:design ;; *) exit 2 ;; esac ;;
   "issue comment"|"issue edit") shift; echo "$*" >> "$HO_CALLS" ;;
   *) exit 2 ;;
 esac
@@ -1209,7 +1383,7 @@ SH
   hgit init -q --bare "$HO/origin.git"; hgit -C "$HO/origin.git" symbolic-ref HEAD refs/heads/main
   hgit init -q "$HO/seed"; hgit -C "$HO/seed" symbolic-ref HEAD refs/heads/main
   mkdir -p "$HO/seed/.adlc/scripts" "$HO/seed/docs/adr" "$HO/seed/src/api"
-  cp "$S/adlc-diff-scope.sh" "$HO/seed/.adlc/scripts/"
+  cp "$S/adlc-diff-scope.sh" "$S/adlc-relabel.sh" "$HO/seed/.adlc/scripts/"
   echo template > "$HO/seed/docs/adr/template.md"; echo first > "$HO/seed/docs/adr/0001-adopt.md"
   echo guide > "$HO/seed/docs/guide.md"; echo x > "$HO/seed/src/api/a.py"
   ( cd "$HO/seed" && hgit add -A && hgit -c user.name=t -c user.email=t@example.com commit -qm init \
@@ -1260,11 +1434,11 @@ SH
   runner; echo adr > "$HO/run/docs/adr/0002-login.md"; echo more > "$HO/run/docs/guide.md"; echo stray > "$HO/run/src/api/b.py"
   says 'Q: which roles?\n## Task breakdown\n- T1 …\n\nADLC-BREAKDOWN: `docs/adr/0002-login.md`\r\n'
   hstep handoff.sh 7; check 0 "ADR + breakdown: the handoff succeeds (the commit names its own identity)" $?
-  eq ".adlc/scope/7.txt|.adlc/scripts/adlc-diff-scope.sh|docs/adr/0001-adopt.md|docs/adr/0002-login.md|docs/adr/template.md|docs/guide.md|src/api/a.py|" \
+  eq ".adlc/scope/7.txt|.adlc/scripts/adlc-diff-scope.sh|.adlc/scripts/adlc-relabel.sh|docs/adr/0001-adopt.md|docs/adr/0002-login.md|docs/adr/template.md|docs/guide.md|src/api/a.py|" \
      "the design branch holds the docs and the scope file, not the stray file" "$(otree adlc/design-7)"
   eq "docs/adr/0002-login.md|docs/guide.md|" "the scope file lists exactly the design files it committed" "$(oscope 7)"
   eq "adlc-design <adlc-design@users.noreply.github.com>" "the commit is the design lane's" "$(hgit -C "$HO/origin.git" log -1 --format='%an <%ae>' adlc/design-7 2>/dev/null)"
-  eq "comment 7 --body 📐 Design handed|edit 7 --remove-label stage:design --add-label stage:build|" "the issue advances, after the push" "$(hcalls)"
+  eq "comment 7 --body 📐 Design handed|edit 7 --remove-label stage:design --add-label stage:build|" "the issue advances, after the push, in one edit through the relabel script" "$(hcalls)"
   eq "$main0" "main is untouched" "$(oref main)"
 
   # ── the Builder starts from it ──
@@ -1336,7 +1510,7 @@ grants() { # <template> → "<agent>=<tools>;" per agent step, in file order ("-
 FULL='Read,Edit,Write,Skill,Bash'
 GITRO='Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*)'
 REVIEW="Skill,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*),Bash(gh pr list:*),Bash(gh pr checks:*),Bash(gh issue view:*),$GITRO"
-eq "adlc:product-analyst=Skill,Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh issue edit:*),Bash(gh issue list:*),Bash(gh label list:*),Bash(gh search:*),Bash(.adlc/scripts/adlc-triage.sh:*);" \
+eq "adlc:product-analyst=Skill,Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh issue edit:*),Bash(gh issue list:*),Bash(gh label list:*),Bash(gh search:*),Bash(.adlc/scripts/adlc-triage.sh:*),Bash(.adlc/scripts/adlc-relabel.sh:*);" \
    "intake: the Analyst, named gh commands, no edit tools" "$(grants adlc-intake.yml)"
 eq "adlc:architect=Edit(docs/**),Skill,Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh issue list:*),Bash(gh pr view:*),Bash(gh pr list:*),Bash(gh pr diff:*),$GITRO;" \
    "design: the Architect, edits under docs/ only, no commit/push/label" "$(grants adlc-design.yml)"
@@ -1436,7 +1610,17 @@ grep -q -- '--jq .behind_by' "$RB" && ok "…reading behind_by" || bad "RUNBOOK 
 grep -qE 'On `BEHIND`' "$RB" && bad "RUNBOOK Gate 2 must not key on mergeStateStatus BEHIND" || ok "…and does not key on mergeStateStatus BEHIND"
 grep -q 'wait for the checks to go green on the' "$RB" && ok "…and waits for green checks on the new head" || bad "RUNBOOK Gate 2 must wait for the checks after merging the base"
 grep -q '^Base: ' "$ROOT/templates/skills/release-ops.SKILL.md.tmpl" && ok "Action Card records the base the battery ran against" || bad "release-ops card needs a Base: line"
-grep -q 'remove-label stage:fast --add-label gate:deploy' "$RB" && ok "RUNBOOK fast lane moves the issue to gate:deploy in one call" || bad "RUNBOOK fast lane must remove stage:fast when adding gate:deploy"
+grep -q 'adlc-relabel.sh <n> gate:deploy' "$RB" && ok "RUNBOOK fast lane moves the issue to gate:deploy with the relabel script (one state)" || bad "RUNBOOK fast lane must move the issue to gate:deploy with adlc-relabel.sh"
+grep -q -- '--remove-label stage:\|--add-label stage:\|--add-label gate:' "$RB" && bad "RUNBOOK must not spell out a state-label pair (adlc-relabel.sh does it)" || ok "RUNBOOK spells out no state-label pair"
+for f in "$ROOT"/templates/github/adlc-*.yml; do
+  hits=$(grep -nE 'gh issue edit .*--(add|remove)-label (stage|gate):' "$f" || true)
+  eq "" "$(basename "$f"): moves state labels through adlc-relabel.sh, never a hand-spelled pair" "$hits"
+done
+# the prose an agent reads counts too: "add gate:deploy" in the QA prompt was the wording behind the 25 double-labelled issues
+for f in "$ROOT"/templates/github/adlc-*.yml "$RB"; do
+  hits=$(grep -nE '\badds? `?(stage|gate):[a-z]+' "$f" || true)
+  eq "" "$(basename "$f"): no prompt or step tells anyone to \"add\" a state label" "$hits"
+done
 # /adlc-model
 CM="$ROOT/commands/adlc-model.md"
 [ -f "$CM" ] && ok "commands/adlc-model.md exists" || bad "commands/adlc-model.md missing"
@@ -1634,6 +1818,7 @@ case "$1 $2" in
   "run list")   src="$CY_FX/runs.json" ;;
   "issue list") src="$CY_FX/issues.json" ;;
   "pr list")    src="$CY_FX/prs.json" ;;
+  "pr view")    src="$CY_FX/pr-$3.json"; [ -f "$src" ] || src="$CY_FX/pr-none.json" ;;
   "repo view")  src="$CY_FX/repo.json" ;;
   api*)         n=$(printf '%s' "$2" | sed -nE 's#.*/issues/([0-9]+)/timeline.*#\1#p')
                 [ "$n" = 10 ] && { echo "gh: Not Found (HTTP 404)" >&2; exit 1; }
@@ -1677,34 +1862,59 @@ SH
     xref "$(at 1800)" 9 true; tl "$(at 2000)" unlabeled stage:build; tl "$(at 2000)" labeled stage:qa; tl "$(at 2600)" unlabeled stage:qa; tl "$(at 2600)" labeled gate:deploy
     tl "$(at 3500)" labeled stage:intake; } | jq -s . > "$CY/fx/timeline-7.json"   # re-labeled 500 s AFTER the close: counts 0, not -500
   { tl "$(at 1900)" labeled adlc:changes-requested; tl "$(at 1950)" unlabeled adlc:changes-requested; tl "$(at 1990)" labeled lane:full; } | jq -s . > "$CY/fx/timeline-9.json"
+  # PR 9's comments (issue 58): the label marks one round, the verdict comments three — a reviewer that asked for
+  # changes three times (its fourth comment only QUOTES "ADLC-ADV: CHANGES" and ends PASS), the other once; a repo
+  # that runs the pipeline by hand never applies the label, so the verdicts count too: max(1, max(3, 1)) = 3
+  # (not 2 distinct markers, not 4 CHANGES comments, not 1 + 3)
+  jq -n '{comments: [
+    {body: "Found two things.\nADLC-FINDING: High | authz-gap | src/a.py\n\nADLC-ADV: CHANGES"},
+    {body: "Conformance: the ADR says otherwise.\n\n**ADLC-ARCH: CHANGES**"},
+    {body: "Still one left.\n\n`ADLC-ADV: CHANGES`"},
+    {body: "And the test for it.\n\nADLC-ADV: CHANGES"},
+    {body: "The earlier ADLC-ADV: CHANGES is addressed.\n\nADLC-ADV: PASS"},
+    {body: "ADLC-ARCH: PASS"}]}' > "$CY/fx/pr-9.json"
+  echo '{"comments": []}' > "$CY/fx/pr-none.json"
   # issue 8: fast lane, its PR predates its intake label (filed from the PR) → intake_to_pr null
   { xref "$(at -50)" 500 true other/plugin; xref "$(at 0)" 11 true; tl "$(at 100)" labeled stage:intake; tl "$(at 200)" unlabeled stage:intake; tl "$(at 200)" labeled stage:fast; } | jq -s . > "$CY/fx/timeline-8.json"
-  jq -n --arg t1 "$T1" --arg close "$(at 3000)" --arg old "2020-01-01T00:00:00Z" '[
+  # issue 12 (issue 38): QA put gate:deploy on and never took stage:qa off; closed at 1000. The stage ends at the
+  # next state label (600), not at the close (1000); the gate runs from 600 to the close (400).
+  { tl "$(at 0)" labeled stage:qa; tl "$(at 600)" labeled gate:deploy; } | jq -s . > "$CY/fx/timeline-12.json"
+  # issue 13: as 12, then gate:deploy taken off at 700 (a Gate 2 rejection): stage:qa, still on the issue, is the
+  # state again from 700 to the close at 1000 — 600 + 300, not 600 with 300 s in no bucket
+  { tl "$(at 0)" labeled stage:qa; tl "$(at 600)" labeled gate:deploy; tl "$(at 700)" unlabeled gate:deploy; } | jq -s . > "$CY/fx/timeline-13.json"
+  jq -n --arg t1 "$T1" --arg close "$(at 3000)" --arg close12 "$(at 1000)" --arg old "2020-01-01T00:00:00Z" '[
     {number: 7, title: "thing", createdAt: $t1, closedAt: $close, labels: []},
     {number: 8, title: "small", createdAt: $t1, closedAt: $close, labels: []},
+    {number: 12, title: "two labels", createdAt: $t1, closedAt: $close12, labels: []},
+    {number: 13, title: "gate taken off again", createdAt: $t1, closedAt: $close12, labels: []},
     {number: 10, title: "transferred away (timeline 404)", createdAt: $t1, closedAt: $close, labels: []},
     {number: 3, title: "ancient", createdAt: $old, closedAt: $old, labels: []}]' > "$CY/fx/issues.json"
   : > "$CY/calls"
   OUT=$( cd "$CY/repo" && env PATH="$CY/bin:$PATH" CY_FX="$CY/fx" CY_CALLS="$CY/calls" bash "$S/adlc-cycle.sh" issues 7 2>"$CY/err" ); check 0 "cycle issues: runs to the end although one timeline read failed" $?
-  eq 2 "cycle issues: one row per readable issue created in the window" "$(printf '%s\n' "$OUT" | wc -l | tr -d ' ')"
+  eq 4 "cycle issues: one row per readable issue created in the window" "$(printf '%s\n' "$OUT" | wc -l | tr -d ' ')"
   eq 1 "cycle issues: the unreadable issue is named on stderr and skipped, not silently dropped" "$(grep -c 'timeline of #10; skipped' "$CY/err")"
   eq 1 "…and gh's own error is kept" "$(grep -c 'HTTP 404' "$CY/err")"
   R7=$(printf '%s\n' "$OUT" | jq -c 'select(.issue == 7)')
-  eq "600 300 100 1000 600 400" "cycle: dwell per label from labeled→unlabeled intervals; an open gate runs to the issue's close; a label put on after the close adds 0" \
+  eq "600 300 100 1000 600 400" "cycle: dwell per label from labeled→unlabeled intervals; the open gate ends at the next label put on, capped at the close (3500 → 3000); that label, put on after the close, adds 0" \
      "$(printf '%s' "$R7" | jq -r '"\(.dwell["stage:intake"]) \(.dwell["gate:stories"]) \(.dwell["stage:design"]) \(.dwell["stage:build"]) \(.dwell["stage:qa"]) \(.dwell["gate:deploy"])"')"
-  eq "full 9 1800 1 2300 700" "cycle: lane, first PR that references the issue (not the issue xref), intake→PR, rounds from the PR's changes-requested labels, stage vs gate seconds" \
+  eq "full 9 1800 3 2300 700" "cycle: lane, first PR that references the issue (not the issue xref), intake→PR, rounds = max(changes-requested labels, CHANGES verdicts per marker), stage vs gate seconds" \
      "$(printf '%s' "$R7" | jq -r '"\(.lane) \(.pr) \(.intake_to_pr_seconds) \(.rounds) \(.stage_seconds) \(.gate_seconds)"')"
-  eq "fast 11 null 0" "cycle: stage:fast → fast lane; another repo's PR is not this issue's PR; a PR that predates the intake label gives no intake→PR; no changes-requested → 0 rounds" \
+  eq "fast 11 null 0" "cycle: stage:fast → fast lane; another repo's PR is not this issue's PR; a PR that predates the intake label gives no intake→PR; no changes-requested and no verdict → 0 rounds" \
      "$(printf '%s\n' "$OUT" | jq -r 'select(.issue == 8) | "\(.lane) \(.pr) \(.intake_to_pr_seconds) \(.rounds)"')"
+  eq "600 400 600 400 full" "cycle: a stage left on when the next state label is put on ends there, not at the close; the gate runs to the close" \
+     "$(printf '%s\n' "$OUT" | jq -r 'select(.issue == 12) | "\(.dwell["stage:qa"]) \(.dwell["gate:deploy"]) \(.stage_seconds) \(.gate_seconds) \(.lane)"')"
+  eq "900 100 900 100" "cycle: a superseded stage is the state again when the gate that superseded it is taken off, until the close" \
+     "$(printf '%s\n' "$OUT" | jq -r 'select(.issue == 13) | "\(.dwell["stage:qa"]) \(.dwell["gate:deploy"]) \(.stage_seconds) \(.gate_seconds)"')"
   eq 1 "cycle: one issue list call" "$(grep -c '^issue list$' "$CY/calls")"
   eq 1 "cycle: one repo view call, outside the loop" "$(grep -c '^repo view$' "$CY/calls")"
-  eq 5 "cycle: one timeline call per issue, plus one per linked PR (none for a skipped issue)" "$(grep -c '^api ' "$CY/calls")"
+  eq 7 "cycle: one timeline call per issue, plus one per linked PR (none for a skipped issue)" "$(grep -c '^api ' "$CY/calls")"
+  eq 2 "cycle: one pr view call per linked PR, for its verdict comments" "$(grep -c '^pr view$' "$CY/calls")"
   printf '%s\n' "$OUT" > "$CY/repo/.adlc/metrics/cycle.jsonl"
   OUT=$( cd "$CY/repo" && CLAUDE_PROJECT_DIR="$CY/repo" bash "$S/adlc-cycle.sh" report 7 2>&1 ); check 0 "cycle report: runs to the end" $?
   eq "builder          1               1      0.2       100%        60       100%  82%" "report: the per-stage spend table (agent runs only; cached share of the prompt)" "$(printf '%s\n' "$OUT" | grep '^builder ')"
   eq "adlc-ci: runs=2 avg_sec=35 failed=1" "report: guard lanes by name with avg seconds and failures" "$(printf '%s\n' "$OUT" | grep '^adlc-ci:')"
-  eq "issues=2  with_pr=2  fast_lane=1" "report: issue counts" "$(printf '%s\n' "$OUT" | grep '^issues=')"
-  eq "rounds: total=1  issues_with_a_fix_round=1" "report: fix rounds" "$(printf '%s\n' "$OUT" | grep '^rounds:')"
+  eq "issues=4  with_pr=2  fast_lane=1" "report: issue counts" "$(printf '%s\n' "$OUT" | grep '^issues=')"
+  eq "rounds: total=3  issues_with_a_fix_round=1" "report: fix rounds" "$(printf '%s\n' "$OUT" | grep '^rounds:')"
   rm -f "$CY/repo/.adlc/metrics/runs.jsonl" "$CY/repo/.adlc/metrics/cycle.jsonl"
   OUT=$( cd "$CY/repo" && CLAUDE_PROJECT_DIR="$CY/repo" bash "$S/adlc-cycle.sh" report 7 2>&1 ); check 0 "report with no ledgers: still exits 0" $?
   eq 2 "report with no ledgers: says which to materialize, instead of empty tables" "$(printf '%s\n' "$OUT" | grep -c 'materialize it with')"

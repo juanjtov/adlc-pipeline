@@ -101,7 +101,7 @@ jobs:
           claude_args: |
             --agent adlc:product-analyst
             --permission-mode dontAsk
-            --allowedTools "Skill,Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh issue edit:*),Bash(gh issue list:*),Bash(gh label list:*),Bash(gh search:*),Bash(.adlc/scripts/adlc-triage.sh:*)"
+            --allowedTools "Skill,Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh issue edit:*),Bash(gh issue list:*),Bash(gh label list:*),Bash(gh search:*),Bash(.adlc/scripts/adlc-triage.sh:*),Bash(.adlc/scripts/adlc-relabel.sh:*)"
           prompt: |
             Triage issue #${{ github.event.issue.number }} and turn it into stories (or a change
             brief). Load your role's skills with the Skill tool first: adlc:role-product-analyst,
@@ -171,6 +171,7 @@ jobs:
             gh issue comment "$N" --body "🚦 Triaged **FAST** — the fast lane is *recommended*. It skips design + Gate 1, so the **lane is yours to approve**: apply \`stage:fast\` to take it, or \`stage:design\` for the full pipeline. Autopilot will not start the fast lane on its own."
             echo "Autopilot: triaged FAST → left at gate:stories for human lane approval (fast lane never auto-starts)."
           else
-            gh issue edit "$N" --remove-label gate:stories --add-label stage:design
+            chmod +x .adlc/scripts/adlc-relabel.sh
+            .adlc/scripts/adlc-relabel.sh "$N" stage:design
             echo "Autopilot: triaged FULL → Gate 1 auto-approved → stage:design. Gate 2 remains the only human step."
           fi

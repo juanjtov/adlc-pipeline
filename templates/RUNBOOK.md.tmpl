@@ -39,8 +39,8 @@ directly to a fresh issue (your own triage) or after the Analyst recommends FAST
    `.claude/agents/adlc-adversarial-reviewer.md`; walk the `adlc:security-gate` classes). The cap
    is enforced again on the real diff — an over-cap/sensitive diff goes to `stage:design`.
 4. On a PASS verdict, move the issue to `gate:deploy`
-   (`gh issue edit <n> --remove-label stage:fast --add-label gate:deploy` — one state at a
-   time, as the fast-lane workflow does). **Gate 2 (you):** the same behind-the-base check
+   (`.adlc/scripts/adlc-relabel.sh <n> gate:deploy` — one call that takes `stage:fast` and any
+   other state label off, so the issue is in one state, as the fast-lane workflow does). **Gate 2 (you):** the same behind-the-base check
    and merge as the full lane's Gate 2 below. On CHANGES, hand it back to the Builder (the same fix
    cycle as the full lane).
 
@@ -77,7 +77,8 @@ directly to a fresh issue (your own triage) or after the Analyst recommends FAST
 2. It verifies AC coverage, writes missing tests, runs the full battery, and runs the
    **adversarial security gate**. For UI changes it runs browser verification.
 3. You run `/security-review` on the PR branch and post findings.
-4. On a clean verdict it adds `gate:deploy` and posts a **Proposed Action Card**.
+4. On a clean verdict it moves the issue to `gate:deploy` (`.adlc/scripts/adlc-relabel.sh <n> gate:deploy`,
+   one call, which takes `stage:qa` off) and posts a **Proposed Action Card**.
 
 ## Gate 2 — Merge + deploy (you)
 
