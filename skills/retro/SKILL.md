@@ -82,6 +82,19 @@ Run the `ablation` keep/cut test on existing context, driven by data: any CLAUDE
 gotcha with a **zero hit-rate** over the window (never tied to a prevented failure) is a
 removal candidate. The loop must delete as readily as it adds, or it rots into append-only.
 
+## Follow-up chains — a decision for the Principal, not more follow-ups
+
+```
+.adlc/scripts/adlc-chains.sh report    # chains 3+ issues deep: an issue, its follow-up, that one's follow-up, …
+```
+Each `depth=` line is one area where fix after fix drew another follow-up, a pipeline run per
+issue. Put every such line in the PR body (with no PR, in your summary) as a **decision**, not
+as further follow-up work: **accept the risk** — the Principal labels the chain's root issue
+`adlc:accepted-risk`, and QA is then told to file no more follow-ups in that chain — or
+**redesign** — one issue that replaces the approach. A line that starts `decided` already
+carries the label: leave it out. `follow_ups_filed` in the metrics is the follow-ups' share of
+the issues opened.
+
 ## Step 4 — Propose
 
 Open one PR that: adds the tests/checks/conventions from Step 2, removes the Step 3

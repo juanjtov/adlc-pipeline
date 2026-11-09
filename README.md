@@ -80,6 +80,7 @@ templates/                     # what the wizard fills into the host repo
             adlc-adr-check.sh                                                          # an ADR's Scope = the scope file; each Guarantees row names a test that exists
             adlc-ci-budget.sh · adlc-local-ci.sh                                       # Actions minutes: will the CI battery fit · the battery run locally, one marker comment on the PR
             adlc-refresh.sh                                                            # the refresh: per-file diff, skips host-owned copies; runs from the plugin, not copied
+            adlc-chains.sh                                                             # follow-up chains: which issue follows which, how deep, decided or not
             #   adlc-cache.sh        = prompt-cache hit-rate rollup
             #   adlc-run-log.sh      = run ledger: tokens · cost · seconds per agent run (Mission Control / OTel / Actions)
             #   adlc-cycle.sh        = cycle time per stage + fix rounds per issue, from the label timeline; the ranked report
@@ -156,6 +157,17 @@ of the prompt and USD, read from Mission Control's local store (`mc`), the OTel 
 cold-cache fix, a cheaper model tier for a stage, a flaky lane — in one propose-only PR with the
 report in its body. `adlc-metrics.sh` adds first-pass acceptance and iterations-to-green (CI runs
 per merged PR) from the same window.
+
+**A follow-up chain is a decision, not more follow-ups.** A residual that does not block a PR
+(a Medium in the `security-gate` rubric) becomes a follow-up issue, and when each fix draws the
+next one the pipeline feeds itself: one adopting repo had chains four to seven issues deep. QA's
+prompt has it file one follow-up per PR, labelled `adlc:follow-up`, with the body line
+`ADLC-FOLLOW-UP: #<parent issue>`. `adlc-chains.sh report` builds the chains from those lines
+(for older issues, from phrases such as "follow-up of #N") and lists every one three or more
+issues deep; both retros put each to you as a decision. Label the chain's root issue
+`adlc:accepted-risk` and QA's prompt has it file no more follow-ups in that chain (it names the
+residuals on the Action Card instead), or open one issue that replaces the approach. These are
+prompt rules and a report: nothing blocks an agent that files an issue anyway.
 
 **Cost / latency / tokens.** Latency per lane and per pipeline run is tracked deterministically
 by `adlc-cost.sh` (from GitHub Actions run durations — no extra infra). Token count and cost per

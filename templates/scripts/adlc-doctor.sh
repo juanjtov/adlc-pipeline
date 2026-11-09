@@ -7,7 +7,8 @@
 #         invokes exist, each with a model line ·
 #         and, when gh is available: the state-machine labels exist, and the two a script
 #         filters on (adlc:change-failure, adlc:tripwire) · no open issue or PR
-#         carries two state labels at once · GitHub is still running this repo's workflows (an
+#         carries two state labels at once · the two follow-up chain labels exist ·
+#         GitHub is still running this repo's workflows (an
 #         exhausted Actions budget fails every run at once, the tripwire's included) · the
 #         default branch has a merge gate (a required approving review, or at least the tripwire);
 #         and, when it can find the plugin, whether .adlc/VERSION (stamped by /adlc-init)
@@ -179,6 +180,11 @@ if [ -z "${ADLC_DOCTOR_SKIP_LABELS:-}" ] && command -v gh >/dev/null 2>&1 && gh 
     printf '%s\n' "$existing" | grep -qx "adlc:tripwire" \
       || note "missing GitHub label: adlc:tripwire (the tripwire files its alerts under it; without it they are filed unlabelled) — re-run the plugin's templates/github/labels.sh"
   fi
+  # The follow-up chain labels: QA files a PR's residuals as one issue labelled adlc:follow-up, and
+  # the Principal closes a chain by labelling its root adlc:accepted-risk (adlc-chains.sh reads it).
+  for l in adlc:follow-up adlc:accepted-risk; do
+    printf '%s\n' "$existing" | grep -qx "$l" || note "missing GitHub label: $l (follow-up chains; run the plugin's templates/github/labels.sh again, it only adds and updates)"
+  done
   # One state per issue: an issue or PR carrying two stage:/gate: labels at once is in two
   # states, and the cycle clock, Mission Control's station view and a lane keyed on the older
   # label each pick their own. A closed one is out of the machine, so open ones only. gh's

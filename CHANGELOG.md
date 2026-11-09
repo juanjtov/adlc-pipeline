@@ -25,10 +25,43 @@ refreshed `adlc-main-tripwire.yml` calls it (with the `adlc-tripwire-check.sh` c
 mode); the `adlc-doctor.sh` copy gains the two new labels and the host-owned line, the
 `adlc-metrics.sh` copy the `change_failures` count, and the RUNBOOK template the scope-file
 section. Re-run `templates/github/labels.sh` as well: it creates `adlc:change-failure` and
-`adlc:tripwire`. The refresh itself now runs through `adlc-refresh.sh`, from the plugin. The
-security-gate, code-review and efficient-runs skills, the retro and cycle-retro recipes, the role
-prompts and the guard hook live in the plugin, which every session loads from the installed
-plugin, so those parts need no refresh.
+`adlc:tripwire`. The refresh itself now runs through `adlc-refresh.sh`, from the plugin. From
+issue 37: `adlc-chains.sh` is new, and QA's prompt and both retros call it; `labels.sh` creates
+two more labels (`adlc:follow-up`, `adlc:accepted-risk`; the refreshed `adlc-doctor.sh` copy
+reports them missing until you run it again), and the `adlc-metrics.sh` copy gains the
+`follow_ups_filed` line. The security-gate, code-review and efficient-runs skills, the retro and
+cycle-retro recipes, the role prompts and the guard hook live in the plugin, which every session
+loads from the installed plugin, so those parts need no refresh.
+
+- **A follow-up chain is a decision for the Principal: `adlc-chains.sh`, two labels, one
+  follow-up per PR** (issue 37). On one host 91 of 224 issue titles were follow-ups, in chains
+  four to seven issues deep, each issue a pipeline run; its retro had already said of one chain
+  that the approach would keep losing, and three more rounds followed. Nothing recorded which
+  issue a follow-up followed, and nothing recorded a decision to stop. Now QA's prompt has it
+  file ONE follow-up issue per PR for the residuals that do not block (a Medium in the
+  `security-gate` rubric; a Low stays a note in the review, as the rubric already said),
+  labelled `adlc:follow-up`, with the body line `ADLC-FOLLOW-UP: #<the issue the PR closes>`.
+  New `adlc-chains.sh` reads one `gh issue list` (1000 issues by default,
+  `ADLC_CHAINS_LIMIT`) and takes each issue's parent from that marker line, and for older
+  issues from a phrase in the title or body ("follow-up of #N", "residuals of #N", "QA of #N",
+  "(from PR #N)"); a number that is not an issue is looked up as a pull request (one
+  `gh pr list` call, only then) and resolved to the issue its body closes. A parent must be
+  older than its follow-up, so issues that name each other cannot loop. `adlc-chains.sh report
+  [min_depth]` prints one line per root issue whose longest path is 3 or more issues deep,
+  with every issue under the root counted, and lists a chain whose root carries
+  `adlc:accepted-risk` apart as decided; `adlc-chains.sh root <issue>` prints an issue's root,
+  the chain's depth and `accepted-risk` or `open`. The `retro` and `cycle-retro` skills run the
+  report and put each undecided chain to the Principal as a decision (label the root
+  `adlc:accepted-risk`, or one issue that replaces the approach), not as further follow-ups; QA
+  asks `root` before filing and, on `accepted-risk`, files nothing and names the residuals in
+  its comment and on the Action Card's Risk line, and on a chain already 3 deep says so on the
+  card. `labels.sh` creates the two labels, the doctor reports them missing, and
+  `adlc-metrics.sh` prints `follow_ups_filed: N / M`, the follow-ups among the issues opened in
+  the window. Not done: these are prompt rules and a report, so nothing blocks an agent that
+  files an issue anyway; the phrase reading is a heuristic (a body that says "QA of #N" about
+  an unrelated issue links to it); only the label on a chain's ROOT counts; a PR tied to its
+  issue by hand, with no closing keyword in its body, is not resolved; and the lanes' prompts
+  are unchanged, so the rule reaches QA through its role skill.
 
 - **A refresh no longer overwrites what a host changed; the tripwire alerts on a force-push
   and files an alert once** (issue 39). The refresh copied `templates/scripts/*.sh` over the

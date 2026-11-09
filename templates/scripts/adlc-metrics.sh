@@ -137,6 +137,13 @@ else
   echo "change_failures: 0 (this repo has no $CF_LABEL label, so no issue carries it — run the plugin's templates/github/labels.sh)"
 fi
 
+# --- Follow-up share (issue 37): of the issues opened in the window, those QA filed as a follow-up ---
+# (label adlc:follow-up; the newest 500 issues are read). A high share is a pipeline feeding itself:
+# adlc-chains.sh report shows which chains.
+followups=$(gh issue list --state all --limit 500 --json createdAt,labels \
+        --jq "[.[] | select(.createdAt >= \"$SINCE\")] | \"\([.[] | select(any((.labels // [])[]; .name == \"adlc:follow-up\"))] | length) / \(length)\"")
+echo "follow_ups_filed: $followups issues opened"
+
 # --- Finding classes (the compounding signal) ---
 if [ -f "$LEDGER" ]; then
   echo "finding_classes (class: count  [top severity]):"

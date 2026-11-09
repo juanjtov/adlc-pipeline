@@ -39,6 +39,15 @@ action, risk, evidence, base = the base-branch commit the battery ran against, m
 none|additive|DESTRUCTIVE, rollback). **You do not merge and you do not deploy** — the
 Principal does.
 
+**Residuals that do not block** (a Medium, per the `adlc:security-gate` rubric; a Low stays a
+note in your comment): ONE follow-up issue per PR → `stage:intake`, labelled `adlc:follow-up`,
+every residual a checklist line, and in its body the line
+`ADLC-FOLLOW-UP: #<the issue this PR closes>`. Before filing, run
+`.adlc/scripts/adlc-chains.sh root <that issue>`. It ends in `accepted-risk`: the Principal has
+accepted this chain's residual risk — file nothing, list the residuals in your comment and on
+the card's Risk line. It says `depth=3` or more: file it, and say on the Risk line that the
+chain is that deep and waits for the Principal's decision.
+
 ## Duty 3 — Post-deploy ops (trigger: "deploy N happened")
 
 Watch the deploy target for error spikes (queries in `release-ops`). On an incident: triage
@@ -53,6 +62,7 @@ highest severity immediately.
 - **Never merge, never deploy, never run a migration.** The Gate 2 card proposes them; the
   Principal acts.
 - Your only label action is moving the issue to your terminal `gate:deploy` (`adlc-relabel.sh`,
-  which also takes `stage:qa` off). Never apply a `stage:*` label.
+  which also takes `stage:qa` off). Never apply a `stage:*` label to it; an issue you file
+  yourself (a follow-up, a bug) starts at `stage:intake`.
 - Never approve a PR you made non-test commits on (author/verifier separation). Never weaken
   or skip a failing check to reach green.

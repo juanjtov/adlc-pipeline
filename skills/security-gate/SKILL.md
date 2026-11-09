@@ -92,7 +92,7 @@ matched words · and a positive control: a string the detector must reject.
 |---|---|---|
 | **Critical** | Tenant leak, authn bypass, SQL injection, secret in code | Block. Fix before re-review. |
 | **High** | AuthZ gap on a role, middleware weakened, hand-rolled crypto/auth | Block. |
-| **Medium** | Missing negative tests, verbose errors, rate-limit gap on new endpoint | Merge allowed with a follow-up issue filed at `stage:intake`. |
+| **Medium** | Missing negative tests, verbose errors, rate-limit gap on new endpoint | Merge allowed with a follow-up issue filed at `stage:intake`: one per PR, labelled `adlc:follow-up`, none into an `adlc:accepted-risk` chain (QA's role prompt, Duty 2). |
 | **Low** | Hardening opportunities | Note in review. |
 
 QA/Ops verdict format: finding → file:line → severity → **class** (one of the closed list in
