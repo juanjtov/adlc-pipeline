@@ -76,7 +76,7 @@ templates/                     # what the wizard fills into the host repo
             adlc-cache.sh · adlc-triage.sh · adlc-pr-stage.sh · adlc-branch-issue.sh   # deterministic logic
             adlc-run-log.sh · adlc-cycle.sh                                            # the cycle-retro's two ledgers
             adlc-relabel.sh                                                            # one state per issue: move to a stage:/gate: label in one call
-            adlc-adr-check.sh                                                          # an ADR's Scope = the scope file; each Guarantees row names a test that exists
+            adlc-adr-check.sh                                                          # an ADR's Scope = its issue's scope file, once that exists; each Guarantees row names a test that exists
             adlc-ci-budget.sh · adlc-local-ci.sh                                       # Actions minutes: will the CI battery fit · the battery run locally, one marker comment on the PR
             #   adlc-cache.sh        = prompt-cache hit-rate rollup
             #   adlc-run-log.sh      = run ledger: tokens · cost · seconds per agent run (Mission Control / OTel / Actions)
@@ -110,10 +110,12 @@ hook**, so your machine and Actions run the same code. The Builder declares each
 in `.adlc/scope/<issue>.txt`; the diff-scope check fails a lane PR that strays outside it or
 declares none. That check and the fast-lane cap run on `pull_request_target` — the workflow and
 scripts come from the default branch and the PR is only read as data — so a PR cannot edit the
-guards that judge it. `adlc-adr-check.sh` holds an ADR to its own words: its `## Scope` must
-match that scope file (the `docs/` lines the design lane puts there aside), and each row of its `## Guarantees` table must name a test that
-exists (`path::node`) or say `unenforced — <reason>`; the Builder, the Architect's local review
-and QA run it, no workflow does, and ADRs with neither section (older ones) are skipped.
+guards that judge it. `adlc-adr-check.sh` holds an ADR to its own words: where the ADR names
+its issue and that issue's scope file exists, its `## Scope` must match the file (the `docs/`
+lines the design lane puts there aside), and each row of its `## Guarantees` table must name a
+test that exists (`path::node`) or say `unenforced — <reason>`; the Builder, the Architect's
+local review and QA run it, no workflow does, and an ADR with no sign of either section or of
+the header's issue field (an older one) is skipped.
 `adlc-doctor.sh` validates a host repo's setup (deny rules, unfilled
 placeholders, lanes that can't run their agent, skills, the five agent copies and their model
 lines, labels, whether GitHub is still running the workflows at all, and whether the default
@@ -176,7 +178,9 @@ rises), so the metric is the point. The cache also expires: a run that blocks on
 for longer than the cache lifetime pays full input price on its next turn, so the wizard merges
 `settings.cache.json` (`promptCacheTtl` and `subagentPromptCacheTtl`, both `"1h"`) into
 `.claude/settings.json`. A 1-hour cache write is billed at a higher rate than a 5-minute one, so
-this pays off only where runs do wait that long; removing the two keys undoes it.
+this pays off only where runs do wait that long; removing the two keys undoes it. Not checked:
+that every Claude Code version reads the two keys from a project's settings file, and what the
+Actions lanes do with them.
 
 ### Two layers, on purpose
 
