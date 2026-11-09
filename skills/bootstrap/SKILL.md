@@ -96,15 +96,26 @@ detected values pre-selected as the recommended option. Cover:
      RUNBOOK; labels track state; no Actions.
    - **Full automation · public repo** — label transitions auto-trigger the lanes; the merge
      gate is real **branch protection** (free on public repos); unlimited Actions minutes.
-   - **Full automation · private repo (Free plan)** — lanes still auto-trigger (~2,000
-     Actions min/month free; when they run out GitHub fails every run at once, the tripwire's
-     included, and nothing says so — `adlc-doctor.sh` and Mission Control read that state and
-     say it); branch protection isn't available, so the merge gate is the
+   - **Full automation · private repo (Free plan)** — lanes still auto-trigger, on the plan's
+     included Actions minutes (~2,000 a month on Free; size them in 7a); branch protection
+     isn't available, so the merge gate is the
      plugin's guard hook (backed by the `settings.json` deny rules) + the
      **`adlc-main-tripwire.yml`** backstop + human Gate 2.
    Full automation (either kind) needs two secrets — `CLAUDE_CODE_OAUTH_TOKEN` and a
    `ADLC_DISPATCH_TOKEN` (PAT/App token) — see Phase 3. Best added once the local recipe
    is proven.
+7a. **Actions minutes** — only when a PRIVATE repo will run CI on Actions (full automation, or
+   the local recipe with `adlc-ci.yml` on Actions). Size it before copying the workflow: ask
+   for, or estimate from the battery, the job-minutes of one CI run (the sum over its jobs);
+   take 4–5 CI runs per PR unless the user has a measured figure; ask PRs per month; then run
+   `${CLAUDE_PLUGIN_ROOT}/templates/scripts/adlc-ci-budget.sh <minutes/run> <runs/PR> <PRs/month> [included]`
+   (included defaults to 2,000; the agent lanes use minutes on top of this estimate). On
+   `OVER`, propose in this order: (1) `paths` filters on the CI workflow; (2) the heavy jobs
+   (database, perf, image build) only once the issue reaches `stage:qa`, or on a label; (3) CI
+   off Actions, with the local CI recipe (`.adlc/scripts/adlc-local-ci.sh`, in the RUNBOOK;
+   write its `.adlc/local-ci.txt` from the Phase 1 commands, one `<name>: <command>` per line).
+   Say what running out means: GitHub fails every run at once, the tripwire's included, and
+   nothing says so but `adlc-doctor.sh` and Mission Control.
 7b. **Autonomy level** (for full automation) — offer three, in increasing hands-off order.
    All keep **Gate 2 (merge + deploy) human** — merge/deploy is never automated — and only
    allowlisted authors can auto-trigger:
@@ -342,8 +353,8 @@ the merge gate according to the repo's visibility (the Phase 1 choice):
 - **Private repo (Free plan)** → also copy `adlc-main-tripwire.yml` into `.github/workflows/`.
   Branch protection isn't available, so the merge gate is: the plugin's guard hook (backed by
   the `settings.json` deny rules written in Phase 2) + this tripwire (fails and files a bug
-  on any direct push to main) + the human Gate 2. Actions minutes are the ~2,000/month free
-  tier — note it.
+  on any direct push to main) + the human Gate 2. Actions minutes are limited there: the
+  sizing from Phase 1 (7a) applies.
 
 Then print the **one-time manual infra checklist** (Principal tasks — you cannot do these):
 - Two repo secrets: `CLAUDE_CODE_OAUTH_TOKEN` (`claude setup-token` — subscription, no API

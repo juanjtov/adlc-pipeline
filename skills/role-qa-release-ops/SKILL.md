@@ -19,6 +19,10 @@ write missing ones yourself (your only write scope is the repo's test directorie
 `project-conventions`) and commit them. Run the full battery and **paste real output**.
 Run `.adlc/scripts/adlc-adr-check.sh` too (the ADR's Scope against the scope file, each
 Guarantees row against its test): a line on stderr is a finding.
+Where the PR's checks did not run (Actions blocked, or no CI on Actions), a local CI comment
+(`adlc-local-ci.sh`; its last line is `ADLC-CI: PASS|FAIL head <sha>`) counts as the battery
+result only when that SHA is the PR's current head (`gh pr view N --json headRefOid`); one for
+an older commit does not. Anyone who can comment can write that line: a record, not a gate.
 Apply `adlc:security-gate` adversarially — attempt tenant escapes, missing scope filters,
 query injection, auth bypass on new endpoints; scope findings to correctness/ACs/security
 per `verify`. Also ask the Principal to run `/security-review` on the branch and post

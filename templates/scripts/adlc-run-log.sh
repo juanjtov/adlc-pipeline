@@ -20,7 +20,18 @@
 #   actions [DAYS]   GitHub Actions lane durations (gh run list): latency per lane with no token data.
 #                    Lane name -> stage by the template's exact workflow name ("ADLC Builder" ->
 #                    builder, "ADLC review" -> reviewer …); other workflows keep their own name
-#                    as a slug (adlc-ci, adlc-diff-scope …).
+#                    as a slug (adlc-ci, adlc-diff-scope …). Each row also carries the run's
+#                    "lane", GitHub's "conclusion", and an "outcome": the conclusion, except
+#                    `blocked` for a run GitHub failed before it started. That is the doctor's
+#                    rule, per run: concluded `failure`, at most 60 s after it was created, and no
+#                    step of it ran (what an exhausted Actions budget looks like; any other
+#                    reason GitHub fails a run before its first step reads the same). A run that
+#                    found a bug and a run that never started both conclude `failure`; only the
+#                    first is the lane's failure. Cost: one `gh run view --json jobs` call per
+#                    run that failed within those 60 s (none for any other run); on a blocked
+#                    account that is every listed run, and the listing stops at 500. A run that
+#                    cannot be read keeps `failure`, with a count on stderr: a guess never turns
+#                    a failure into blocked.
 #
 # Row: {"ts","source","repo","issue","pr","stage","agent","run_id","seconds","input","output",
 #       "cache_read","cache_creation","tokens","cache_read_pct","cost_usd","model"}
@@ -31,7 +42,7 @@
 # denominator, so it reads higher on the same run. Nulls where a source does not know a field.
 set -euo pipefail
 src="${1:-}"; shift || true
-[ -n "$src" ] || { sed -n '2,30p' "$0"; exit 2; }
+[ -n "$src" ] || { sed -n '2,41p' "$0"; exit 2; }
 
 # This repo as owner/name, lower-cased ($ADLC_REPO, else git remote origin). Every source needs it:
 # the store holds several repos' runs, and a row must say whose it is. Exit 2 when it cannot be
@@ -136,15 +147,29 @@ case "$src" in
     since=$(date -u -v-"${days}"d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "-${days} days" +%Y-%m-%dT%H:%M:%SZ)
     # An issue number comes from the head branch, so only PR-triggered lanes (review, fix, CI,
     # diff-scope, fast) carry one; the issue-triggered lanes run on the default branch → null.
-    gh run list --limit 500 --json databaseId,workflowName,headBranch,status,conclusion,startedAt,updatedAt \
-      --jq "[.[] | select(.status == \"completed\" and .startedAt >= \"$since\")]" \
-    | jq -c --arg repo "$repo" "$LANE_STAGE_JQ $BRANCH_ISSUE_JQ"'
-        .[] | select(.workflowName | test("ADLC"; "i"))
+    runs="$(gh run list --limit 500 --json databaseId,workflowName,headBranch,status,conclusion,createdAt,startedAt,updatedAt \
+      --jq "[.[] | select(.status == \"completed\" and .startedAt >= \"$since\" and (.workflowName | test(\"ADLC\"; \"i\")))]")" \
+      || { echo "adlc-run-log: could not list the workflow runs (gh run list)" >&2; exit 1; }
+    # blocked = failed within 60 s of its creation AND no step ran; the second half is one call per candidate
+    blocked='[]'; unread=0
+    fast="$(printf '%s' "$runs" | jq -r '.[] | select(.conclusion == "failure" and ((.updatedAt | fromdate?) - (.createdAt | fromdate?)) <= 60) | .databaseId')" \
+      || { echo "adlc-run-log: could not read the run list gh returned" >&2; exit 1; }
+    for id in $fast; do
+      if ran="$(gh run view "$id" --json jobs --jq '[.jobs[]?.steps[]? | select(.conclusion != null and .conclusion != "" and .conclusion != "skipped")] | length' 2>/dev/null)"; then
+        if [ "$ran" = 0 ]; then blocked="$(jq -cn --argjson a "$blocked" --argjson id "$id" '$a + [$id]')"; fi
+      else
+        unread=$((unread + 1))
+      fi
+    done
+    [ "$unread" -eq 0 ] || echo "adlc-run-log: ${unread} run(s) that failed within 60 s could not be read (gh run view); left as failure" >&2
+    printf '%s' "$runs" | jq -c --arg repo "$repo" --argjson blocked "$blocked" "$LANE_STAGE_JQ $BRANCH_ISSUE_JQ"'
+        .[]
         | {ts: .startedAt, source: "actions", repo: $repo, issue: ((.headBranch // "") | branch_issue? // null), pr: null,
            stage: (.workflowName | lane_stage), agent: null, run_id: ("actions:" + (.databaseId | tostring)),
            seconds: ((.updatedAt | fromdate) - (.startedAt | fromdate)),
            input: null, output: null, cache_read: null, cache_creation: null, tokens: null, cache_read_pct: null,
-           cost_usd: null, model: null, lane: .workflowName, conclusion: .conclusion}'
+           cost_usd: null, model: null, lane: .workflowName, conclusion: .conclusion,
+           outcome: (if (.databaseId as $i | $blocked | index($i)) then "blocked" else .conclusion end)}'
     ;;
 
   *) echo "adlc-run-log: unknown source '$src' (mc | otel <file> | actions [DAYS])" >&2; exit 2 ;;

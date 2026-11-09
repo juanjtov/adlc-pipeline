@@ -101,6 +101,16 @@ directly to a fresh issue (your own triage) or after the Analyst recommends FAST
    coupled with the deploy.
 5. Tell the QA agent "deploy N happened" for the post-deploy watch.
 
+## Local CI (the checks did not run on GitHub)
+
+When Actions is blocked (`.adlc/scripts/adlc-doctor.sh` says so) or CI is not on Actions, run the
+battery here. List it in `.adlc/local-ci.txt`, one `<name>: <command>` per line (the name ends at
+the first colon, `#` lines are comments; commit the file), check out the PR's head with a clean
+tree, and run `.adlc/scripts/adlc-local-ci.sh <pr>` (`--dry-run` prints instead of posting). It
+posts one PR comment whose last line is `ADLC-CI: PASS head <sha>` or `ADLC-CI: FAIL head <sha>`.
+QA counts it only for the PR's current head. It is a record, not a gate: anyone who can comment
+can write that line.
+
 ## Isolated-worktree recipe (optional, for parallel Builder/QA)
 
 Run Builder/QA in a `git worktree` off the branch so their edits don't collide with your

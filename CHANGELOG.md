@@ -9,14 +9,49 @@ it differs from the installed plugin.
 
 ## Unreleased (on `main` after 0.3.1)
 
-Tooling refresh needed: **yes** — `adlc-relabel.sh` is new and the lanes call it; the `adlc-log-findings.sh` copy gains the backtick-wrapped
-marker, the per-comment time, the skipped-line report and the closed class list below, the `adlc-cycle.sh` copy the
-verdict-based round count and the next-label end of a stage interval, the `adlc-doctor.sh` copy the Actions check, and the `adlc-metrics.sh` copy the `infra_failed` line;
-`adlc-adr-check.sh` is new, `docs/adr/template.md` gains `## Scope` and `## Guarantees` (the wizard shows the
-difference and asks before it replaces yours), the RUNBOOK's Stage 4 names the check, and the wizard merges the
-new `settings.cache.json` into `.claude/settings.json`. The security-gate, code-review and efficient-runs skills,
-the retro and cycle-retro recipes, the role prompts and the guard hook live in the plugin,
-which every session loads from the installed plugin, so those parts need no refresh.
+Tooling refresh needed: **yes** — `adlc-relabel.sh` is new and the lanes call it; the
+`adlc-log-findings.sh` copy gains the backtick-wrapped marker, the per-comment time, the
+skipped-line report and the closed class list below, the `adlc-cycle.sh` copy the verdict-based
+round count and the next-label end of a stage interval, the `adlc-doctor.sh` copy the Actions
+check, and the `adlc-metrics.sh` copy the `infra_failed` line; `adlc-adr-check.sh` is new,
+`docs/adr/template.md` gains `## Scope` and `## Guarantees` (the wizard shows the difference and
+asks before it replaces yours), the RUNBOOK's Stage 4 names the check, and the wizard merges the
+new `settings.cache.json` into `.claude/settings.json`. From issue 34: `adlc-ci-budget.sh` and
+`adlc-local-ci.sh` are new; the `adlc-cycle.sh` copy gains the `blocked=` figure, the
+`adlc-metrics.sh` copy the `blocked` and `local_ci` lines, the `adlc-run-log.sh` copy the
+`outcome` field, the `adlc-doctor.sh` copy a pointer to the local CI script, and the RUNBOOK
+template the local CI recipe. The security-gate, code-review and efficient-runs skills, the retro
+and cycle-retro recipes, the role prompts and the guard hook live in the plugin, which every
+session loads from the installed plugin, so those parts need no refresh.
+
+- **Actions minutes are sized before the battery is copied, a blocked run is not a failed
+  one, and local CI leaves one marker** (issue 34, the rest of it). The bootstrap offered
+  Actions on a private repo with one sentence about minutes: on one host a battery of 17 to 23
+  job-minutes ran 4.6 times per merged PR, used about 8,000 minutes in a month against 2,000,
+  and when the account was blocked the host ran the battery by hand and posted free-form
+  "Local CI on head X" comments, while the cycle report's `failed=97/222` could not tell the
+  dead runs from the real failures. Three changes. (1) New `adlc-ci-budget.sh <minutes/run> <runs/PR>
+  <PRs/month> [included]` prints the monthly estimate and `FITS` or `OVER` (exit 0 / 1; decimals
+  allowed in the first two); the wizard runs it for a private repo that will run CI on Actions
+  and, on `OVER`, proposes `paths` filters, then the heavy jobs only at `stage:qa` or on a
+  label, then CI off Actions. It is an estimate of the CI battery alone: the agent lanes'
+  minutes come on top, and the CI template has no ready-made switch for the second proposal.
+  (2) New `adlc-local-ci.sh <pr> [--dry-run] [commands-file]` runs the host's own list
+  (`.adlc/local-ci.txt`, one `<name>: <command>` per line) from the repo root, refuses unless
+  the tree is clean and HEAD is the PR's head commit, and posts one PR comment whose last line
+  is `ADLC-CI: PASS head <sha>` or `ADLC-CI: FAIL head <sha>`. QA's prompt counts it as the
+  battery result only for the PR's current head, `adlc-metrics.sh` counts each such comment on
+  a merged PR as one CI run (from the comments it already fetched; a `local_ci:` line says how
+  many), and the doctor's blocked note names the script. The marker is a record, not a gate:
+  anyone who can comment can write it, and nothing checks that the battery ran. No per-command
+  timeout. (3) A run that concluded `failure` within 60 s of its creation with no step run (the
+  doctor's rule, per run) is `blocked`: `adlc-run-log.sh actions` rows carry `outcome`
+  (GitHub's `conclusion` stays beside it), `adlc-cycle.sh report` prints `blocked=` beside
+  `failed=` and leaves those runs out of `failed=` and `avg_sec`, and `adlc-metrics.sh` leaves
+  them out of `iterations_to_green` / `failed_first` and prints a `blocked:` line when there is
+  one. One `gh run view` call per run that failed within 60 s in the run ledger; none added in
+  `adlc-metrics.sh`, which already looked up each red run. A run that cannot be read stays a
+  failure. Any other reason GitHub fails a run before its first step reads as `blocked` too.
 
 - **The wizard sets the prompt-cache lifetime to 1 hour** (issue 57). On one host 321 of 8,491
   pipeline calls in 30 days came more than 5 minutes after the previous call of the same run,
@@ -33,6 +68,7 @@ which every session loads from the installed plugin, so those parts need no refr
   version reads the two keys from a project's settings file (the issue reports 2.1.318 or
   newer), and what the Actions lanes do with them. The doctor does not look for the keys: a
   repo that took them out on purpose would be told about it on every run.
+
 - **An ADR states its scope and what pins each guarantee, and `adlc-adr-check.sh` holds it to
   both** (issue 55). The template had Context / Decision / Alternatives / Consequences only, so
   a Decision could promise more than the tests deliver and nothing failed when the promise
@@ -54,6 +90,7 @@ which every session loads from the installed plugin, so those parts need no refr
   sections instead. Not done: no workflow runs it (`adlc-diff-scope.yml` never checks out the
   PR head, and `adlc-ci.yml` has no guards job), the design lane does not write the scope file
   from the ADR's Scope, and the node check is a word search, not a test collector.
+
 - **A security-gate attack class for text classifiers over LLM output** (issue 54). On one
   host a chat agent gated writes on regex and word-list predicates over model text; five PRs in
   ten days each wrote a fresh detector, and each fell to input shapes an earlier review had
@@ -65,6 +102,7 @@ which every session loads from the installed plugin, so those parts need no refr
   positive control it must reject, and run it against the project's shared phrasing corpus if
   one exists. `code-review` points at that list rather than repeating it. Findings use the
   closed class list (`missing-edge-case`, `logic-contradiction`); there is no new class.
+
 - **One state per issue: `adlc-relabel.sh`, and the cycle clock ends a stage at the next
   label** (issue 38, the rest of it; PR 46 added the doctor check). Every lane and role prompt
   spelled out its own label pair, and the pairs drifted: QA's said "add `gate:deploy`" and
@@ -97,6 +135,7 @@ which every session loads from the installed plugin, so those parts need no refr
   while a page is open and shows a banner. Not in this change, still on the issue: the
   bootstrap's minutes sizing step, a local-CI marker recipe, and a `blocked` run outcome in
   `adlc-run-log.sh`.
+
 - **The finding class is a closed list** (issue 28). Reviewers named classes freely, so the
   retro, which ranks by class × frequency, saw one failure under five names as five small
   classes: on one host 144 findings carried 53 class names (78 four days later), 30 of them
@@ -110,6 +149,7 @@ which every session loads from the installed plugin, so those parts need no refr
   it logs as written rather than forcing it to `other`. `adlc-log-findings.sh classes` prints
   the list; the retro's Step 1 ranks on the canonical class and lists the names outside the
   list apart. Rows already in a ledger are not rewritten: rebuild the ledger (the recipe does).
+
 - **`adlc-metrics.sh` sets CI runs that died in a setup step apart from red test runs**
   (issue 56). `iterations_to_green` and `failed_first` counted every failed run of a merged
   PR's branch; on one host five of eighteen first-run reds had died creating an ephemeral
@@ -126,6 +166,7 @@ which every session loads from the installed plugin, so those parts need no refr
   PRs, so the cycle-retro sees the provisioning reds and the retro the test reds. A run whose
   jobs cannot be read, or none of whose failed jobs names a failed step, stays a plain failure. Green
   runs are never looked up; one call more per red run.
+
 - **The cycle ledger counts fix rounds from CHANGES review verdicts too** (issue 58).
   `adlc-cycle.sh` counted a round as an `adlc:changes-requested` label event on the issue's PR.
   Only the Actions review lane applies that label; a repo that runs the pipeline by hand, with
@@ -137,6 +178,7 @@ which every session loads from the installed plugin, so those parts need no refr
   label on the same verdict. The cycle-retro skill calls the figure an estimate that usually
   reads low: a round closed as PASS-with-findings leaves no marker, and two rounds asked for by
   different reviewers read as one. One `gh pr view` call more per linked PR.
+
 - **The finding ledger no longer drops a third of the findings** (issue 27). Measured on a host
   with 144 markers in its PR threads, the materialized ledger held 94. Three causes, all fixed:
   `adlc-log-findings.sh` skipped a marker wrapped in code markup
@@ -150,6 +192,7 @@ which every session loads from the installed plugin, so those parts need no refr
   script does not look is a visible skip. The recipe in the `retro` skill reads comments and review bodies, stamps each
   row with its comment's time, and lists 500 PRs instead of 50: on a repo past 50 PRs the older
   ones fell off the end without a word (349 markers, 220 read, on the same host).
+
 - **One Mission Control shows every adopted repo on the machine, and says so** (issue 52).
   It always could: the hook sends each event with its working directory, the server maps that
   to a repo, and the page's repo menu switches between them. But a repo reached the menu only
