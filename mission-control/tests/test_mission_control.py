@@ -195,6 +195,37 @@ class Intake(unittest.TestCase):
         self.assertEqual((run['ended'], run['report']), (t + 60, 'Opened PR #9.'))
         self.assertIsNotNone(self.store.steps('s-build')[1]['ended'])
 
+    def test_a_session_opening_in_an_adopted_repo_puts_it_on_the_menu(self):
+        ing = ingest.Ingest(self.store, repos=FakeRepos(), on_repo=self.store.add_repo)
+        root = tempfile.mkdtemp()
+        try:
+            plain = os.path.join(root, 'plain')
+            inside = os.path.join(root, 'shop', 'src', 'api')
+            os.makedirs(plain)
+            os.makedirs(inside)
+            os.makedirs(os.path.join(root, 'shop', '.adlc'))                                   # a bare .adlc/ is not the wizard's
+            start = lambda cwd, session='s-user': ing.hook(fx.hook('SessionStart', session=session, agent=None, cwd=cwd))
+            self.assertFalse(start(plain))
+            self.assertFalse(start(inside))
+            self.assertEqual(self.store.repos(), [])
+            with open(os.path.join(root, 'shop', '.adlc', 'VERSION'), 'w') as fh:
+                fh.write('0.3.1\n')
+            self.assertTrue(start(inside))                                                     # a subdirectory of an adopted repo counts, as the guard counts it
+            self.assertEqual(self.store.repos(), [REPO])
+            self.assertFalse(start(inside, 's-again'))                                         # already there: nothing to redraw
+            self.assertEqual(self.store.q('SELECT * FROM runs'), [])                           # not a pipeline agent's session: no run, no path kept
+            # the other two markers the wizard writes, and the same rule as hooks/adlc-guard.sh
+            for marker in (('docs', 'adlc', 'CHARTER.md'), ('.adlc', 'scripts', 'labels.sh')):
+                repo = tempfile.mkdtemp(dir=root)
+                os.makedirs(os.path.join(repo, *marker[:-1]))
+                open(os.path.join(repo, *marker), 'w').close()
+                self.assertTrue(ingest.adopted(repo), marker)
+            self.assertFalse(ingest.adopted(''))
+            # a path git cannot take is refused by the lookup, not raised to the request handler
+            self.assertFalse(ingest.Ingest(Store(), on_repo=self.store.add_repo).hook(fx.hook('SessionStart', agent=None, cwd=inside + '\0x')))
+        finally:
+            shutil.rmtree(root)
+
     def test_what_a_tool_returned_is_not_kept(self):
         self.ing.hook(fx.hook('PreToolUse', tool_name='Bash', tool_input={'command': 'cat .env'}, tool_use_id='t1'), now=fx.T0)
         self.ing.hook(fx.hook('PostToolUse', tool_name='Bash', tool_input={'command': 'cat .env'}, tool_use_id='t1', tool_response='SECRET=hunter2'), now=fx.T0 + 1)
@@ -666,6 +697,25 @@ class OverHttp(unittest.TestCase):
         self.assertEqual(self.arrived, [])
         self.assertEqual(self.app.store.q('SELECT * FROM runs'), [])
 
+    def test_a_session_opening_in_an_adopted_repo_reaches_the_server(self):
+        root, plain = tempfile.mkdtemp(), tempfile.mkdtemp()
+        try:
+            os.makedirs(os.path.join(root, '.adlc', 'scripts'))
+            self.app.ingest.repos = type('Repos', (), {'lookup': staticmethod(lambda cwd: ('acme/other', 'main') if cwd == root else (REPO, 'main'))})()
+            out = self.hook({'hook_event_name': 'SessionStart', 'session_id': 's-user', 'cwd': root, 'source': 'startup'})
+            self.assertEqual((out.returncode, out.stdout, out.stderr), (0, '', ''))
+            self.assertEqual(len(self.arrived), 1)
+            self.assertEqual(self.app.store.repos(), [REPO, 'acme/other'])
+            self.assertEqual(json.loads(self.get('/api/state?repo=acme/other')[1])['repo'], 'acme/other')   # its own line, empty for now
+            # a session opening in a plain folder is sent too, and leaves nothing behind
+            self.hook({'hook_event_name': 'SessionStart', 'session_id': 's-other', 'cwd': plain, 'source': 'startup'})
+            self.assertEqual(len(self.arrived), 2)
+            self.assertEqual(self.app.store.repos(), [REPO, 'acme/other'])
+            self.assertEqual(self.app.store.q('SELECT * FROM runs'), [])
+        finally:
+            shutil.rmtree(root)
+            shutil.rmtree(plain)
+
     def test_the_hook_is_silent_when_mission_control_is_not_running(self):
         empty = tempfile.mkdtemp()
         try:
@@ -801,18 +851,30 @@ class Launcher(unittest.TestCase):
             self.assertEqual((mark['port'], mark['pid']), (port, first.pid))
             with urllib.request.urlopen('http://127.0.0.1:%d/api/state?repo=ACME/shop' % port, timeout=5) as res:
                 self.assertEqual(json.loads(res.read())['repo'], REPO)               # one repo, however its name is cased
-            # a second copy on the same data would take the marker, and agents would stop reporting to the first
-            second = self.start(home, self.free_port())
+            # a second copy on the same data would take the marker, and agents would stop reporting to the first;
+            # a start from a repo the first copy shows points at that repo's line instead
+            other = self.free_port()
+            second = self.start(home, other)
             out, _ = second.communicate(timeout=10)
             self.assertEqual(second.returncode, 0)
-            self.assertIn('already running at http://localhost:%d' % port, out)
+            self.assertIn('already running and shows %s too: http://localhost:%d/?repo=%s. Stop it first to move it to port %d.' % (REPO, port, REPO, other), out)
             with open(marker) as fh:
                 self.assertEqual(json.load(fh)['pid'], first.pid)
+            same = self.start(home, port)                                                 # the same port: the same answer, without the port note
+            out, _ = same.communicate(timeout=10)
+            self.assertIn('already running and shows %s too: http://localhost:%d/?repo=%s\n' % (REPO, port, REPO), out)
+            # a repo the first copy has not heard of is not linked to: the page would show another repo's line
+            unknown = self.start(home, port, '--repo', 'Acme/Other')
+            out, _ = unknown.communicate(timeout=10)
+            self.assertIn('already running at http://localhost:%d. acme/other is not on its menu yet' % port, out)
             # the demo keeps to itself: no marker of its own, so agents never report to made-up data
             demo_port = self.free_port()
             demo = self.start(tempfile.mkdtemp(), demo_port, '--demo')
             try:
                 self.wait_for(lambda: server.running_at(demo_port), 'the demo')
+                live = self.start(tempfile.mkdtemp(), demo_port)                     # a live start on the demo's port must not call its data live
+                out, _ = live.communicate(timeout=10)
+                self.assertIn('already running at http://localhost:%d with demo data. Stop it first' % demo_port, out)
             finally:
                 demo.terminate()
                 demo.communicate(timeout=10)
