@@ -108,8 +108,9 @@ which every session loads from the installed plugin, so those parts need no refr
   adopted repo (the guard's own rule: `.adlc/scripts/`, `.adlc/VERSION` or
   `docs/adlc/CHARTER.md` at or above it) the server puts that repo on the menu, and keeps
   nothing from any other session, not even its path. The checkout the session is in must hold
-  the marker itself (a clone sitting inside an adopted repo's folder does not count), and only
-  a session that starts while Mission Control is running is seen. A second start prints the running copy's
+  the marker itself (a clone sitting inside an adopted repo's folder does not count; a linked
+  worktree inside that folder counts through the checkout it was added from), and a session that was already open
+  is not seen until Claude Code next sends its session-start event for it. A second start prints the running copy's
   address on the repo it was run from (`?repo=owner/name`) and `--open` opens that; a repo the
   copy has not heard of is named, not linked, since the page would show another repo's line.
   The documented way to run a copy per repo (`ADLC_MC_HOME` and `--port` for each) stays, with
