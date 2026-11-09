@@ -108,7 +108,8 @@ declares none. That check and the fast-lane cap run on `pull_request_target` —
 scripts come from the default branch and the PR is only read as data — so a PR cannot edit the
 guards that judge it. `adlc-doctor.sh` validates a host repo's setup (deny rules, unfilled
 placeholders, lanes that can't run their agent, skills, the five agent copies and their model
-lines, labels, and whether the default branch has a merge gate). Judgment guardrails
+lines, labels, whether GitHub is still running the workflows at all, and whether the default
+branch has a merge gate). Judgment guardrails
 (design conformance, security severity) stay as skills + the adversarial review — those can't
 be made deterministic without losing the point.
 

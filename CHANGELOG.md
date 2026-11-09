@@ -14,6 +14,20 @@ marker, the per-comment time, the skipped-line report and the closed class list 
 verdict-based round count, and the `adlc-metrics.sh` copy the `infra_failed` line. The retro and cycle-retro recipes live in the plugin skills,
 which every session loads from the installed plugin, so those parts need no refresh.
 
+- **The doctor and Mission Control say when GitHub has stopped running the workflows** (issue
+  34, the detection half). When a private repo's included Actions minutes or its spending limit
+  run out, or Actions is turned off, GitHub still creates a run for every trigger and fails it
+  within seconds with no step executed, for every workflow at once, the tripwire that watches
+  the default branch included; the checks on a PR just read red. One host ran that way for
+  three days (about 180 dead runs, eight PRs merged with every check red) before anyone looked.
+  `adlc-doctor.sh` (gh-backed section, repos with adlc workflows only) reads the last ten
+  completed runs: when at least three exist, all failed within 60 s of being created, and the
+  latest ran no step, it reports Actions as blocked and says the tripwire is not watching;
+  steps that ran mean a failing workflow, not a block, and a run it cannot read is reported as
+  possibly blocked. Mission Control reads the same signal over REST about every two minutes
+  while a page is open and shows a banner. Not in this change, still on the issue: the
+  bootstrap's minutes sizing step, a local-CI marker recipe, and a `blocked` run outcome in
+  `adlc-run-log.sh`.
 - **The finding class is a closed list** (issue 28). Reviewers named classes freely, so the
   retro, which ranks by class × frequency, saw one failure under five names as five small
   classes: on one host 144 findings carried 53 class names (78 four days later), 30 of them

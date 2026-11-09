@@ -26,6 +26,7 @@ Requirements: Python 3.9 or newer (the one that ships with macOS developer tools
 | On the page | Source | How fresh |
 |---|---|---|
 | Where each request is, gates waiting on you, verdicts, merges | GitHub, read with your `gh` login (one GraphQL call) | every 15 s while the page is open |
+| A banner when GitHub has stopped running the repo's workflows (Actions budget used up, or Actions off): every run failing within seconds with no step run | GitHub, one REST call (`gh api …/actions/runs`) | about every 2 min while the page is open |
 | What each agent is doing, step by step | The plugin's hooks (`hooks/hooks.json` -> `hook.sh`) | at once |
 | Tokens, cache use, cost, latency | Claude Code telemetry sent straight here (OTLP over HTTP/JSON) | about 2 s |
 | System prompt, what each agent may run | The agent files in `agents/` and the role prompt each preloads (`skills/role-<role>/`); a repo copy's own `model:` line (`.claude/agents/adlc-<role>.md`) until its first reply names the model; the guard hook (`hooks/adlc_guard.py`) for a narrow role's command list; the lane templates (`templates/github/`) for each Actions lane's grant | on load |

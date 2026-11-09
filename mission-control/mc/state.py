@@ -93,7 +93,7 @@ def build(store, repo, now=None, agents=None, github=None, mode='live', plugin_r
     return {
         'v': 1, 'mode': mode, 'now': now, 'repo': repo,
         'repos': [{'name': name, 'count': _on_line(store, name)} for name in store.repos()],
-        'github': github or {'ok': True, 'msg': '', 'polled': None},
+        'github': github or {'ok': True, 'msg': '', 'polled': None, 'actions': None},
         # Whether Claude Code's telemetry reaches us at all, from any session. Whether a given run has figures is a separate matter.
         'telemetry': now - (tel.get('seen') or 0) < DAY,
         'telemetryNote': ('Model replies from plugin agents are arriving without the agent’s name, so they cannot be placed on a run. '

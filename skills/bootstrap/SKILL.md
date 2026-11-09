@@ -97,7 +97,9 @@ detected values pre-selected as the recommended option. Cover:
    - **Full automation · public repo** — label transitions auto-trigger the lanes; the merge
      gate is real **branch protection** (free on public repos); unlimited Actions minutes.
    - **Full automation · private repo (Free plan)** — lanes still auto-trigger (~2,000
-     Actions min/month free); branch protection isn't available, so the merge gate is the
+     Actions min/month free; when they run out GitHub fails every run at once, the tripwire's
+     included, and nothing says so — `adlc-doctor.sh` and Mission Control read that state and
+     say it); branch protection isn't available, so the merge gate is the
      plugin's guard hook (backed by the `settings.json` deny rules) + the
      **`adlc-main-tripwire.yml`** backstop + human Gate 2.
    Full automation (either kind) needs two secrets — `CLAUDE_CODE_OAUTH_TOKEN` and a
