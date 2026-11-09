@@ -39,8 +39,8 @@ directly to a fresh issue (your own triage) or after the Analyst recommends FAST
    `.claude/agents/adlc-adversarial-reviewer.md`; walk the `adlc:security-gate` classes). The cap
    is enforced again on the real diff — an over-cap/sensitive diff goes to `stage:design`.
 4. On a PASS verdict, move the issue to `gate:deploy`
-   (`gh issue edit <n> --remove-label stage:fast --add-label gate:deploy` — one state at a
-   time, as the fast-lane workflow does). **Gate 2 (you):** the same behind-the-base check
+   (`.adlc/scripts/adlc-relabel.sh <n> gate:deploy` — one call that takes `stage:fast` and any
+   other state label off, so the issue is in one state, as the fast-lane workflow does). **Gate 2 (you):** the same behind-the-base check
    and merge as the full lane's Gate 2 below. On CHANGES, hand it back to the Builder (the same fix
    cycle as the full lane).
 

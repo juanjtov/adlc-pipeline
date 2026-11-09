@@ -962,6 +962,11 @@ class Guard:
             self.check_git(args, scope, "GIT_DIR" in names or "GIT_WORK_TREE" in names)
         elif prog == "gh":
             self.check_gh(args, scope)
+        elif prog == "adlc-relabel.sh":
+            # The plugin's relabel script (.adlc/scripts/adlc-relabel.sh <issue> <label>) is
+            # `gh issue edit` by another name: judge it as that call, so a role that may not move
+            # an issue's labels cannot move them through the script.
+            self.check_gh([Word("issue"), Word("edit")] + list(args), scope)
         elif prog in ("curl", "wget"):
             self.check_http(prog, args)
         else:
@@ -1025,6 +1030,13 @@ class Guard:
                         self.opaque("a shell's `-c`")
                     self.check_text(args[k + 1].text, depth + 1, self.child_scope(scope))
                 return
+        # `bash .adlc/scripts/adlc-relabel.sh 12 stage:qa` is the relabel script all the same (a
+        # script file's contents are not read here; this one is known by name).
+        for k, a in enumerate(args):
+            if not a.text.startswith("-"):
+                if not a.dynamic and base(a) == "adlc-relabel.sh":
+                    self.check_gh([Word("issue"), Word("edit")] + list(args[k + 1:]), scope)
+                break
         if cmd.fed or any("<(…)" in a.text for a in args):
             self.opaque("a shell reading a process substitution")
         if cmd.heredocs:

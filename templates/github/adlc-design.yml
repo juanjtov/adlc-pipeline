@@ -106,4 +106,5 @@ jobs:
             commit -q -m "docs: design for #$N (ADR from the design lane)"
           git push -q --force origin "HEAD:refs/heads/$branch"
           gh issue comment "$N" --body "📐 Design handed off on branch \`$branch\` ($(printf '%s' "$adrs" | paste -sd ' ' -)). The Builder lane starts from it, so the ADR rides in the Builder's PR."
-          gh issue edit "$N" --remove-label stage:design --add-label stage:build
+          chmod +x .adlc/scripts/adlc-relabel.sh
+          .adlc/scripts/adlc-relabel.sh "$N" stage:build

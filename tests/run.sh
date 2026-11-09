@@ -413,7 +413,7 @@ eq yes "…naming the issue with its state labels" "$(says_gate "issue #12: stag
 eq yes "…all three of a triple" "$(says_gate "issue #129: stage:build gate:deploy stage:fast")"
 eq yes "…and the PR" "$(says_gate "pr #30: stage:build stage:qa")"
 eq no  "…not the clean one" "$(says_gate "#13")"
-eq yes "…with the fix: keep the latest, remove the rest" "$(says_gate "keep the label it reached last and remove the rest — gh issue edit <n> --remove-label <label>")"
+eq yes "…with the fix: keep the latest, remove the rest, with the relabel script" "$(says_gate "keep the label it reached last and remove the rest — .adlc/scripts/adlc-relabel.sh <n> <that label>")"
 dl - -;                      check 0 "labels: no open issue or PR (empty lists) passes" $?
 dl "[$(L 12 stage:qa gate:deploy)]" -; touch "$FIX/fx/fail-issues"
 GATE=$(DFX="$FIX/fx" DFX_ROOT="$FIX" PATH="$FIX/bin:$PATH" bash "$S/adlc-doctor.sh" "$FIX" 2>&1); check 1 "labels: a failed issue listing is flagged, not read as clean" $?
@@ -557,6 +557,48 @@ for f in "$ROOT/skills/code-review/SKILL.md" "$ROOT/skills/role-adversarial-revi
   eq "" "classes: $(basename "$(dirname "$f")") names every class of the list" "$miss"
 done
 
+echo "relabel (one state per issue):"
+RL="$(mktemp -d)"; mkdir -p "$RL/bin"
+cat > "$RL/bin/gh" <<'SH'
+#!/usr/bin/env bash
+# stub gh: `issue view N --json labels --jq …` answers from $RL_LABELS (one name per line); every call is logged
+echo "$*" >> "$RL_CALLS"
+case "$1 $2" in
+  "issue view") [ -z "${RL_FAIL_VIEW:-}" ] || { echo "gh: Not Found (HTTP 404)" >&2; exit 1; }
+                jq -R . "$RL_LABELS" | jq -s '{labels: map({name: .})}' | jq -r "${@: -1}" ;;
+  "issue edit") [ -z "${RL_FAIL_EDIT:-}" ] || { echo "gh: Validation Failed (HTTP 422)" >&2; exit 1; } ;;
+  *) exit 2 ;;
+esac
+SH
+chmod +x "$RL/bin/gh"
+relabel() { # <labels, space-separated> <issue> <new label> [ENV=val …]
+  local labels="$1"; shift
+  printf '%s\n' $labels > "$RL/labels"; : > "$RL/calls"
+  RL_OUT=$(env PATH="$RL/bin:$PATH" RL_LABELS="$RL/labels" RL_CALLS="$RL/calls" "${@:3}" bash "$S/adlc-relabel.sh" "$1" "$2" 2>"$RL/err"); RL_RC=$?
+}
+rcalls() { tr '\n' '|' < "$RL/calls"; }
+relabel "bug stage:qa lane:fast" 12 gate:deploy; check 0 "stage:qa → gate:deploy exits 0" $RL_RC
+eq "issue view 12 --json labels --jq .labels[].name|issue edit 12 --remove-label stage:qa --add-label gate:deploy|" "…one read, then ONE edit that removes the old state and adds the new; other labels untouched" "$(rcalls)"
+eq "#12: stage:qa → gate:deploy" "…and says what moved" "$RL_OUT"
+relabel "stage:build gate:deploy stage:fast" 129 stage:qa; check 0 "a triple-labelled issue exits 0" $RL_RC
+eq "issue view 129 --json labels --jq .labels[].name|issue edit 129 --remove-label stage:build --remove-label gate:deploy --remove-label stage:fast --add-label stage:qa|" "…every other state label comes off in the same call" "$(rcalls)"
+relabel "adlc:auto gate:deploy" 5 gate:deploy; check 0 "already there, alone: exits 0" $RL_RC
+eq "issue view 5 --json labels --jq .labels[].name|" "…and makes no edit" "$(rcalls)"
+eq "#5 is at gate:deploy already" "…saying so" "$RL_OUT"
+relabel "stage:qa gate:deploy" 7 gate:deploy; check 0 "already there, with a leftover: exits 0" $RL_RC
+eq "issue view 7 --json labels --jq .labels[].name|issue edit 7 --remove-label stage:qa|" "…and only removes the leftover" "$(rcalls)"
+relabel "bug" 8 stage:intake; check 0 "no state label yet: exits 0" $RL_RC
+eq "issue view 8 --json labels --jq .labels[].name|issue edit 8 --add-label stage:intake|" "…and only adds" "$(rcalls)"
+relabel "stage:qa" x gate:deploy;        check 2 "an issue that is not a number is an error (nothing read, nothing written)" $RL_RC
+eq "" "…no gh call" "$(rcalls)"
+relabel "stage:qa" 12 bug;               check 2 "a label outside stage:/gate: is an error" $RL_RC
+relabel "stage:qa" 12 "stage:";          check 2 "a bare prefix is an error" $RL_RC
+relabel "stage:qa" 12 gate:deploy RL_FAIL_VIEW=1; check 1 "a failed read exits 1" $RL_RC
+eq "issue view 12 --json labels --jq .labels[].name|" "…and writes nothing" "$(rcalls)"
+relabel "stage:qa" 12 gate:deploy RL_FAIL_EDIT=1; check 1 "a failed edit exits 1" $RL_RC
+grep -q 'gh issue edit failed for #12' "$RL/err" && ok "…and says so" || bad "…must say the edit failed"
+rm -rf "$RL"
+
 echo "cost/latency:"
 CO=$(printf 'adlc-builder 120 5000 0.10\nadlc-qa 80 3000 0.06\nadlc-builder 60 2000 0.04\n' | bash "$S/adlc-cost.sh")
 printf '%s\n' "$CO" | grep -qE 'adlc-builder +2 +180 +90\.0 +7000' && ok "per-lane rollup (runs/total/avg/tokens)" || bad "per-lane rollup"
@@ -621,6 +663,7 @@ step_run() { # <workflow file> <regex matching the step's `- name:` line>  → i
     inrun { if ($0 ~ /^          / || $0 ~ /^[ \t]*$/) { sub(/^          /, ""); print } else inrun=0 }' "$1"
 }
 IT="$(mktemp -d)"; ST="$IT/state"
+mkdir -p "$IT/repo/.adlc/scripts"; cp "$S/adlc-relabel.sh" "$IT/repo/.adlc/scripts/"   # the Gate 1 handoff relabels through the script (issue 38)
 step_run "$I" '- name: Read the live issue state' > "$IT/live.sh"
 step_run "$I" '- name: Gate 1 handoff'            > "$IT/gate.sh"
 cat > "$IT/gh" <<'SH'
@@ -638,7 +681,7 @@ intake() { # <script> <labels, space-separated> <comments> [ENV=val …] — run
   local script="$1" labels="$2" comments="$3"; shift 3
   rm -rf "$ST"; mkdir -p "$ST"; : > "$ST/calls"; : > "$ST/out"
   printf '%s\n' $labels > "$ST/labels"; printf '%s\n' "$comments" > "$ST/comments"
-  env PATH="$IT:$PATH" ST="$ST" N=7 GITHUB_OUTPUT="$ST/out" "$@" bash -e "$IT/$script" >/dev/null 2>&1
+  ( cd "$IT/repo" && env PATH="$IT:$PATH" ST="$ST" N=7 GITHUB_OUTPUT="$ST/out" "$@" bash -e "$IT/$script" ) >/dev/null 2>&1
 }
 outs()  { tr '\n' ' ' < "$ST/out"; }
 calls() { cut -d' ' -f1-6 "$ST/calls" | tr '\n' '|'; }
@@ -656,7 +699,9 @@ eq "" "gate: …before the note that says it was removed" "$(calls)"
 intake gate.sh "adlc:auto gate:stories" "ADLC-TRIAGE: FULL | needs design" AUTOPILOT=false
 eq "" "gate: stories posted, no autopilot → Gate 1 left to the Principal" "$(calls)"
 intake gate.sh "adlc:auto adlc:autopilot gate:stories" "ADLC-TRIAGE: FULL | needs design" AUTOPILOT=true
-eq "edit 7 --remove-label gate:stories --add-label stage:design|" "gate: autopilot + FULL → stage:design" "$(calls)"
+eq "edit 7 --remove-label gate:stories --add-label stage:design|" "gate: autopilot + FULL → stage:design, in one edit through the relabel script" "$(calls)"
+intake gate.sh "adlc:auto adlc:autopilot gate:stories stage:fast" "ADLC-TRIAGE: FULL | needs design" AUTOPILOT=true
+eq "edit 7 --remove-label gate:stories --remove-label stage:fast --add-label stage:design|" "gate: …which also takes a leftover second state label off" "$(cut -d' ' -f1-8 "$ST/calls" | tr '\n' '|')"
 intake gate.sh "adlc:auto adlc:autopilot gate:stories" "ADLC-TRIAGE: FAST | copy fix" AUTOPILOT=true
 eq "comment 7 --body 🚦 Triaged **FAST**|" "gate: autopilot + FAST → lane-approval note, never stage:fast" "$(calls)"
 intake gate.sh "adlc:auto adlc:autopilot gate:stories" "ADLC-TRIAGE: FULL | needs design" AUTOPILOT=false
@@ -1318,7 +1363,7 @@ if command -v git >/dev/null 2>&1; then
 # stub gh: the issue's comments come from $HO_COMMENTS; the write calls the handoff makes are logged
 case "$1 $2" in
   "issue view") [ -z "${HO_FAIL_VIEW:-}" ] || { echo "gh: Bad Gateway (HTTP 502)" >&2; exit 1; }
-                case "$*" in *"--json comments"*) cat "$HO_COMMENTS" ;; *) exit 2 ;; esac ;;
+                case "$*" in *"--json comments"*) cat "$HO_COMMENTS" ;; *"--json labels"*) printf '%s\n' adlc:auto stage:design ;; *) exit 2 ;; esac ;;
   "issue comment"|"issue edit") shift; echo "$*" >> "$HO_CALLS" ;;
   *) exit 2 ;;
 esac
@@ -1328,7 +1373,7 @@ SH
   hgit init -q --bare "$HO/origin.git"; hgit -C "$HO/origin.git" symbolic-ref HEAD refs/heads/main
   hgit init -q "$HO/seed"; hgit -C "$HO/seed" symbolic-ref HEAD refs/heads/main
   mkdir -p "$HO/seed/.adlc/scripts" "$HO/seed/docs/adr" "$HO/seed/src/api"
-  cp "$S/adlc-diff-scope.sh" "$HO/seed/.adlc/scripts/"
+  cp "$S/adlc-diff-scope.sh" "$S/adlc-relabel.sh" "$HO/seed/.adlc/scripts/"
   echo template > "$HO/seed/docs/adr/template.md"; echo first > "$HO/seed/docs/adr/0001-adopt.md"
   echo guide > "$HO/seed/docs/guide.md"; echo x > "$HO/seed/src/api/a.py"
   ( cd "$HO/seed" && hgit add -A && hgit -c user.name=t -c user.email=t@example.com commit -qm init \
@@ -1379,11 +1424,11 @@ SH
   runner; echo adr > "$HO/run/docs/adr/0002-login.md"; echo more > "$HO/run/docs/guide.md"; echo stray > "$HO/run/src/api/b.py"
   says 'Q: which roles?\n## Task breakdown\n- T1 …\n\nADLC-BREAKDOWN: `docs/adr/0002-login.md`\r\n'
   hstep handoff.sh 7; check 0 "ADR + breakdown: the handoff succeeds (the commit names its own identity)" $?
-  eq ".adlc/scope/7.txt|.adlc/scripts/adlc-diff-scope.sh|docs/adr/0001-adopt.md|docs/adr/0002-login.md|docs/adr/template.md|docs/guide.md|src/api/a.py|" \
+  eq ".adlc/scope/7.txt|.adlc/scripts/adlc-diff-scope.sh|.adlc/scripts/adlc-relabel.sh|docs/adr/0001-adopt.md|docs/adr/0002-login.md|docs/adr/template.md|docs/guide.md|src/api/a.py|" \
      "the design branch holds the docs and the scope file, not the stray file" "$(otree adlc/design-7)"
   eq "docs/adr/0002-login.md|docs/guide.md|" "the scope file lists exactly the design files it committed" "$(oscope 7)"
   eq "adlc-design <adlc-design@users.noreply.github.com>" "the commit is the design lane's" "$(hgit -C "$HO/origin.git" log -1 --format='%an <%ae>' adlc/design-7 2>/dev/null)"
-  eq "comment 7 --body 📐 Design handed|edit 7 --remove-label stage:design --add-label stage:build|" "the issue advances, after the push" "$(hcalls)"
+  eq "comment 7 --body 📐 Design handed|edit 7 --remove-label stage:design --add-label stage:build|" "the issue advances, after the push, in one edit through the relabel script" "$(hcalls)"
   eq "$main0" "main is untouched" "$(oref main)"
 
   # ── the Builder starts from it ──
@@ -1455,7 +1500,7 @@ grants() { # <template> → "<agent>=<tools>;" per agent step, in file order ("-
 FULL='Read,Edit,Write,Skill,Bash'
 GITRO='Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*)'
 REVIEW="Skill,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*),Bash(gh pr list:*),Bash(gh pr checks:*),Bash(gh issue view:*),$GITRO"
-eq "adlc:product-analyst=Skill,Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh issue edit:*),Bash(gh issue list:*),Bash(gh label list:*),Bash(gh search:*),Bash(.adlc/scripts/adlc-triage.sh:*);" \
+eq "adlc:product-analyst=Skill,Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh issue edit:*),Bash(gh issue list:*),Bash(gh label list:*),Bash(gh search:*),Bash(.adlc/scripts/adlc-triage.sh:*),Bash(.adlc/scripts/adlc-relabel.sh:*);" \
    "intake: the Analyst, named gh commands, no edit tools" "$(grants adlc-intake.yml)"
 eq "adlc:architect=Edit(docs/**),Skill,Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh issue list:*),Bash(gh pr view:*),Bash(gh pr list:*),Bash(gh pr diff:*),$GITRO;" \
    "design: the Architect, edits under docs/ only, no commit/push/label" "$(grants adlc-design.yml)"
@@ -1555,7 +1600,12 @@ grep -q -- '--jq .behind_by' "$RB" && ok "…reading behind_by" || bad "RUNBOOK 
 grep -qE 'On `BEHIND`' "$RB" && bad "RUNBOOK Gate 2 must not key on mergeStateStatus BEHIND" || ok "…and does not key on mergeStateStatus BEHIND"
 grep -q 'wait for the checks to go green on the' "$RB" && ok "…and waits for green checks on the new head" || bad "RUNBOOK Gate 2 must wait for the checks after merging the base"
 grep -q '^Base: ' "$ROOT/templates/skills/release-ops.SKILL.md.tmpl" && ok "Action Card records the base the battery ran against" || bad "release-ops card needs a Base: line"
-grep -q 'remove-label stage:fast --add-label gate:deploy' "$RB" && ok "RUNBOOK fast lane moves the issue to gate:deploy in one call" || bad "RUNBOOK fast lane must remove stage:fast when adding gate:deploy"
+grep -q 'adlc-relabel.sh <n> gate:deploy' "$RB" && ok "RUNBOOK fast lane moves the issue to gate:deploy with the relabel script (one state)" || bad "RUNBOOK fast lane must move the issue to gate:deploy with adlc-relabel.sh"
+grep -q -- '--remove-label stage:\|--add-label stage:\|--add-label gate:' "$RB" && bad "RUNBOOK must not spell out a state-label pair (adlc-relabel.sh does it)" || ok "RUNBOOK spells out no state-label pair"
+for f in "$ROOT"/templates/github/adlc-*.yml; do
+  hits=$(grep -nE 'gh issue edit .*--(add|remove)-label (stage|gate):' "$f" || true)
+  eq "" "$(basename "$f"): moves state labels through adlc-relabel.sh, never a hand-spelled pair" "$hits"
+done
 # /adlc-model
 CM="$ROOT/commands/adlc-model.md"
 [ -f "$CM" ] && ok "commands/adlc-model.md exists" || bad "commands/adlc-model.md missing"
@@ -1786,14 +1836,18 @@ SH
   echo '{"comments": []}' > "$CY/fx/pr-none.json"
   # issue 8: fast lane, its PR predates its intake label (filed from the PR) → intake_to_pr null
   { xref "$(at -50)" 500 true other/plugin; xref "$(at 0)" 11 true; tl "$(at 100)" labeled stage:intake; tl "$(at 200)" unlabeled stage:intake; tl "$(at 200)" labeled stage:fast; } | jq -s . > "$CY/fx/timeline-8.json"
-  jq -n --arg t1 "$T1" --arg close "$(at 3000)" --arg old "2020-01-01T00:00:00Z" '[
+  # issue 12 (issue 38): QA put gate:deploy on and never took stage:qa off; closed at 1000. The stage ends at the
+  # next state label (600), not at the close (1000); the gate runs from 600 to the close (400).
+  { tl "$(at 0)" labeled stage:qa; tl "$(at 600)" labeled gate:deploy; } | jq -s . > "$CY/fx/timeline-12.json"
+  jq -n --arg t1 "$T1" --arg close "$(at 3000)" --arg close12 "$(at 1000)" --arg old "2020-01-01T00:00:00Z" '[
     {number: 7, title: "thing", createdAt: $t1, closedAt: $close, labels: []},
     {number: 8, title: "small", createdAt: $t1, closedAt: $close, labels: []},
+    {number: 12, title: "two labels", createdAt: $t1, closedAt: $close12, labels: []},
     {number: 10, title: "transferred away (timeline 404)", createdAt: $t1, closedAt: $close, labels: []},
     {number: 3, title: "ancient", createdAt: $old, closedAt: $old, labels: []}]' > "$CY/fx/issues.json"
   : > "$CY/calls"
   OUT=$( cd "$CY/repo" && env PATH="$CY/bin:$PATH" CY_FX="$CY/fx" CY_CALLS="$CY/calls" bash "$S/adlc-cycle.sh" issues 7 2>"$CY/err" ); check 0 "cycle issues: runs to the end although one timeline read failed" $?
-  eq 2 "cycle issues: one row per readable issue created in the window" "$(printf '%s\n' "$OUT" | wc -l | tr -d ' ')"
+  eq 3 "cycle issues: one row per readable issue created in the window" "$(printf '%s\n' "$OUT" | wc -l | tr -d ' ')"
   eq 1 "cycle issues: the unreadable issue is named on stderr and skipped, not silently dropped" "$(grep -c 'timeline of #10; skipped' "$CY/err")"
   eq 1 "…and gh's own error is kept" "$(grep -c 'HTTP 404' "$CY/err")"
   R7=$(printf '%s\n' "$OUT" | jq -c 'select(.issue == 7)')
@@ -1803,15 +1857,17 @@ SH
      "$(printf '%s' "$R7" | jq -r '"\(.lane) \(.pr) \(.intake_to_pr_seconds) \(.rounds) \(.stage_seconds) \(.gate_seconds)"')"
   eq "fast 11 null 0" "cycle: stage:fast → fast lane; another repo's PR is not this issue's PR; a PR that predates the intake label gives no intake→PR; no changes-requested and no verdict → 0 rounds" \
      "$(printf '%s\n' "$OUT" | jq -r 'select(.issue == 8) | "\(.lane) \(.pr) \(.intake_to_pr_seconds) \(.rounds)"')"
+  eq "600 400 600 400 full" "cycle: a stage left on when the next state label is put on ends there, not at the close; the gate runs to the close" \
+     "$(printf '%s\n' "$OUT" | jq -r 'select(.issue == 12) | "\(.dwell["stage:qa"]) \(.dwell["gate:deploy"]) \(.stage_seconds) \(.gate_seconds) \(.lane)"')"
   eq 1 "cycle: one issue list call" "$(grep -c '^issue list$' "$CY/calls")"
   eq 1 "cycle: one repo view call, outside the loop" "$(grep -c '^repo view$' "$CY/calls")"
-  eq 5 "cycle: one timeline call per issue, plus one per linked PR (none for a skipped issue)" "$(grep -c '^api ' "$CY/calls")"
+  eq 6 "cycle: one timeline call per issue, plus one per linked PR (none for a skipped issue)" "$(grep -c '^api ' "$CY/calls")"
   eq 2 "cycle: one pr view call per linked PR, for its verdict comments" "$(grep -c '^pr view$' "$CY/calls")"
   printf '%s\n' "$OUT" > "$CY/repo/.adlc/metrics/cycle.jsonl"
   OUT=$( cd "$CY/repo" && CLAUDE_PROJECT_DIR="$CY/repo" bash "$S/adlc-cycle.sh" report 7 2>&1 ); check 0 "cycle report: runs to the end" $?
   eq "builder          1               1      0.2       100%        60       100%  82%" "report: the per-stage spend table (agent runs only; cached share of the prompt)" "$(printf '%s\n' "$OUT" | grep '^builder ')"
   eq "adlc-ci: runs=2 avg_sec=35 failed=1" "report: guard lanes by name with avg seconds and failures" "$(printf '%s\n' "$OUT" | grep '^adlc-ci:')"
-  eq "issues=2  with_pr=2  fast_lane=1" "report: issue counts" "$(printf '%s\n' "$OUT" | grep '^issues=')"
+  eq "issues=3  with_pr=2  fast_lane=1" "report: issue counts" "$(printf '%s\n' "$OUT" | grep '^issues=')"
   eq "rounds: total=3  issues_with_a_fix_round=1" "report: fix rounds" "$(printf '%s\n' "$OUT" | grep '^rounds:')"
   rm -f "$CY/repo/.adlc/metrics/runs.jsonl" "$CY/repo/.adlc/metrics/cycle.jsonl"
   OUT=$( cd "$CY/repo" && CLAUDE_PROJECT_DIR="$CY/repo" bash "$S/adlc-cycle.sh" report 7 2>&1 ); check 0 "report with no ledgers: still exits 0" $?

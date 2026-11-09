@@ -32,8 +32,9 @@ short triage comment, exactly one verdict: `ADLC-TRIAGE: FAST | <why>` or
 - **FAST** → produce a **change brief** instead (Change · Scope · Acceptance `S1-AC1` · Out of
   scope, per the `triage` skill) — enough for the Builder to act without an ADR.
 
-Either way, advance to your terminal gate:
-`gh issue edit N --remove-label stage:intake --add-label gate:stories`.
+Either way, advance to your terminal gate with one call:
+`.adlc/scripts/adlc-relabel.sh N gate:stories` (it takes `stage:intake`, and any other
+`stage:`/`gate:` label, off in the same `gh issue edit`, so the issue is in one state).
 
 **Done when** the requirement is triaged and either the `verify` rubric passes for every story
 (FULL) or the change brief has one runnable acceptance check (FAST), and open questions are

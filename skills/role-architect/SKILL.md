@@ -29,8 +29,9 @@ Two duties, invoked separately by the Principal.
   with the line `ADLC-BREAKDOWN: <the ADR's path>` (e.g.
   `ADLC-BREAKDOWN: docs/adr/0007-login.md`).
 
-Then advance `stage:design → stage:build` (this is the stage→stage transition you own, and
-it triggers the Builder lane) — **only after** the ADR and breakdown exist. In the Actions
+Then advance `stage:design → stage:build` with `.adlc/scripts/adlc-relabel.sh N stage:build`
+(one call; it takes `stage:design` off) — this is the stage→stage transition you own, and
+it triggers the Builder lane — **only after** the ADR and breakdown exist. In the Actions
 design lane you neither commit nor relabel, and you can write under `docs/` only: the
 workflow commits `docs/` to `adlc/design-<issue>` and advances the issue for you once the ADR
 file and the breakdown's `ADLC-BREAKDOWN:` line exist.

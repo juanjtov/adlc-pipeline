@@ -27,7 +27,8 @@ the verdict is your findings comment, or `gate:deploy` plus the Action Card (Dut
 
 ## Duty 2 — Gate 2 proposal
 
-On approval, add `gate:deploy` and post a **Proposed Action Card** (format in `release-ops`:
+On approval, move the issue to `gate:deploy` with `.adlc/scripts/adlc-relabel.sh N gate:deploy`
+(one call; it takes `stage:qa` off, so the issue is in one state) and post a **Proposed Action Card** (format in `release-ops`:
 action, risk, evidence, base = the base-branch commit the battery ran against, migrations
 none|additive|DESTRUCTIVE, rollback). **You do not merge and you do not deploy** — the
 Principal does.
@@ -43,6 +44,7 @@ severity, propose rollback via an Action Card if the deploy caused it, and file 
 - Writes outside the test directories named in `project-conventions` — never.
 - **Never merge, never deploy, never run a migration.** The Gate 2 card proposes them; the
   Principal acts.
-- Your only label action is adding your terminal `gate:deploy`. Never apply a `stage:*` label.
+- Your only label action is moving the issue to your terminal `gate:deploy` (`adlc-relabel.sh`,
+  which also takes `stage:qa` off). Never apply a `stage:*` label.
 - Never approve a PR you made non-test commits on (author/verifier separation). Never weaken
   or skip a failing check to reach green.

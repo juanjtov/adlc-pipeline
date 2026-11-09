@@ -7,7 +7,10 @@
 #   adlc-cycle.sh issues [DAYS]   one JSONL row per issue created in the window (default 30 days):
 #       {"issue","title","created","closed","lane":"full|fast","pr","pr_opened",
 #        "intake_to_pr_seconds","rounds","dwell":{"stage:intake":s,…},"stage_seconds","gate_seconds"}
-#       dwell = seconds the issue wore each label (open intervals run to the issue's close, or now);
+#       dwell = seconds the issue wore each label: from its labeled event to its unlabeled event OR
+#         to the next stage:/gate: label put on (QA adds gate:deploy without taking stage:qa off;
+#         one host had 32 issues wearing two states), whichever comes first; an interval still open
+#         runs to the issue's close, or now, and never past the close;
 #       stage_seconds = time in stage:* labels — queue time AND agent time (an issue can sit at
 #       stage:intake for days before the Analyst runs; the agent's own minutes are in runs.jsonl);
 #       gate_seconds = time in gate:* labels (waiting on the Principal); rounds = the fix rounds
@@ -79,13 +82,19 @@ case "$cmd" in
                  | select(.label.name | test("^(stage|gate):"))
                  | {e: .event, l: .label.name, t: (.created_at | t)}] as $ev
           | ($ev | map(.l) | unique) as $labels
-          # dwell per label: each labeled→next unlabeled interval; an open interval runs to $end, and one
-          # that opens after $end (a label put on a closed issue) counts 0, never negative.
-          | ($labels | map({(.): (. as $l | [$ev[] | select(.l == $l)] | sort_by(.t)
-                | reduce .[] as $x ({open: null, sum: 0};
-                    if $x.e == "labeled" then (if .open == null then .open = $x.t else . end)
-                    else (if .open != null then .sum += ($x.t - .open) | .open = null else . end) end)
-                | .sum + (if .open != null then ([$end - .open, 0] | max) else 0 end))}) | add // {}) as $dwell
+          # dwell per label: each labeled→(its unlabeled, or the NEXT stage:/gate: label put on) interval,
+          # in time order across labels; a close never runs past $end, an interval still open runs to
+          # $end, and one that opens after $end (a label put on a closed issue) counts 0, never negative.
+          | ($ev | sort_by(.t)
+             | reduce .[] as $x ({open: {}, sum: {}};
+                 if $x.e == "labeled" then
+                   (reduce (.open | to_entries[] | select(.key != $x.l)) as $o (.;
+                      .sum[$o.key] += ([([$x.t, $end] | min) - $o.value, 0] | max) | del(.open[$o.key])))
+                   | (if .open[$x.l] == null then .open[$x.l] = $x.t else . end)
+                 else
+                   (if .open[$x.l] != null then .sum[$x.l] += ([([$x.t, $end] | min) - .open[$x.l], 0] | max) | del(.open[$x.l]) else . end)
+                 end)) as $st
+          | ($labels | map({(.): (($st.sum[.] // 0) + (if $st.open[.] != null then ([$end - $st.open[.], 0] | max) else 0 end))}) | add // {}) as $dwell
           | ([$ev[] | select(.e == "labeled" and .l == "stage:intake")] | sort_by(.t) | first | .t) as $intake
           | ([.[] | select(.event == "cross-referenced" and .source.issue.pull_request != null and '"$XREF_REPO"' == $repo)] | sort_by(.created_at) | first | .created_at) as $pr_opened
           | {issue: $issue.number, title: $issue.title, created: $issue.createdAt, closed: $issue.closedAt,
