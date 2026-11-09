@@ -81,6 +81,7 @@ templates/                     # what the wizard fills into the host repo
             adlc-ci-budget.sh · adlc-local-ci.sh                                       # Actions minutes: will the CI battery fit · the battery run locally, one marker comment on the PR
             adlc-refresh.sh                                                            # the refresh: per-file diff, skips host-owned copies; runs from the plugin, not copied
             adlc-chains.sh                                                             # follow-up chains: which issue follows which, how deep, decided or not
+            adlc-rounds.sh                                                             # fix rounds of a PR (reviews that sent it back): what the cap and the cycle ledger count
             #   adlc-cache.sh        = prompt-cache hit-rate rollup
             #   adlc-run-log.sh      = run ledger: tokens · cost · seconds per agent run (Mission Control / OTel / Actions)
             #   adlc-cycle.sh        = cycle time per stage + fix rounds per issue, from the label timeline; the ranked report
@@ -111,7 +112,12 @@ detection, the fix-loop cap, the verdict parse, setup validation — are small s
 `scripts/`, **unit-tested** (`tests/run.sh`), and called by both CI and a **local pre-commit
 hook**, so your machine and Actions run the same code. The Builder declares each change's scope
 in `.adlc/scope/<issue>.txt`; the diff-scope check fails a lane PR that strays outside it or
-declares none. That check and the fast-lane cap run on `pull_request_target` — the workflow and
+declares none. A Builder that needs a path outside it asks on the PR
+(`ADLC-SCOPE-REQUEST: <path prefix> | <reason>`), and the Architect's next review answers
+`ADLC-SCOPE: GRANT <path prefix>` or `DENY`; on a grant the Builder adds that line to the scope
+file. The markers are the record of the decision, not an authorization check (in the Actions
+lanes every agent posts under the same account): the scope file stays what the check enforces.
+That check and the fast-lane cap run on `pull_request_target` — the workflow and
 scripts come from the default branch and the PR is only read as data — so a PR cannot edit the
 guards that judge it. `adlc-adr-check.sh` holds an ADR to its own words: its `## Scope` must
 match that scope file (the `docs/` lines the design lane puts there aside), and each row of its `## Guarantees` table must name a test that
@@ -488,7 +494,10 @@ architect conformance) and carries build → qa **from the agents' verdicts, not
 decision** — so you can enable branch protection's "require a human approval" and it gates only
 the final merge. If a review flags something, **`adlc-fix.yml`** sends the PR back to the Builder
 to fix and re-review automatically — capped at 3 rounds, then it tags `needs:human` — so what
-reaches you is a clean PR to read and merge. Autopilot auto-approves Gate 1 into the **full**
+reaches you is a clean PR to read and merge. A round is a review that sent the PR back, counted
+from the PR's own `adlc:changes-requested` label events and CHANGES verdict comments, never from
+its commits; the RUNBOOK's fix cycle runs the same check (`adlc-fix-cap.sh --pr <pr>`) when you
+drive the pipeline by hand. Autopilot auto-approves Gate 1 into the **full**
 pipeline only; it never starts the **fast lane** (that skips design, so the lane choice stays an
 explicit human approval — a `FAST` recommendation waits at `gate:stories`). The label has to be
 on the issue before the Analyst starts (apply it when you file); added later, it does not advance

@@ -45,17 +45,26 @@ file and the breakdown's `ADLC-BREAKDOWN:` line exist.
 ## Duty 2 — Design-conformance review (trigger: a Builder PR)
 
 Compare `gh pr diff` against the ADR and task breakdown. The PR's `.adlc/scope/<issue>.txt`
-must match the breakdown's declared scope (the design lane's own lines aside: the ADR and any
+must match the breakdown's declared scope plus any prefix a review granted on this PR (the
+design lane's own lines aside: the ADR and any
 other `docs/` file it committed) — CI enforces that file, so a wider one is a finding.
 Run `.adlc/scripts/adlc-adr-check.sh` on the PR's checkout: each line it prints on stderr (the
 ADR's Scope and the scope file differ, a Guarantees row names a test that is not there) is a
 finding, and so is this PR's ADR on its skipped list. In the Actions review lane the script is
 not among your granted commands (QA runs it there): read the two sections against the scope
 file and the named tests yourself.
+**Scope requests:** a Builder that needs a path outside the scope posts
+`ADLC-SCOPE-REQUEST: <path prefix> | <reason>` in a PR comment. Answer every request that has
+no answer yet, one line each in your review comment: `ADLC-SCOPE: GRANT <path prefix>` or
+`ADLC-SCOPE: DENY <path prefix>`. A grant is a design decision: give it only where the path
+fits the ADR, and end that review CHANGES, so the PR returns to the Builder, who adds exactly
+that line to the scope file.
 In the Actions review lane `gh pr review` is not granted (a bot cannot review its own PR):
 your verdict there is the PR comment and marker line the lane's prompt asks for. Otherwise
 submit `gh pr review --approve` (conformant) or `--request-changes`
-with specific comments. Scope your review per `verify`: flag what breaks correctness, the
+with specific comments, and post a PR comment whose last line is `ADLC-ARCH: PASS` or
+`ADLC-ARCH: CHANGES`: the fix-loop cap counts a PR's rounds from those comment lines and does
+not read a review. Scope your review per `verify`: flag what breaks correctness, the
 declared diff scope, the design, or an AC — not taste.
 **Done when** the verdict is submitted. On approval, report that the PR can advance
 `stage:build → stage:qa` (the Principal or CI applies it — not you).

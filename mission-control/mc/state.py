@@ -46,6 +46,8 @@ def build(store, repo, now=None, agents=None, github=None, mode='live', plugin_r
     issues = store.issues(repo)
     events = _group(store.label_events(repo), 'number')
     prs = store.prs(repo)
+    for p in prs:   # when the review lane labelled it adlc:changes-requested: one source of its fix rounds
+        p['asked'] = [e['ts'] for e in events.get(p['number'], []) if e['added'] and e['label'] == P.CHANGES_LABEL and e.get('ts')]
     prs_by_issue = _group([p for p in prs if p.get('issue')], 'issue')
     comments = {}
     for c in store.comments(repo):
@@ -211,39 +213,32 @@ def _lane(labels, evs, pr):
     return 'fast' if 'stage:fast' in labels else 'full'
 
 
-def _review(comments):
-    """What one review left on the pull request: its last ADLC-ADV and ADLC-ARCH verdicts, and when the last one was posted."""
-    adv = arch = at = None
-    for c in comments:
-        a, b = P.ADV_RE.findall(c['body'] or ''), P.ARCH_RE.findall(c['body'] or '')
-        adv, arch = (a[-1] if a else adv), (b[-1] if b else arch)
-        if a or b:
-            at = c['ts']
-    return adv, arch, at
-
-
 def _timeline(evs, pr, pcomments, done_at):
     """Every move of a request, in order: label changes, the pull request opening, and each fix round.
 
-    A fix round is what the lanes make it. A review that is not clean on both verdicts sends the pull request to
-    the Builder, and the Builder's `adlc-fix:` commit sends it back to review. So there is one round per fix commit
-    (the count adlc-fix-cap.sh caps), plus one more while a review's request for changes is still unanswered.
+    A fix round is a review that sent the pull request back, counted as the fix-loop cap counts it (P.fix_rounds,
+    the rule of adlc-rounds.sh): from the pull request's own label events and verdict comments, never from its
+    commits. Each one opens a Builder stop. An `adlc-fix:` commit only places a moment: the first one after a
+    request, and before the next, is when the pull request went back to review.
     """
     t = [{'ts': e['ts'], 'slot': P.LABEL_SLOT[e['label']], 'round': 0, 'actor': e.get('actor'), 'label': e['label']}
          for e in evs if e['added'] and e['label'] in P.LABEL_SLOT and e.get('ts')]
     rounds = 0
     if pr and pr.get('created'):
-        starts = [pr['created']] + sorted(f for f in (pr.get('fix_commits') or []) if f > pr['created'])
-        ordered = sorted((c for c in pcomments if c.get('ts')), key=lambda c: c['ts'])
-        for i, start in enumerate(starts):
-            end = starts[i + 1] if i + 1 < len(starts) else None
-            t.append({'ts': start, 'slot': 'reviewer', 'round': i})
-            adv, arch, at = _review([c for c in ordered if c['ts'] >= start and (end is None or c['ts'] < end)])
-            # A fix commit followed, so this review asked for one. For the latest review, read its verdicts. At the cap
-            # (needs:human) the loop has stopped and a person takes over: no further round.
-            if end is not None or ('CHANGES' in (adv, arch) and 'needs:human' not in pr['labels']):
-                rounds = i + 1
-                t.append({'ts': at or end, 'slot': 'builder', 'round': rounds})
+        t.append({'ts': pr['created'], 'slot': 'reviewer', 'round': 0})
+        asked = P.fix_rounds(pr.get('asked') or [], pcomments)
+        fixes = pr.get('fix_commits') or []
+        rounds = len(asked)
+        for i, at in enumerate(asked, 1):
+            nxt = asked[i] if i < rounds else None
+            back = next((f for f in fixes if f > at and (nxt is None or f < nxt)), None)
+            # At the cap (needs:human) the loop has stopped and a person takes over. The latest request is a round
+            # all the same, the one the cap stopped on, but no Builder stop opens for it unless a fix followed.
+            if nxt is None and back is None and 'needs:human' in pr['labels']:
+                break
+            t.append({'ts': at, 'slot': 'builder', 'round': i})
+            if back is not None:
+                t.append({'ts': back, 'slot': 'reviewer', 'round': i})
     if done_at:
         t.append({'ts': done_at, 'slot': 'done', 'round': rounds})
     t.sort(key=lambda x: x['ts'])

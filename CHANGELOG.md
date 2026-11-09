@@ -29,9 +29,64 @@ section. Re-run `templates/github/labels.sh` as well: it creates `adlc:change-fa
 issue 37: `adlc-chains.sh` is new, and QA's prompt and both retros call it; `labels.sh` creates
 two more labels (`adlc:follow-up`, `adlc:accepted-risk`; the refreshed `adlc-doctor.sh` copy
 reports them missing until you run it again), and the `adlc-metrics.sh` copy gains the
-`follow_ups_filed` line. The security-gate, code-review and efficient-runs skills, the retro and
-cycle-retro recipes, the role prompts and the guard hook live in the plugin, which every session
-loads from the installed plugin, so those parts need no refresh.
+`follow_ups_filed` line. From issues 35 and 13: `adlc-rounds.sh` is new, and the `adlc-fix.yml`,
+`adlc-fix-cap.sh` and `adlc-cycle.sh` copies call it (the three come together: the new
+`adlc-fix.yml` beside an older `adlc-fix-cap.sh` fails its cap step, it does not run uncapped),
+and the RUNBOOK copy gains the capped fix cycle. The security-gate, code-review and efficient-runs
+skills, the retro and cycle-retro recipes, the role prompts and the guard hook live in the plugin,
+which every session loads from the installed plugin, so those parts need no refresh.
+
+- **The fix-loop cap counts rounds, not commits, and the local recipe runs it too** (issue 35).
+  The cap was written as "3 rounds" and counted as `adlc-fix:` commits on the PR's branch.
+  Builders make several commits in a round: on one host a PR with exactly three review rounds
+  carried nine fix commits and seven merged PRs carried more than three, so in the Actions lane
+  a Builder that split its first round into three commits was stopped after it, and one that
+  left the prefix out was never stopped; in a repo run by hand nothing ran the cap at all, and
+  `needs:human` was never applied. A fix round is now one thing everywhere: a review that sent
+  the PR back. New `adlc-rounds.sh <pr>` counts it from the PR's own record, the larger of its
+  `adlc:changes-requested` label events and its CHANGES verdict comments per marker: the count
+  the cycle ledger took in issue 58, now in one script that `adlc-cycle.sh` calls.
+  `adlc-fix-cap.sh --pr <pr> [max]` prints GO while that count is at most max and STOP past it.
+  The request being handled is one of the rounds, so with max 3 the first three requests each
+  get a Builder round and the fourth stops, the allowance the old count gave a Builder that
+  made one commit per round. `adlc-fix.yml`'s cap step calls it with the job's own token and
+  fails, never GO, when the count cannot be read or the answer is neither word; a step after
+  it then says so on the PR, which keeps its label, with a link to the run. The RUNBOOK's
+  Stage 4 gains the fix cycle: run the cap before the PR goes back to the Builder, label it
+  `needs:human` on STOP. The form that reads commit subjects on stdin still works, for a
+  workflow copy that pipes `git log` into it. Outside the lanes the Architect now also posts
+  its verdict as a PR comment marker (`ADLC-ARCH: PASS` / `CHANGES`), because the count reads
+  comments, not GitHub reviews.
+  The same issue reported a fix round that stalled on scope: the fix needed a file outside
+  `.adlc/scope/<issue>.txt` and the Builder waited for a free-form ruling. That round trip has
+  markers now, in the two role prompts and with no new lane step. The Builder does not touch
+  the path: it posts `ADLC-SCOPE-REQUEST: <path prefix> | <reason>` on the PR, finishes what is
+  in scope and pushes. The Architect's next review answers each open request with
+  `ADLC-SCOPE: GRANT <path prefix>` or `ADLC-SCOPE: DENY <path prefix>`, a grant with a CHANGES
+  verdict, and the Builder then adds that line to the scope file. The diff-scope check is
+  unchanged and reads no marker: the scope file is still what it enforces, and the marker is the
+  record of the decision, not an authorization check (in the Actions lanes every agent posts
+  under the same account). A granted request costs one round of the cap. Not done: in the
+  Actions lanes a push is what brings the review back, so a round in which the Builder has
+  nothing in scope to push leaves its request unanswered until someone pushes or reviews by
+  hand; and the count stays an estimate (a request for changes that left neither the label nor
+  a marker comment is not a round, and a verdict in a GitHub review body is not read).
+
+- **A PR is no longer charged for another PR's fix rounds, and Mission Control shows the
+  cap's count** (issue 13). The cap counted the `adlc-fix:` commits a PR's branch had and its
+  base lacked, so a stacked PR whose parent was squash-merged, and a promotion PR, carried
+  other PRs' fix commits and were stopped at their first review with no round of their own.
+  With rounds read from the PR's own label events and verdict comments (the entry above) both
+  start at round 0; the fix-loop cap step's tests run the two cases on a git history that
+  holds those commits. Mission Control counted a round per `adlc-fix:` commit newer than the
+  PR; it now applies the same rule (`fix_rounds` in `mc/pipeline.py`; a test runs it and
+  `adlc-rounds.sh` over the same PRs), on data the one GraphQL call brings: the PR part of the
+  query also asks for the PR's last 40 label events. At the cap the request carries the count
+  the cap stopped on and stays at the review station with "Needs a human". Limits: Mission
+  Control sees the last 40 label events and the last 40 comments of a PR, so a very long thread
+  can show fewer rounds than the cap counts; and an `adlc-fix:` commit is still what places,
+  on the page, the moment a round went back to review, so a round fixed without the prefix
+  shows as still with the Builder until the next review.
 
 - **A follow-up chain is a decision for the Principal: `adlc-chains.sh`, two labels, one
   follow-up per PR** (issue 37). On one host 91 of 224 issue titles were follow-ups, in chains
