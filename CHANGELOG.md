@@ -48,17 +48,22 @@ loads from the installed plugin, so those parts need no refresh.
   `gh pr list` call, only then) and resolved to the issue its body closes. A parent must be
   older than its follow-up, so issues that name each other cannot loop. `adlc-chains.sh report
   [min_depth]` prints one line per root issue whose longest path is 3 or more issues deep,
-  with every issue under the root counted, and lists a chain whose root carries
+  with the issues in the chain counted (the root included), and lists a chain whose root carries
   `adlc:accepted-risk` apart as decided; `adlc-chains.sh root <issue>` prints an issue's root,
   the chain's depth and `accepted-risk` or `open`. The `retro` and `cycle-retro` skills run the
   report and put each undecided chain to the Principal as a decision (label the root
   `adlc:accepted-risk`, or one issue that replaces the approach), not as further follow-ups; QA
   asks `root` before filing and, on `accepted-risk`, files nothing and names the residuals in
   its comment and on the Action Card's Risk line, and on a chain already 3 deep says so on the
-  card. `labels.sh` creates the two labels, the doctor reports them missing, and
-  `adlc-metrics.sh` prints `follow_ups_filed: N / M`, the follow-ups among the issues opened in
-  the window. Not done: these are prompt rules and a report, so nothing blocks an agent that
-  files an issue anyway; the phrase reading is a heuristic (a body that says "QA of #N" about
+  card; when the lookup fails or the label is refused it files anyway and says so there.
+  `labels.sh` creates the two labels, the doctor reports them missing, and
+  `adlc-metrics.sh` prints `follow_ups_filed: N / M`, the issues labelled `adlc:follow-up`
+  among the issues opened in the window (a follow-up filed without the label is not in it, and
+  a repo without the label gets a note beside the 0). Not done: these are prompt rules and a
+  report, so nothing blocks an agent that files an issue anyway; the report counts every issue
+  whatever its author or label, so whoever can open issues (anyone, on a public repo) can
+  deepen an existing chain with marker lines, though not change what an existing issue names
+  as its parent or make a chain read decided; the phrase reading is a heuristic (a body that says "QA of #N" about
   an unrelated issue links to it); only the label on a chain's ROOT counts; a PR tied to its
   issue by hand, with no closing keyword in its body, is not resolved; and the lanes' prompts
   are unchanged, so the rule reaches QA through its role skill.

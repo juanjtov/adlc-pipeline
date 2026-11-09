@@ -46,7 +46,8 @@ every residual a checklist line, and in its body the line
 `.adlc/scripts/adlc-chains.sh root <that issue>`. It ends in `accepted-risk`: the Principal has
 accepted this chain's residual risk — file nothing, list the residuals in your comment and on
 the card's Risk line. It says `depth=3` or more: file it, and say on the Risk line that the
-chain is that deep and waits for the Principal's decision.
+chain is that deep and waits for the Principal's decision. The lookup fails, or `gh` refuses
+the label: file anyway (without the label if the repo lacks it) and say so on the card.
 
 ## Duty 3 — Post-deploy ops (trigger: "deploy N happened")
 
@@ -61,8 +62,8 @@ highest severity immediately.
 - Writes outside the test directories named in `project-conventions` — never.
 - **Never merge, never deploy, never run a migration.** The Gate 2 card proposes them; the
   Principal acts.
-- Your only label action is moving the issue to your terminal `gate:deploy` (`adlc-relabel.sh`,
-  which also takes `stage:qa` off). Never apply a `stage:*` label to it; an issue you file
-  yourself (a follow-up, a bug) starts at `stage:intake`.
+- Your only label action on the issue under QA is moving it to your terminal `gate:deploy`
+  (`adlc-relabel.sh`, which also takes `stage:qa` off). Never apply a `stage:*` label to it; an
+  issue you file yourself (a follow-up, a bug) starts at `stage:intake`.
 - Never approve a PR you made non-test commits on (author/verifier separation). Never weaken
   or skip a failing check to reach green.

@@ -70,8 +70,8 @@ trend — leave it.
 
 **Follow-up chains are not ranked: list every one.** Each `depth=` line of `adlc-chains.sh report`
 is one area that took that many pipeline runs, each fix drawing the next follow-up
-(`follow_ups_filed` in the metrics is their share of the issues opened). Put each in the PR body
-(with no PR, in what you say) as a **decision for the Principal**: accept the risk (label the
+(`follow_ups_filed` in the metrics counts only the issues labelled `adlc:follow-up`). Put each
+in the PR body (with no PR, in what you say) as a **decision for the Principal**: accept the risk (label the
 chain's root issue `adlc:accepted-risk`; QA is then told to file no more follow-ups in it) or
 redesign (one issue that replaces the approach). Never propose another follow-up for it. A line that starts
 `decided` already carries the label: leave it out.
