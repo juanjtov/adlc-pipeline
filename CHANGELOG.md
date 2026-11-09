@@ -54,6 +54,21 @@ which every session loads from the installed plugin, so those parts need no refr
   script does not look is a visible skip. The recipe in the `retro` skill reads comments and review bodies, stamps each
   row with its comment's time, and lists 500 PRs instead of 50: on a repo past 50 PRs the older
   ones fell off the end without a word (349 markers, 220 read, on the same host).
+- **One Mission Control shows every adopted repo on the machine, and says so** (issue 52).
+  It always could: the hook sends each event with its working directory, the server maps that
+  to a repo, and the page's repo menu switches between them. But a repo reached the menu only
+  once a pipeline agent had run in it, and a second `adlc-mission-control` in another repo
+  answered "already running, stop it first", with `--open` landing on the first repo's line.
+  Now the hook script also forwards a session starting; when the session's folder is an
+  adopted repo (the guard's own rule: `.adlc/scripts/`, `.adlc/VERSION` or
+  `docs/adlc/CHARTER.md` at or above it) the server puts that repo on the menu, and keeps
+  nothing from any other session, not even its path. A second start prints the running copy's
+  address on the repo it was run from (`?repo=owner/name`) and `--open` opens that; a repo the
+  copy has not heard of is named, not linked, since the page would show another repo's line.
+  The documented way to run a copy per repo (`ADLC_MC_HOME` and `--port` for each) stays, with
+  its limit now written down: a repo's runs land in the per-repo copy only from sessions that
+  have that `ADLC_MC_HOME` set; the rest go to the default folder's copy. `--demo` still
+  writes nothing; the guard and the server's Host and Origin checks are untouched.
 
 ## 0.3.1
 
