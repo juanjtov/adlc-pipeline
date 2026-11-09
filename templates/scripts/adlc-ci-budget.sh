@@ -41,6 +41,7 @@ LC_ALL=C awk -v m="$min" -v r="$runs" -v p="$prs" -v i="$inc" '
     printf "included: %d minutes/month\n", i
     pct = ceil(int(est / i * 100000 + 0.5) / 1000)
     if (est <= i) { printf "FITS: %d%% of the included minutes\n", pct; exit 0 }
+    if (pct < 101) pct = 101   # over by less than a thousandth of a percent is still over
     printf "OVER: %d%% of the included minutes (%.1fx)\n", pct, est / i
     exit 1
   }'

@@ -19,8 +19,9 @@ asks before it replaces yours), the RUNBOOK's Stage 4 names the check, and the w
 new `settings.cache.json` into `.claude/settings.json`. From issue 34: `adlc-ci-budget.sh` and
 `adlc-local-ci.sh` are new; the `adlc-cycle.sh` copy gains the `blocked=` figure, the
 `adlc-metrics.sh` copy the `blocked` and `local_ci` lines, the `adlc-run-log.sh` copy the
-`outcome` field, the `adlc-doctor.sh` copy a pointer to the local CI script, and the RUNBOOK
-template the local CI recipe. The security-gate, code-review and efficient-runs skills, the retro
+`outcome` field, the `adlc-doctor.sh` copy a pointer to the local CI script, the
+`adlc-triage.sh` copy `.adlc/local-ci.txt` on its deny list, and the RUNBOOK template the local
+CI recipe. The security-gate, code-review and efficient-runs skills, the retro
 and cycle-retro recipes, the role prompts and the guard hook live in the plugin, which every
 session loads from the installed plugin, so those parts need no refresh.
 
@@ -38,11 +39,16 @@ session loads from the installed plugin, so those parts need no refresh.
   minutes come on top, and the CI template has no ready-made switch for the second proposal.
   (2) New `adlc-local-ci.sh <pr> [--dry-run] [commands-file]` runs the host's own list
   (`.adlc/local-ci.txt`, one `<name>: <command>` per line) from the repo root, refuses unless
-  the tree is clean and HEAD is the PR's head commit, and posts one PR comment whose last line
-  is `ADLC-CI: PASS head <sha>` or `ADLC-CI: FAIL head <sha>`. QA's prompt counts it as the
-  battery result only for the PR's current head, `adlc-metrics.sh` counts each such comment on
-  a merged PR as one CI run (from the comments it already fetched; a `local_ci:` line says how
-  many), and the doctor's blocked note names the script. The marker is a record, not a gate:
+  the tree is clean (untracked files count) and HEAD is the PR's head commit, posts nothing when
+  the battery itself moved HEAD or changed the tree (a formatter that fixes, a code generator:
+  the later checks did not run on that commit), and otherwise posts one PR comment whose last
+  line is `ADLC-CI: PASS head <sha>` or `ADLC-CI: FAIL head <sha>`. QA's prompt counts it as the
+  battery result only for the PR's current head, `adlc-metrics.sh` counts each comment on a
+  merged PR whose last non-blank line starts with that marker as one CI run (from the comments
+  it already fetched; a comment that quotes the marker elsewhere is not a run; a `local_ci:`
+  line says how many), and the doctor's blocked note names the script. The battery file is now a
+  sensitive path for the fast lane: `adlc-triage.sh`'s default deny list holds
+  `.adlc/local-ci.txt`, so a PR that edits it goes FULL. The marker is a record, not a gate:
   anyone who can comment can write it, and nothing checks that the battery ran. No per-command
   timeout. (3) A run that concluded `failure` within 60 s of its creation with no step run (the
   doctor's rule, per run) is `blocked`: `adlc-run-log.sh actions` rows carry `outcome`

@@ -60,9 +60,11 @@ echo "first_pass_approved: $firstpass / $merged"
 # stays a plain failure.
 #
 # Where the checks did not run on GitHub, adlc-local-ci.sh leaves one PR comment per battery run
-# whose marker is `ADLC-CI: PASS|FAIL head <sha>`. Each such comment on a merged PR (its LAST
-# marker, markup around it allowed, as the verdict markers are read) counts as one CI run of that
-# PR, a FAIL as a red one, so a host with no Actions runs is not blind here. The comments come
+# whose last line is the marker `ADLC-CI: PASS|FAIL head <sha>`. Each comment on a merged PR whose
+# last non-blank line starts with that marker (markup around it allowed; the last marker on the
+# line is read) counts as one CI run of that PR, a FAIL as a red one, so a host with no Actions
+# runs is not blind here. A comment that quotes the marker anywhere else, as QA's verdict may, is
+# not a run. The comments come
 # with the PR list above: no call more. A `local_ci:` line says how many were counted, only when
 # there is one. The marker is a record anyone who can comment can write, not a gate. A battery
 # that ran both on Actions and locally for one push counts twice.
@@ -92,8 +94,10 @@ while read -r id fast; do
 done <<<"$red_ids"
 # Both lists go in through file descriptors: 200 PRs with their comments overflow an argument.
 jq -rn --slurpfile runs <(echo "$runs") --slurpfile prs <(echo "$prs") --argjson infra "$infra" --argjson blocked "$blocked" '
-  # the local CI comments of one PR: the last ADLC-CI marker of each comment, PASS or FAIL
-  def local_ci: [(.comments // [])[] | (.body // "")
+  # the local CI comments of one PR: those whose last non-blank line starts with the ADLC-CI
+  # marker (a comment that quotes one in its prose is not a run); the last marker on that line
+  def local_ci: [(.comments // [])[] | (.body // "") | split("\n") | map(select(test("\\S"))) | (last // "")
+    | select(test("^[*`_\\s]*ADLC-CI:"))
     | [match("(?<![A-Za-z0-9_-])ADLC-CI:[*`_\\s]*(PASS|FAIL)[*`_\\s]+head[*`_\\s]+[0-9a-f]{40}(?![0-9a-f])"; "g").captures[0].string]
     | last | select(. != null)];
   $runs[0] as $runs | $prs[0] as $prs | ($infra + $blocked) as $out
