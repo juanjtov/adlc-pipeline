@@ -41,6 +41,7 @@
 #       1 a file could not be read, compared or written (what was copied before it stays copied)
 #       2 bad arguments
 set -uo pipefail
+unset CDPATH   # with it exported, the `cd` that finds the templates below prints where it went
 MARK='adlc: host-owned'
 die() { echo "adlc-refresh: $2" >&2; exit "$1"; }
 usage() { die 2 "usage: adlc-refresh.sh [--apply] <host-root> [<filled-file> <target>]"; }
