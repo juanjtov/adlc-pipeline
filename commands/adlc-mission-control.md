@@ -6,8 +6,10 @@ Open ADLC Mission Control for this repository.
 
 1. Start it in the background with `adlc-mission-control --open` (the plugin puts this on the
    Bash PATH; it keeps running until stopped). If it says Mission Control is already running,
-   that is fine: use the address it prints.
-2. Tell me the address (default `http://localhost:4319`) and one line on what the page shows.
+   that is fine: one copy serves every repo on this machine, and the address it prints opens
+   the page on this repo (`http://localhost:4319/?repo=owner/name`).
+2. Tell me the address it printed (default `http://localhost:4319`) and one line on what the
+   page shows.
 3. If the page will have no token or cost figures because telemetry is off, say so, and offer to
    add the `env` block from the plugin's `templates/settings.mission-control.json` to this
    repo's `.claude/settings.local.json`. Show me the block and ask before writing. New Claude
