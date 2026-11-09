@@ -42,14 +42,21 @@ which every session loads from the installed plugin, so those parts need no refr
   the lines of `.adlc/scope/<issue>.txt`) and `## Guarantees` (a table: claim → the
   `path::node` of the test that pins it, or `unenforced — <reason>`). New
   `adlc-adr-check.sh [adr-dir]` reports every problem, one line each, and exits 1: a missing
-  section, a Scope with no block, a row that is neither form, a path that does not exist, a
-  node that is not in that file as a whole word, an `unenforced` with no reason, and, where
-  the ADR names its issue and the scope file exists, any difference between the two (`docs/`
+  section, a header that names no issue (`**Issue:** none` says there is none), a fenced
+  block that is never closed, a Scope with no block, a row that is neither form, a path that
+  does not exist, a node that is not in that file as a whole word, an `unenforced` with no
+  reason, and, where the issue's scope file exists, any difference between the two (`docs/`
   lines of the scope file aside: the design lane puts the files it commits there). An ADR
-  with neither section is skipped and listed, so ADRs written before this template keep
-  passing with no cut-off to maintain; the cost is that a new ADR with both left out is
-  skipped too, which the Architect's review is told to treat as a finding. The Builder runs
-  the script before opening the PR, the Architect in its conformance review, and QA with the
+  with no sign of the sections is skipped and listed, so ADRs written before this template
+  keep passing with no cut-off to maintain; any sign of them (a heading of any level that
+  starts with Scope or Guarantees, `**Issue` in the header, an unclosed fence) makes it a
+  checked ADR, so a near-miss spelling fails instead of switching the check off. Two costs: a
+  new ADR with all of it left out is skipped too, which the Architect's review is told to
+  treat as a finding, and an older ADR that happens to carry such a heading or field must be
+  reworded or filled in. The script's last line names the ADRs it checked. The Builder runs
+  the script before opening the PR, the Architect in its conformance review (it cannot switch
+  branches, so the RUNBOOK has the Principal check the PR branch out first, and an ADR
+  missing from that last line means the check did not run), and QA with the
   battery; in the Actions review lane the Architect has no grant for it and reads the two
   sections instead. Not done: no workflow runs it (`adlc-diff-scope.yml` never checks out the
   PR head, and `adlc-ci.yml` has no guards job), the design lane does not write the scope file

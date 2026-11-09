@@ -179,9 +179,10 @@ Create/write:
 
 6. `docs/adr/template.md` and `docs/adr/0001-adopt-agentic-sdlc.md`
    — from `templates/adr-template.md` and a seeded first ADR recording the adoption
-   decision and the answers from Phase 1. The seeded ADR decides no code: leave the
-   template's `## Scope` and `## Guarantees` out of it (`adlc-adr-check.sh` checks only an
-   ADR that has one of the two, so ADRs written before this template are not held to it).
+   decision and the answers from Phase 1. The seeded ADR decides no code:
+   leave the template's `**Issue:**`, `## Scope` and `## Guarantees` out of it
+   (`adlc-adr-check.sh` checks only an ADR that shows one of the three, so ADRs written
+   before this template are not held to it).
 
 7. `CLAUDE.md`
    — if none exists, create one from `templates/host-CLAUDE.md.tmpl`: the one-liner, the

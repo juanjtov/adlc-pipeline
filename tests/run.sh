@@ -1930,8 +1930,9 @@ echo "adr-check (an ADR's Scope is the scope file; each Guarantees row names a t
 AC="$(mktemp -d)"; mkdir -p "$AC/docs/adr" "$AC/tests" "$AC/.adlc/scope" "$AC/bare"
 printf 'def test_expired_token_rejected():\n    pass\nclass TestLogin:\n    def test_ok(self): pass\n' > "$AC/tests/test_login.py"
 adrc() { ( cd "$AC" && bash "$S/adlc-adr-check.sh" "$@" ) >"$AC/out" 2>"$AC/err"; }
-adr() { # <file> <issue|''> <Scope block lines (%b) | - for no section | nofence> <Guarantees rows (%b) | - for no section>
-  { printf '# ADR: x\n\n**Status:** Proposed  ·  **Author:** Architect'; [ -z "$2" ] || printf '  ·  **Issue:** #%s' "$2"
+adr() { # <file> <issue number | header text (%s) | ''> <Scope block lines (%b) | - for no section | nofence> <Guarantees rows (%b) | - for no section>
+  { printf '# ADR: x\n\n**Status:** Proposed  ·  **Author:** Architect'
+    case "$2" in '') ;; *[!0-9]*) printf '  ·  %s' "$2" ;; *) printf '  ·  **Issue:** #%s' "$2" ;; esac
     printf '\n\n## Context\n\nx\n\n'
     case "$3" in -) ;; nofence) printf '## Scope\n\n- src/login/\n\n' ;; *) printf '## Scope\n\nprose\n\n```\n%b```\n\n' "$3" ;; esac
     [ "$4" = - ] || printf '## Guarantees\n\n| Claim | Pinned by |\n|---|---|\n%b\n' "$4"
@@ -1946,19 +1947,24 @@ adr 0007-login.md 12 'src/login/\n# a comment\n\ntests/\n' "$GOOD"
 printf 'docs/adr/0007-login.md\ndocs/guide.md\nsrc/login/\ntests/\n' > "$AC/.adlc/scope/12.txt"
 adrc; check 0 "a resolvable ADR passes (path::node, Class::method, a [param] id, a | in the claim, unenforced with a reason)" $?
 eq 0 "…with nothing on stderr" "$(errs)"
-eq 1 "…and says how many it checked" "$(grep -c 'OK — 1 ADR(s) checked in docs/adr' "$AC/out")"
+eq "adr-check: OK — checked in docs/adr: 0007-login.md" "…and its last line names the ADR it checked (a run on another branch's checkout cannot read as this ADR passing)" "$(tail -1 "$AC/out")"
 adrc docs/adr/; check 0 "the directory can be named, with a trailing slash" $?
 # older ADRs: neither section → skipped and listed; template.md is never an ADR (its placeholder rows would fail)
 printf '# ADR-0001: adopt\n\n## Context\n\nold\n\n## Decision\n\nIn a block, not a section:\n\n```\n## Scope\n## Guarantees\n| a | b |\n```\n' > "$AC/docs/adr/0001-adopt.md"
 cp "$ROOT/templates/adr-template.md" "$AC/docs/adr/template.md"
 adrc; check 0 "an ADR with neither section (written before the template had them) does not fail; nor does template.md" $?
 eq 1 "…it is listed as skipped (a heading inside a fenced block is not a section)" "$(grep -c 'skipped.*: 0001-adopt.md$' "$AC/out")"
+eq "adr-check: OK — checked in docs/adr: 0007-login.md" "…and is not on the checked list" "$(tail -1 "$AC/out")"
+mv "$AC/docs/adr/0007-login.md" "$AC/hold.md"
+adrc; check 0 "only skipped ADRs in the checkout: exit 0" $?
+eq "adr-check: no ADR checked in docs/adr — nothing was verified" "…and the last line says nothing was verified, not OK" "$(tail -1 "$AC/out")"
+mv "$AC/hold.md" "$AC/docs/adr/0007-login.md"
 eq 0 "…and template.md is not mentioned" "$(cat "$AC/out" "$AC/err" | grep -c 'template.md')"
 # the template is in the format the script reads: as an ADR it IS checked, and only its unfilled rows fail
 cp "$ROOT/templates/adr-template.md" "$AC/docs/adr/0002-from-template.md"
 adrc; check 1 "the template, copied unfilled as an ADR, fails" $?
-eq "0002-from-template.md: Guarantees row '<what must stay true>': tests/<file> does not exist|0002-from-template.md: Guarantees row '<a claim no test holds>': unenforced, with no reason|" \
-   "…on its two placeholder rows and nothing else (its sections, block and table parse)" "$(sed 's|^docs/adr/||' "$AC/err" | tr '\n' '|')"
+eq "0002-from-template.md: the header names no issue — write **Issue:** #N above the first '## ' heading, or **Issue:** none|0002-from-template.md: Guarantees row '<what must stay true>': tests/<file> does not exist|0002-from-template.md: Guarantees row '<a claim no test holds>': unenforced, with no reason|" \
+   "…on its unfilled #N and its two placeholder rows, and nothing else (its sections, block and table parse)" "$(sed 's|^docs/adr/||' "$AC/err" | tr '\n' '|')"
 grep -q '\*\*Issue:\*\* #N' "$ROOT/templates/adr-template.md" && ok "the template's header names the issue" || bad "adr-template.md: the header must carry **Issue:** #N"
 rm "$AC/docs/adr/0002-from-template.md"
 # each failure kind, one at a time (the passing ADR above is each one's control)
@@ -1995,9 +2001,9 @@ eq 1 "…with the count on stdout" "$(grep -c '^adr-check: 5 problem(s)' "$AC/ou
 adr 0007-login.md 12 'src/login/\n' "$GOOD"; adr 0008-login-ui.md 12 'tests/\n' "$GOOD"; printf 'src/login/\ntests/\n' > "$AC/.adlc/scope/12.txt"
 adrc; check 0 "two ADRs of one issue: the scope file is compared with the union of their Scopes" $?
 rm "$AC/docs/adr/0008-login-ui.md"
-adr 0007-login.md '' 'src/anything/\n' "$GOOD"
-adrc; check 0 "an ADR that names no issue: Scope is not compared" $?
-eq 1 "…and stdout says so" "$(grep -c '0007-login.md names no issue' "$AC/out")"
+adr 0007-login.md '**Issue:** none' 'src/anything/\n' "$GOOD"
+adrc; check 0 "an ADR tied to no issue says so (**Issue:** none): Scope is not compared" $?
+eq 1 "…and stdout says so" "$(grep -c '0007-login.md is tied to no issue' "$AC/out")"
 adr 0007-login.md 99 'src/anything/\n' "$GOOD"
 adrc; check 0 "no scope file yet (design time): Scope is not compared" $?
 eq 1 "…and stdout says so" "$(grep -c 'no .adlc/scope/99.txt yet' "$AC/out")"
@@ -2006,6 +2012,52 @@ adrc; check 0 "an empty Scope block against a scope file holding only the design
 adr 0007-login.md 12 'src/login/\ntests/\n' "$GOOD"; printf 'docs/adr/0007-login.md\nsrc/login/\ntests/\n' > "$AC/.adlc/scope/12.txt"
 sed 's/$/\r/' "$AC/docs/adr/0007-login.md" > "$AC/crlf" && mv "$AC/crlf" "$AC/docs/adr/0007-login.md"
 adrc; check 0 "a CRLF ADR reads the same" $?
+eq "adr-check: OK — checked in docs/adr: 0007-login.md" "…it is checked, not skipped" "$(tail -1 "$AC/out")"
+# Review fixes. A scope file whose last line has no newline: diff-scope honours that line, so the comparison must too.
+adr 0007-login.md 12 'src/login/\n' "$GOOD"; printf 'src/login/\nsecrets/' > "$AC/.adlc/scope/12.txt"
+adrfail "a scope file's last line with no newline after it is compared (an extra prefix there fails)" ".adlc/scope/12.txt: 'secrets/' is in no Scope section"
+adr 0007-login.md 12 'src/login/\nsecrets/\n' "$GOOD"
+adrc; check 0 "…and counts as present when the ADR's Scope lists it" $?
+# near-miss spellings are read or fail; none of them switches the check off
+printf 'src/login/\nsecrets/\n' > "$AC/.adlc/scope/12.txt"
+for h in '**Issue**: #12' '**Issue:** [#12](https://example.test/i/12)' '**Issue:** #012'; do
+  adr 0007-login.md "$h" 'src/login/\n' "$GOOD"; adrfail "the issue is read from '$h' (the scope file is compared)" ".adlc/scope/12.txt: 'secrets/' is in no Scope section"
+done
+for h in '' 'Issue: #12' '**Issue:** #N' '**Issue:** TBD'; do
+  adr 0007-login.md "$h" 'src/login/\n' "$GOOD"; adrfail "a header that names no issue ('$h') fails" "0007-login.md: the header names no issue"
+done
+{ printf '# ADR: x\n\n## Context\n\n**Issue:** #12 is where this began.\n\n## Scope\n\n```\nsrc/login/\nsecrets/\n```\n\n'
+  printf '## Guarantees\n\n| Claim | Pinned by |\n|---|---|\n%b' "$GOOD"; } > "$AC/docs/adr/0007-login.md"
+adrfail "an issue named below the first '## ' is not the header's" "0007-login.md: the header names no issue"
+nearmiss() { # <Scope heading> <Guarantees heading> → an ADR with one bogus row under those headings
+  printf '# ADR: x\n\n**Issue:** #12\n\n## Context\n\nx\n\n%s\n\n```\nsrc/login/\nsecrets/\n```\n\n%s\n\n| Claim | Pinned by |\n|---|---|\n| x | prose |\n' "$1" "$2" > "$AC/docs/adr/0007-login.md"
+}
+nearmiss '## Scope (declared)' '## Guarantees we make'
+adrfail "'## Scope (declared)' is not the section, and the ADR is checked, not skipped" "0007-login.md: no '## Scope' section (the heading '## Scope (declared)' is not it)"
+eq 1 "…the same for '## Guarantees we make'" "$(grep -c "no '## Guarantees' section (the heading '## Guarantees we make' is not it)" "$AC/err")"
+nearmiss '### Scope' '#### guarantees:'
+adrfail "a Scope / Guarantees heading at another level is checked and fails" "0007-login.md: no '## Scope' section (the heading '### Scope' is not it)"
+nearmiss '## Scope:' '##  Guarantees'
+adrfail "a trailing colon and extra spaces are let through: the sections are read (the bogus row fails)" "Guarantees row 'x': 'prose' is neither"
+eq 1 "…and nothing else is reported" "$(errs)"
+printf '# ADR: x\n\n**Status:** Proposed  ·  **Issue:** #12\n\n## Context\n\nx\n' > "$AC/docs/adr/0007-login.md"
+adrfail "**Issue in the header alone makes it a checked ADR (both sections are missing)" "0007-login.md: no '## Guarantees' section"
+# fences: an inline span that opens a line is not a fence; a longer fence is not closed by a shorter one; an open one fails
+fenced() { # <lines before the sections (%b)>
+  { printf '# ADR: x\n\n**Issue:** #12\n\n## Context\n\n%b\n' "$1"
+    printf '## Scope\n\n```\nsrc/login/\nsecrets/\n```\n\n## Guarantees\n\n| Claim | Pinned by |\n|---|---|\n| x | prose |\n'; } > "$AC/docs/adr/0007-login.md"
+}
+fenced '```code``` at the start of a line is an inline span.\n'
+adrfail "a line that opens with an inline triple-backtick span does not swallow the rest" "Guarantees row 'x': 'prose' is neither"
+fenced '````\n```\n## Scope\n````\n'
+adrfail "a four-backtick block holding a triple-backtick line closes where it should" "Guarantees row 'x': 'prose' is neither"
+eq 1 "…and nothing else is reported (the heading inside it is text)" "$(errs)"
+fenced '~~~\n```\n~~~\n'
+adrfail "a tilde block is not closed by backticks" "Guarantees row 'x': 'prose' is neither"
+printf '# ADR-0003: old\n\n## Context\n\n```\nnever closed\n\n## Decision\n\nx\n' > "$AC/docs/adr/0003-open.md"
+adrfail "a fenced block that is never closed fails, even in an ADR with no section (it may hide them)" "0003-open.md: the fenced block opened on line 5 is never closed"
+rm "$AC/docs/adr/0003-open.md"
+adr 0007-login.md 12 'src/login/\ntests/\n' "$GOOD"; printf 'docs/adr/0007-login.md\nsrc/login/\ntests/\n' > "$AC/.adlc/scope/12.txt"
 # bad arguments, and a file that cannot be read
 adrc docs/adr extra;          check 2 "two arguments is an error" $?
 adrc --fix;                   check 2 "an option is an error" $?
@@ -2015,6 +2067,9 @@ if [ "$(id -u)" != 0 ]; then
   adrc; check 1 "an ADR that cannot be read is a failure, not a skip" $?
   eq 1 "…named on stderr" "$(grep -c '0007-login.md: could not be read' "$AC/err")"
   chmod 644 "$AC/docs/adr/0007-login.md"
+  chmod 000 "$AC/.adlc/scope/12.txt"
+  adrfail "a scope file that cannot be read is a failure, not 'no scope file yet'" "0007-login.md: .adlc/scope/12.txt could not be read"
+  chmod 644 "$AC/.adlc/scope/12.txt"
 fi
 adrc; check 0 "…and the fixture passes again once readable" $?
 rm -rf "$AC"
@@ -2027,7 +2082,10 @@ grep -q 'not among your granted commands' "$RA" && ok "role-architect says the A
 eq 0 "…and no lane grants it or calls it (the grants are as they were)" "$(cat "$ROOT"/templates/github/adlc-*.yml | grep -c 'adlc-adr-check')"
 grep -q '\.adlc/scripts/adlc-adr-check\.sh' "$ROOT/templates/RUNBOOK.md.tmpl" && ok "RUNBOOK's conformance stage names the script" || bad "RUNBOOK must name adlc-adr-check.sh"
 grep -q '`adlc-adr-check`' "$ROOT/skills/bootstrap/SKILL.md" && ok "bootstrap lists it among the scripts it copies" || bad "bootstrap must list adlc-adr-check"
-grep -q "leave the" "$ROOT/skills/bootstrap/SKILL.md" && grep -q 'template.s `## Scope` and `## Guarantees` out of it' "$ROOT/skills/bootstrap/SKILL.md" && ok "bootstrap seeds the first ADR without the two sections (so it is skipped, not failed)" || bad "bootstrap must leave Scope/Guarantees out of the seeded ADR"
+grep -q 'leave the template.s `\*\*Issue:\*\*`, `## Scope` and `## Guarantees` out of it' "$ROOT/skills/bootstrap/SKILL.md" && ok "bootstrap seeds the first ADR without the issue field and the two sections (so it is skipped, not failed)" || bad "bootstrap must leave **Issue:**, Scope and Guarantees out of the seeded ADR"
+grep -q 'is not among the ADRs its last line names' "$RA" && ok "role-architect: an ADR missing from the checked list means the check did not run" || bad "role-architect must say what a missing ADR on the checked list means"
+grep -q 'cannot switch branches' "$RA" && ok "role-architect says it cannot check the PR branch out itself" || bad "role-architect must say it cannot switch branches"
+grep -q 'gh pr checkout <n>' "$ROOT/templates/RUNBOOK.md.tmpl" && ok "RUNBOOK Stage 4 checks the PR branch out before the Architect is invoked" || bad "RUNBOOK Stage 4 must check out the PR branch first"
 grep -q 'adlc-adr-check\.sh  ' "$ROOT/README.md" && ok "README's layout tree lists the script" || bad "README layout tree must list adlc-adr-check.sh"
 
 echo "security-gate (text classifiers over LLM output):"
