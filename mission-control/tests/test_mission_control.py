@@ -44,7 +44,10 @@ class FakeRepos:
         return REPO, 'feat/3-password-reset'
 
     def root(self, cwd):
-        return ''   # no checkout to bound the walk by: the markers at or above the folder decide
+        return '/'   # the whole disk is the checkout: the markers at or above the folder decide
+
+    def main_root(self, cwd):
+        return ''
 
 
 def seeded(data=None):
@@ -198,6 +201,43 @@ class Intake(unittest.TestCase):
         self.assertEqual((run['ended'], run['report']), (t + 60, 'Opened PR #9.'))
         self.assertIsNotNone(self.store.steps('s-build')[1]['ended'])
 
+    def test_which_repo_a_session_adds_is_decided_on_real_checkouts(self):
+        """session_repo() against git itself: the fakes above cannot show that git's own spelling of a path is met."""
+        def git(cwd, *args):
+            subprocess.run(['git', '-C', cwd, '-c', 'user.name=t', '-c', 'user.email=t@example.invalid', '-c', 'commit.gpgsign=false'] + list(args),
+                           check=True, capture_output=True)
+        root = tempfile.mkdtemp()   # on macOS this path is a symlink away from the one git prints
+        try:
+            shop, nested = os.path.join(root, 'shop'), os.path.join(root, 'shop', 'vendor', 'nested')
+            for repo, origin in ((shop, 'git@github.com:Acme/Shop.git'), (nested, 'https://example.org/third/party')):
+                os.makedirs(os.path.join(repo, 'src'))
+                git(repo, 'init', '-q', '-b', 'main')
+                git(repo, 'remote', 'add', 'origin', origin)
+            os.makedirs(os.path.join(shop, '.adlc', 'scripts'))                                  # the marker, not tracked: as on a branch older than adoption
+            repos = ingest.Repos()
+            self.assertEqual(ingest.session_repo(repos, os.path.join(shop, 'src')), 'acme/shop')
+            self.assertEqual(ingest.session_repo(repos, shop), 'acme/shop')
+            self.assertIsNone(ingest.session_repo(repos, os.path.join(nested, 'src')))             # a clone inside the adopted folder
+            self.assertIsNone(ingest.session_repo(repos, nested))
+            self.assertIsNone(ingest.session_repo(repos, os.path.join(nested, '.git')))            # git names no top in there: nothing is added
+            self.assertIsNone(ingest.session_repo(repos, root))                                    # no checkout at all
+            link = os.path.join(root, 'link')
+            os.symlink(os.path.join(nested, 'src'), link)
+            self.assertIsNone(ingest.session_repo(repos, link))                                    # reached through a link, still the nested clone
+            # a linked worktree inside the adopted folder is the repo it was added from, also when its own checkout has no marker
+            git(shop, 'commit', '-q', '--allow-empty', '-m', 'first')
+            inside, beside = os.path.join(shop, '.claude', 'worktrees', 'wt'), os.path.join(root, 'beside')
+            git(shop, 'worktree', 'add', '-q', '-b', 'wt-inside', inside)
+            git(shop, 'worktree', 'add', '-q', '-b', 'wt-beside', beside)
+            self.assertEqual(ingest.session_repo(repos, inside), 'acme/shop')
+            self.assertIsNone(ingest.session_repo(repos, beside))                                  # outside the adopted folder, no marker above it: the guard is not in scope there either
+            # ...but a worktree of the nested clone is still the nested clone
+            git(nested, 'commit', '-q', '--allow-empty', '-m', 'first')
+            git(nested, 'worktree', 'add', '-q', '-b', 'wt', os.path.join(root, 'nested-wt'))
+            self.assertIsNone(ingest.session_repo(repos, os.path.join(root, 'nested-wt')))
+        finally:
+            shutil.rmtree(root)
+
     def test_a_session_opening_in_an_adopted_repo_puts_it_on_the_menu(self):
         ing = ingest.Ingest(self.store, repos=FakeRepos(), on_repo=self.store.add_repo)
         root = tempfile.mkdtemp()
@@ -231,11 +271,13 @@ class Intake(unittest.TestCase):
             self.assertTrue(ingest.adopted(nested))                                            # the guard's rule: a marker anywhere above
             self.assertFalse(ingest.adopted(nested, top))
             self.assertTrue(ingest.adopted(inside, os.path.join(root, 'shop')))                # the marker at the top itself counts
-            bounded = type('Repos', (), {'lookup': staticmethod(lambda cwd: ('third/party', 'main')), 'root': staticmethod(lambda cwd: top)})()
+            bounded = type('Repos', (), {'lookup': staticmethod(lambda cwd: ('third/party', 'main')), 'root': staticmethod(lambda cwd: top),
+                                         'main_root': staticmethod(lambda cwd: '')})()
             self.assertFalse(ingest.Ingest(self.store, repos=bounded, on_repo=self.store.add_repo).hook(fx.hook('SessionStart', agent=None, cwd=nested)))
             self.assertEqual(self.store.repos(), [REPO])
             # a path longer than any real one is refused before the walk (it costs a few file checks per level)
-            self.assertFalse(ingest.adopted('/a' * 3000))
+            self.assertTrue(ingest.adopted(os.path.join(root, 'shop', 'a' * 200)))            # a folder that is not there walks up like any other
+            self.assertFalse(ingest.adopted(os.path.join(root, 'shop') + '/a' * 3000))           # under a marker, and still refused: the cap, not the walk
             self.assertFalse(ingest.adopted(None))
             # a path git cannot take is refused by the lookup, not raised to the request handler
             self.assertFalse(ingest.Ingest(Store(), on_repo=self.store.add_repo).hook(fx.hook('SessionStart', agent=None, cwd=inside + '\0x')))
@@ -780,7 +822,7 @@ class OverHttp(unittest.TestCase):
         try:
             os.makedirs(os.path.join(root, '.adlc', 'scripts'))
             self.app.ingest.repos = type('Repos', (), {'lookup': staticmethod(lambda cwd: ('acme/other', 'main') if cwd == root else (REPO, 'main')),
-                                                       'root': staticmethod(lambda cwd: '')})()
+                                                       'root': staticmethod(lambda cwd: '/'), 'main_root': staticmethod(lambda cwd: '')})()
             out = self.hook({'hook_event_name': 'SessionStart', 'session_id': 's-user', 'cwd': root, 'source': 'startup'})
             self.assertEqual((out.returncode, out.stdout, out.stderr), (0, '', ''))
             self.assertEqual(len(self.arrived), 1)
@@ -901,9 +943,9 @@ class OverHttp(unittest.TestCase):
 class Launcher(unittest.TestCase):
     """server.py as the user starts it: the marker file is what tells the hook where to send."""
 
-    def start(self, home, port, *args):
+    def start(self, home, port, *args, cwd=None):
         env = dict(os.environ, ADLC_MC_HOME=home, PYTHONUNBUFFERED='1')
-        return subprocess.Popen([sys.executable, SERVER, '--port', str(port), '--repo', 'Acme/Shop'] + list(args), env=env,
+        return subprocess.Popen([sys.executable, SERVER, '--port', str(port), '--repo', 'Acme/Shop'] + list(args), env=env, cwd=cwd,
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
 
     def wait_for(self, check, what):
@@ -946,7 +988,20 @@ class Launcher(unittest.TestCase):
             unknown = self.start(home, port, '--repo', 'Acme/Other')
             out, _ = unknown.communicate(timeout=10)
             self.assertIn('already running at http://localhost:%d. acme/other is not on its menu yet' % port, out)
-            self.assertIn('not set up with /adlc-init' if not ingest.adopted(os.getcwd()) else 'a new Claude Code session starts', out)
+            # what it says a session would do is the server's own rule, for the folder the command ran in
+            plain, other = tempfile.mkdtemp(), tempfile.mkdtemp()
+            try:
+                out, _ = self.start(home, port, '--repo', 'Acme/Other', cwd=plain).communicate(timeout=10)
+                self.assertIn('appears when a pipeline agent runs in it. A Claude Code session opening in the folder you are in does not add it', out)
+                os.makedirs(os.path.join(other, '.adlc', 'scripts'))
+                for args in (('init', '-q'), ('remote', 'add', 'origin', 'git@github.com:Acme/Other.git')):
+                    subprocess.run(['git', '-C', other] + list(args), check=True, capture_output=True)
+                out, _ = self.start(home, port, '--repo', 'Acme/Other', cwd=other).communicate(timeout=10)
+                self.assertIn('appears when a Claude Code session starts in this folder', out)
+                out, _ = self.start(home, port, '--repo', 'Acme/Elsewhere', cwd=other).communicate(timeout=10)   # adopted, but another repo
+                self.assertIn('acme/elsewhere is not on its menu yet: it appears when a pipeline agent runs in it', out)
+            finally:
+                shutil.rmtree(plain); shutil.rmtree(other)
             # the demo keeps to itself: no marker of its own, so agents never report to made-up data
             demo_port = self.free_port()
             demo = self.start(tempfile.mkdtemp(), demo_port, '--demo')
