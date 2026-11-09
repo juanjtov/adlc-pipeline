@@ -24,14 +24,14 @@ A request normally passes two gates. At Gate 1 you approve the plan and pick the
 
 ## The team
 
-Five AI agents do the work, and one person, called the Principal, owns the decisions. Each agent gets only the tools its job needs: its file names them, and each automated lane grants a fixed list. A guard built into the plugin checks every shell command, and for three of the roles also where a file edit lands and which label goes on an issue. The table shows each role's rules; the list under it says what holds each one.
+Five AI agents do the work, and one person, called the Principal, owns the decisions. Each agent gets only the tools its job needs: its file names them, and each automated lane grants a fixed list. A guard built into the plugin, when it is on, checks every shell command an agent types, and for three of the roles also where a file edit lands and which label goes on an issue. The table shows each role's rules; the list under it says what holds each one.
 
 | Who | Their one job | What they may change | What they never do |
 | --- | --- | --- | --- |
 | **Product Analyst** | Turns a request into user stories with testable acceptance criteria, and recommends a lane (fast or full) | GitHub issue comments and labels only | Write code, or pick the lane itself |
 | **Architect** | Writes the design decision (an ADR) and splits the work into tasks, each listing the exact files allowed. Later checks the pull request matches that design | Files under `docs/` only | Touch application code, or merge |
 | **Builder** | Writes the code, plus a test for every acceptance criterion, and opens a pull request | Code, on its own feature branch | Merge, deploy, or push to main |
-| **Adversarial Reviewer** | Sees only the change and tries to break it: edge cases, security holes, functions that don't exist | Nothing; it can only comment | Edit code, change labels, or merge |
+| **Adversarial Reviewer** | Starts fresh, is told to read only the change and what it was meant to do, and tries to break it: edge cases, security holes, functions that don't exist | Nothing; it can only comment | Edit code, change labels, or merge |
 | **QA & Release-Ops** | Runs the full test suite, fills test gaps, and drafts the merge-and-deploy proposal | Test folders only | Merge, deploy, or run a database migration |
 | **The Principal (you)** | Approves the plan at Gate 1 and merges at Gate 2 | Everything | Nothing is done in your name without your OK |
 
@@ -52,7 +52,7 @@ A request goes through eight steps. Agents do five of them; the first step and t
 3. **Gate 1: you approve the plan.** You read the stories and pick the lane: `stage:design` for the full pipeline, or `stage:fast` for the fast lane. With autopilot on, a full-lane plan is approved for you; the fast lane always waits for you.
 4. **The Architect designs it.** It writes an ADR and a task list in which every task names the exact files that may change. In the automated lane the design is saved on its own branch, `adlc/design-<issue>`, and the Builder starts from there, so the ADR travels in the same pull request. The issue then moves to `stage:build`.
 5. **The Builder writes the code.** On its own branch it implements the tasks and lists the files it may touch in a scope file, `.adlc/scope/<issue>.txt`. It adds a test for each acceptance criterion, runs the tests and opens a pull request.
-6. **Two independent reviews.** The Adversarial Reviewer tries to break the change, and the Architect checks it matches the design. If either asks for changes, the Builder fixes them and both run again. A round is one review that sent the pull request back: the first three each get a Builder fix, and a fourth goes to a person instead. The automated fix loop then tags the pull request `needs:human`; when you drive by hand, the runbook has you run the same check before each return to the Builder. The count is read from the pull request's own record (a label the review lane adds, and the reviewers' verdict comments), not from its commits, so it is an estimate: a request for changes that left neither is not counted.
+6. **Two independent reviews.** The Adversarial Reviewer tries to break the change, and the Architect checks it matches the design. If either asks for changes, the Builder fixes them and both run again. A round is one review that sent the pull request back: the first three each get a Builder fix, and a fourth goes to a person instead. The automated fix loop then tags the pull request `needs:human`; when you drive by hand, the runbook has you run the same check before each return to the Builder. The count is read from the pull request's own record (a label the review lane adds, and the verdict comments on the pull request, whoever wrote them), not from its commits, so it is an estimate: a request for changes that left neither is not counted.
 7. **QA proves it works.** It runs the full test suite, fills missing tests and does a security pass. If all is clean, it moves the issue to `gate:deploy` and posts a Proposed Action Card: the action, its risk, the evidence and how to undo it.
 8. **Gate 2: you merge.** You read the card and the pull request, then merge and deploy yourself. Agents may not: the guard blocks a merge an agent types as a command.
 
@@ -76,7 +76,7 @@ The Retro row is one half of an improvement loop. Both halves only propose: each
 
 - **Retro** (`/adlc:retro`) asks what keeps going wrong in the code. It gathers the findings reviewers left on past pull requests, ranks the kinds that recur, and proposes the cheapest lasting fix for each: a regression test first, then a CI check, then a convention.
 - **Cycle retro** (`/adlc:cycle-retro`) asks where a run's time and money go. It reads a run ledger (seconds, tokens and cost per agent run, taken from Mission Control's store, a telemetry collector or GitHub Actions run times, never from an agent's own report) and how long each issue spent under each label. It proposes changes to the pipeline's shape: what goes to the fast lane, what a reviewer reads, which model a step runs on. Token and cost figures exist only where telemetry is on; run on GitHub's runners it sees times and fix rounds, not tokens.
-- **Follow-up chains.** A leftover that does not block a pull request becomes a follow-up issue, and when each fix draws the next one the pipeline feeds itself. Both reviews list every chain three or more issues deep and put it to you as a decision: accept the risk by labelling the chain's first issue `adlc:accepted-risk`, or open one issue that replaces the approach. QA is told to file one follow-up per pull request and none in a chain you accepted. These are instructions and a report: nothing blocks an agent that files an issue anyway.
+- **Follow-up chains.** A leftover that does not block a pull request becomes a follow-up issue, and when each fix draws the next one the pipeline feeds itself. Both retros list every chain three or more issues deep and put it to you as a decision: accept the risk by labelling the chain's first issue `adlc:accepted-risk`, or open one issue that replaces the approach. QA is told to file one follow-up per pull request and none in a chain you accepted. These are instructions and a report: nothing blocks an agent that files an issue anyway.
 
 ## Two lanes
 
@@ -123,7 +123,7 @@ You also choose how much runs on its own:
 | Auto-start | Filing the Requirement form, or adding `adlc:auto` to an intake issue, starts the Analyst. Approving Gate 1 starts the Architect | Gate 1 and Gate 2 |
 | Full autopilot | Gate 1 is approved for you, full lane only | Gate 2: review and merge |
 
-The local autopilot is a set of instructions your session follows, not a workflow: the checks it calls are the scripts the automated lanes call, and keeping them in order is the model's job. It runs only on an issue you filed, approves Gate 1 only for a full-lane recommendation, never starts the fast lane, and never merges or deploys; when it cannot go on it labels the work `needs:human` and says why. It is the general form of a recipe one adopting repo wrote for itself and ran its pull requests through. As shipped in the plugin it has not yet been run end to end. Use it or the automated agent lanes on a repo, not both: where the lanes are installed, the label moves it makes start them too.
+The local autopilot is a set of instructions your session follows, not a workflow: the checks it calls are the scripts the automated lanes call, and keeping them in order is the model's job. It is told to run only on an issue you filed and a pull request opened under your login, to approve Gate 1 only for a full-lane recommendation, never to start the fast lane, and never to merge or deploy; when it cannot go on it is told to label the work `needs:human` and say why. It is the general form of a recipe one adopting repo wrote for itself and ran its pull requests through. As shipped in the plugin it has not yet been run end to end. Use it or the automated agent lanes on a repo, not both: where the lanes are installed, the label moves it makes start them too.
 
 In the automated modes each agent step installs the plugin on GitHub's runner and runs as the plugin's own agent for its role, on the plugin's default model, with a fixed list of tools. Those agents, their skills and the guard come from that install and are not copied into your repo; the workflow files and the small check scripts are.
 
@@ -156,7 +156,7 @@ Every request becomes one GitHub issue labeled `stage:intake`, and `/adlc-intake
 Mission Control is a live page of the line on your own machine: one station per agent, the two gates, and each request moving between them. Open it with `/adlc-mission-control`, or try it with made-up data by running `adlc-mission-control --demo --open`.
 
 - **It only reads.** It never changes a label, posts a comment or merges.
-- **One copy serves every repo.** A menu at the top switches between the repos on this machine that are set up with the pipeline. A repo joins the menu when you start Mission Control from it, or once a Claude Code session or a pipeline agent starts in it while Mission Control is running.
+- **One copy serves every repo.** A menu at the top switches between the repos on this machine that are set up with the pipeline. A repo joins the menu when it is the one you start Mission Control from, or, while Mission Control is running, once a new Claude Code session starts in a checkout set up with the pipeline or a pipeline agent runs in the repo.
 - **It stays local.** GitHub is read through your own `gh` login, and what it records is kept in one file on your machine.
 - **It sees agents on this machine.** Runs on GitHub's runners show their GitHub state (labels, pull request, verdicts), not their steps or tokens.
 - **Token and cost figures are opt-in.** They appear in new sessions once you add the settings in `templates/settings.mission-control.json`; the command offers to do it.
@@ -170,7 +170,7 @@ It needs Python 3.9 or newer, `git`, `curl` and a signed-in `gh`. There are no p
 | --- | --- |
 | Acceptance criterion (AC) | A pass/fail test of whether a story is done, written as Given / When / Then |
 | ADR | Architecture Decision Record: a short file explaining a design choice, the options rejected and the trade-offs |
-| Adversarial review | A review by an agent that sees only the change and assumes it is wrong until shown otherwise |
+| Adversarial review | A review by an agent that starts fresh, is told to read only the change and what it was meant to do, and assumes it is wrong until shown otherwise |
 | Agent | An AI worker with one role, its own instructions and a fixed set of allowed tools |
 | Author/verifier separation | The rule that whoever builds something never checks, merges or deploys it |
 | Autopilot | Two things share the name. The `adlc:autopilot` label, in the automated lanes, approves Gate 1 for you, in the full lane only. `/adlc:autopilot <issue>` is its local counterpart: your own session runs the steps for one issue up to Gate 2 |

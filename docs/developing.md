@@ -20,7 +20,7 @@ request.
 
 | Command | What it covers | Needs |
 |---|---|---|
-| `bash tests/run.sh` | Every script under `templates/scripts/`, the guard hook, the workflow templates (their triggers, their agent wiring, several steps run as shipped against a stub `gh`), the pre-commit hook, the skills' and agents' wiring, and the docs checks below. Ends `== N passed, 0 failed ==`; exit 0 means all passed. | `bash`, `python3`, `git`. With `jq` and `sqlite3` missing, the cycle-retro ledger checks are skipped and the run says so. |
+| `bash tests/run.sh` | Every script under `templates/scripts/`, the guard hook, the workflow templates (their triggers, their agent wiring, several steps run as shipped against a stub `gh`), the pre-commit hook, the skills' and agents' wiring, and the docs checks below. Ends `== N passed, 0 failed ==`; exit 0 means all passed. | `bash`, `python3`, `git`, `jq`: without one of them the run fails. Without `sqlite3` the cycle-retro ledger checks are skipped and the run says so. |
 | `python3 -m unittest discover -s mission-control/tests` | Mission Control: the store, the hook reporter, the GitHub reader, the server over a real local socket. | Python 3.9 or newer, standard library only. |
 
 `tests/guard-cases.sh` is not run by itself. `tests/run.sh` sources it: it is the table of
@@ -41,13 +41,16 @@ Some checks in `tests/run.sh` fail when you change something that is correct to 
 is the test doing its job: it makes the change visible in review. Change the pin in the same
 commit, and say so in the pull request.
 
-- **Each lane's agent and tool grant.** Which agent every workflow step runs as, and its exact
-  `--allowedTools`. Widening a grant has to change the pinned value too.
+- **Each lane's agent and tool grant.** Which agent every workflow step runs as is pinned in
+  the test. A role step's exact `--allowedTools` must equal the `lanes` entry of the role's
+  contract (`contracts/<role>.json`), so widening a grant has to change the contract too
+  (`contracts/README.md`, "Changing a contract"). The retro's two steps run no role: their
+  grant is pinned in the test itself.
 - **Each lane names its role skill first**, and the agents stay thin wrappers over the role
   skills, in the plugin's copies and in the vendored templates alike.
 - **The labels** `labels.sh` creates, and the ones the doctor expects.
-- **Wording that caused a bug once.** For example, no lane, RUNBOOK or role prompt may spell a
-  raw `--add-label stage:…` pair; they call `adlc-relabel.sh`.
+- **Wording that caused a bug once.** For example, no lane, RUNBOOK or autopilot skill may spell
+  a raw `--add-label stage:…` pair; they call `adlc-relabel.sh`.
 - **The reference page.** Every `ADLC_*` setting the code reads, every marker and every label
   must be in [docs/reference.md](reference.md). Add the row with the code.
 - **The marketplace pin.** When the `ref` in `.claude-plugin/marketplace.json` is not

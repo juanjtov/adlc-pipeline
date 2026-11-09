@@ -51,7 +51,7 @@ the installed plugin, so those parts need no refresh.
   page listed the labels. Nothing told a contributor how to run the tests or what they pin, the
   Mission Control README did not say what is stored or for how long, and the explainer was last
   checked against the code on 2026-10-06. New `docs/reference.md`, linked from the README, has
-  three tables: every `ADLC_*` variable the code reads (what it does, its default, what reads
+  three sections: every `ADLC_*` variable the code reads (what it does, its default, what reads
   it, a user setting or not), with the two repository secrets and the Claude Code settings the
   templates write; every marker in the form its parser takes, who writes it, what reads it, and
   whether it decides what a lane does or is a record; every label, who applies it and what

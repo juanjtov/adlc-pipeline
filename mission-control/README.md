@@ -98,8 +98,8 @@ page still shows the line and every step; the token and cost figures stay empty.
   `~/.adlc/mission-control/` (or the folder `ADLC_MC_HOME` names). Nothing is stored anywhere
   else, and `--demo` stores nothing at all.
 - **What.** The runs, steps and model replies described above, the names of the repos on the
-  menu, and a mirror of what was last read from GitHub (issues, pull requests, label history,
-  comments).
+  menu, the time telemetry last arrived, and a mirror of what was last read from GitHub (issues,
+  pull requests, label history, comments).
 - **For how long.** Nothing expires. Runs, steps and replies are never removed by age, and no
   command removes them. The mirror's issues and pull requests are replaced on every read; its
   label history and comments only grow.

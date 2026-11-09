@@ -80,7 +80,7 @@ for i, (n, tip) in enumerate(lanes):
     text(cx, 291, n, "clu-y lab-m", anchor="middle", size=8)
 a(f'<line x1="955" y1="{CY+18}" x2="955" y2="{CY+CH-18}" stroke="#3A4A78" stroke-width="1"/>')
 text(980, 200, "OR BY HAND", "clu-e", size=8.5, weight=700)
-icon("terminal", 1000, 242, 38, "ic-w", title="Local recipe: you run each agent yourself in Claude Code, following the generated RUNBOOK.md. The recommended way to start. /adlc:autopilot <issue> runs the same steps for one issue from your own session, up to a QA-approved PR at Gate 2; as shipped in the plugin it has not yet been run end to end.")
+icon("terminal", 1000, 242, 38, "ic-w", title="Local recipe: you run each agent yourself in Claude Code, following the generated RUNBOOK.md. The recommended way to start. /adlc:autopilot <issue> runs the same steps for one issue from your own session, up to a reviewed PR at Gate 2 (QA-approved on the full lane); as shipped in the plugin it has not yet been run end to end.")
 text(1028, 238, "Claude Code", "clu-x", size=12.5, weight=700)
 text(1028, 254, "you run each lane", "clu-y", size=9.5)
 text(1028, 267, "from the runbook", "clu-y", size=9.5)
@@ -148,7 +148,7 @@ flow("M367,610 C390,610 410,610 432,610", "fl-ind fl-thick", "arrow-ind")
 label(400, 634, "gate:stories", "lbl-i", size=9)
 # optional autopilot: approves Gate 1 for you, into the full lane only
 node("bolt", 420, 476, "Autopilot", "optional · full lane only", size=26, cls="ic-l", tile=None, dashed=True, label_size=11,
-     title="adlc:autopilot label on an issue: adlc-intake.yml approves Gate 1 for you when the Analyst's verdict is FULL. A FAST verdict still waits for you. Gate 2 is never automated. /adlc:autopilot <issue> is the local counterpart, run from your own session.")
+     title="adlc:autopilot label on an issue: adlc-intake.yml approves Gate 1 for you unless the Analyst's verdict is FAST. A FAST verdict still waits for you. Gate 2 is never automated. /adlc:autopilot <issue> is the local counterpart, run from your own session.")
 a('<path d="M420,524 C420,552 472,546 478,572" class="fl-teal" style="stroke-dasharray:5 4" marker-end="url(#arrow-teal)"/>')
 label(447, 547, "can approve", "lbl-t", size=9)
 
@@ -162,7 +162,7 @@ node("api", 770, AY, "Builder", "code + tests, a PR", size=50, cls="ic-l", tile=
      title="Builder (agents/builder.md; its prompt is skills/role-builder): implements on feat/<issue>-<slug>, records the files it may touch in .adlc/scope/<issue>.txt, a test per acceptance criterion (SN-ACN ids), runs the project's pass/fail command, opens a PR. Never merges, never pushes to main.")
 step(736, 458, 5)
 node("eye", 920, AY, "Two reviewers", "break it · match design", size=50, cls="ic-l", tile="tile-l",
-     title="Adversarial Reviewer (agents/adversarial-reviewer.md; its prompt is skills/role-adversarial-reviewer): fresh context, sees only the diff, tries to break it, ends with ADLC-ADV: PASS or CHANGES. Then the Architect checks the PR against the design: ADLC-ARCH: PASS or CHANGES.")
+     title="Adversarial Reviewer (agents/adversarial-reviewer.md; its prompt is skills/role-adversarial-reviewer): fresh context, told to read only the diff and its criteria, tries to break it, ends with ADLC-ADV: PASS or CHANGES. Then the Architect checks the PR against the design: ADLC-ARCH: PASS or CHANGES.")
 step(886, 458, 6)
 node("check", 1070, AY, "QA", "tests + security", size=50, cls="ic-l", tile="tile-l",
      title="QA & Release-Ops (agents/qa-release-ops.md; its prompt is skills/role-qa-release-ops): runs the full battery, writes missing tests (test folders only), runs the security gate, then moves the issue to gate:deploy and posts a Proposed Action Card. Never merges or deploys.")
@@ -192,7 +192,7 @@ node("api", 620, BY, "Builder", "small change + test", size=50, cls="ic-l", tile
 node("gauge", 790, BY, "Size check", "small, nothing sensitive", size=50, cls="ic-l2", tile="plate",
      title="adlc-triage.sh re-checks the real diff (in the Actions fast lane and under /adlc:autopilot; by hand in the local recipe, where a plain file list checks count and paths but skips the line limit and cannot see a submodule): default max 5 files and 40 changed lines, and no paths named for migrations, auth, security or infra, no CI or pipeline files, dependency manifests (.gitmodules among them) or secrets. A change to a submodule's pointer is never fast-eligible: it is one line in a diff however much code it brings in. It goes by size, file paths and entry type, not by what the code does. A change that fails goes to the full lane.")
 node("eye", 960, BY, "Reviewer", "break it + security", size=50, cls="ic-l", tile="tile-l",
-     title="Adversarial Reviewer on the fast lane: diff + change brief only, walks every security-gate attack class, ends with ADLC-ADV: PASS or CHANGES.")
+     title="Adversarial Reviewer on the fast lane: told to read only the diff and the change brief, and to walk every security-gate attack class; ends with ADLC-ADV: PASS or CHANGES.")
 flow("M656,730 C690,730 720,730 752,730", "fl-ind", "arrow-ind")
 label(705, 752, "opens a PR", "lbl-i", size=9)
 flow("M826,730 C860,730 890,730 922,730", "fl-ind", "arrow-ind")
@@ -244,7 +244,7 @@ nets = [("lock", "Guard hook", "no merge, no push", "hooks/adlc_guard.py, a PreT
         ("json", "Verdict reader", "reads PASS/CHANGES", "adlc-verdict.sh: parses the reviewers' ADLC-ADV / ADLC-ARCH lines; control never trusts GitHub review state."),
         ("sync", "Fix cap", "then a person", "adlc-fix-cap.sh: counts how many times a review sent this PR back (its adlc:changes-requested label events or its CHANGES verdict comments, whichever is more); past 3 the fix lane tags the PR needs:human. The RUNBOOK and /adlc:autopilot run the same check in the local recipe."),
         ("terminal", "Pre-commit", "same check, locally", "templates/hooks/pre-commit: runs the scope check before each local commit."),
-        ("gear", "Doctor", "checks the setup", "adlc-doctor.sh: fails a setup with missing deny rules, unfilled placeholders, lanes that cannot run their agent, missing guard scripts, skills, agent copies or labels, an open issue carrying two state labels, or GitHub Actions blocked (every recent run failed within a minute with no step run), and reports whether the default branch has a merge gate.")]
+        ("gear", "Doctor", "checks the setup", "adlc-doctor.sh: fails a setup with missing deny rules, unfilled placeholders, lanes that cannot run their agent, missing guard scripts, skills, agent copies or labels, an open issue carrying two state labels, or GitHub Actions blocked (the recent runs all failed within a minute and the latest ran no step), and reports whether the default branch has a merge gate.")]
 for i, (g, t, s, tip) in enumerate(nets):
     cx = 302 + i * 92
     icon(g, cx, SY + 56, 28, "ic-l2", title=tip)
