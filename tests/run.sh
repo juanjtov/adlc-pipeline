@@ -348,13 +348,15 @@ here() { [ "$(pwd -P)" = "$(cd "$DFX_ROOT" && pwd -P)" ]; }
 case "$*" in
   "auth status"*) [ -e "$DFX/noauth" ] && exit 1; exit 0 ;;
   "label list"*)  here && printf '%s\n' stage:intake gate:stories stage:design stage:build stage:qa gate:deploy; exit 0 ;;
-  "repo view"*|"api "*|"issue list"*|"pr list"*) here || { echo "fake gh: asked from $PWD, not the fixture root" >&2; exit 1; } ;;
+  "repo view"*|"api "*|"issue list"*|"pr list"*|"run "*) here || { echo "fake gh: asked from $PWD, not the fixture root" >&2; exit 1; } ;;
 esac
 case "$1 $2" in
-  "issue list"|"pr list")
-    k="${1}s"; [ -e "$DFX/fail-$k" ] && { echo '{"message":"Server Error"}' >&2; exit 1; }
+  "issue list"|"pr list"|"run list"|"run view")
+    # issues / prs / runs: a JSON list in $DFX/<k> (none = an empty list); run view: $DFX/jobs (none = the call fails)
+    case "$1 $2" in "run view") k=jobs ;; *) k="${1}s" ;; esac
+    [ -e "$DFX/fail-$k" ] && { echo '{"message":"Server Error"}' >&2; exit 1; }
     f=.; while [ $# -gt 0 ]; do [ "$1" = "--jq" ] && f="$2"; shift; done
-    if [ -e "$DFX/$k" ]; then jq -r "$f" "$DFX/$k"; else echo '[]' | jq -r "$f"; fi; exit $? ;;
+    if [ -e "$DFX/$k" ]; then jq -r "$f" "$DFX/$k"; elif [ "$k" = jobs ]; then echo 'run not found' >&2; exit 1; else echo '[]' | jq -r "$f"; fi; exit $? ;;
 esac
 case "$*" in
   "repo view"*)                 k=default ;;
@@ -422,6 +424,49 @@ GATE=$(DFX="$FIX/fx" DFX_ROOT="$FIX" PATH="$FIX/bin:$PATH" bash "$S/adlc-doctor.
 eq yes "…and says so" "$(says_gate "skipped label check (gh not available/authenticated)")"
 eq 0 "…no listing is made" "$(grep -cE '^(issue|pr) list ' "$FIX/fx/calls")"
 rm -f "$FIX/fx/noauth" "$FIX/fx/fail-issues" "$FIX/fx/issues" "$FIX/fx/prs"
+# is Actions alive? (issue 34): an exhausted budget fails every run within seconds with no step run
+R() { jq -cn --argjson id "$1" --arg c "$2" --argjson s "$3" '{databaseId: $id, status: "completed", conclusion: $c, createdAt: "2026-10-13T02:37:00Z", updatedAt: ("2026-10-13T02:37:00Z" | fromdate + $s | todate)}'; }
+J() { jq -cn --arg c "$1" '{jobs: [{name: "test", conclusion: "failure", steps: (if $c == "" then [] else [{name: "Set up job", conclusion: $c}] end)}]}'; }
+ac() { # <runs json | -> <jobs json | -> : a sound gate fixture, then the runs
+  gate true 1 none
+  [ "$1" = - ] || printf '%s' "$1" > "$FIX/fx/runs"
+  [ "$2" = - ] || printf '%s' "$2" > "$FIX/fx/jobs"
+  : > "$FIX/fx/calls"
+  GATE=$(DFX="$FIX/fx" DFX_ROOT="$FIX" PATH="$FIX/bin:$PATH" bash "$S/adlc-doctor.sh" "$FIX" 2>&1)
+}
+ten() { local i; for i in 1 2 3 4 5 6 7 8 9 10; do R "$((100 + i))" failure 3; done | jq -s .; }   # ten runs, each dead in 3 s
+ac "$(ten)" "$(J "")";                    check 1 "actions: ten fast failures and no step run → flagged as blocked" $?
+eq yes "…naming the cause and the tripwire" "$(says_gate "GitHub Actions looks blocked")"
+eq yes "…and what it means for main" "$(says_gate "the tripwire included")"
+eq yes "…with the run it read" "$(says_gate "(run 101)")"
+eq 1 "…from one run list of the last 10" "$(grep -c '^run list --limit 10 ' "$FIX/fx/calls")"
+eq 1 "…and one run view, of the latest" "$(grep -c '^run view 101 ' "$FIX/fx/calls")"
+ac "$(ten)" "$(J failure)";               check 0 "actions: ten fast failures whose steps ran are a failing workflow, not a block" $?
+eq yes "…and says so" "$(says_gate "their steps ran")"
+ac "$(ten)" "$(J skipped)";               check 1 "actions: a step that was skipped did not run" $?
+ac "$({ R 1 failure 3; R 2 failure 3; } | jq -s .)" "$(J "")"; check 0 "actions: two fast failures are too few to call" $?
+eq 0 "…no run view is made" "$(grep -c '^run view ' "$FIX/fx/calls")"
+ac "$({ ten | jq '.[]'; R 200 failure 300; } | jq -s .)" "$(J "")"; check 0 "actions: one run that took five minutes breaks the pattern" $?
+ac "$({ ten | jq '.[]'; R 200 success 3; } | jq -s .)" "$(J "")"; check 0 "actions: one green run breaks the pattern" $?
+eq yes "…and says Actions runs" "$(says_gate "Actions runs workflows")"
+# a lane whose job-level if: did not match concludes skipped before a runner is asked for; it says nothing either way
+ac "$({ R 200 skipped 2; ten | jq '.[]'; R 201 cancelled 2; } | jq -s .)" "$(J "")"; check 1 "actions: skipped and cancelled runs among the fast failures do not hide the block" $?
+eq yes "…counting only the runs that ran" "$(says_gate "the last 10 completed runs (skipped")"
+eq 1 "…and reading the latest run that ran, not the skipped one" "$(grep -c '^run view 101 ' "$FIX/fx/calls")"
+ac "$({ R 1 skipped 2; R 2 skipped 2; R 3 skipped 2; } | jq -s .)" "$(J "")"; check 0 "actions: only skipped runs say nothing (no completed run that ran)" $?
+eq yes "…read as no completed run yet" "$(says_gate "no completed run yet")"
+ac "$(ten)" '{"jobs":[{"name":"test","conclusion":"failure","steps":[{"name":"Set up job","conclusion":""}]}]}'; check 1 "actions: a step whose conclusion gh renders as the empty string did not run" $?
+ac '[]' -;                                check 0 "actions: no completed run yet passes" $?
+ac "$(ten)" -;                            check 1 "actions: fast failures whose latest run cannot be read are flagged as possibly blocked" $?
+eq yes "…as unknown" "$(says_gate "may be blocked")"
+ac - -; touch "$FIX/fx/fail-runs"
+GATE=$(DFX="$FIX/fx" DFX_ROOT="$FIX" PATH="$FIX/bin:$PATH" bash "$S/adlc-doctor.sh" "$FIX" 2>&1); check 1 "actions: a failed run listing is flagged, not read as alive" $?
+eq yes "…as unchecked" "$(says_gate "whether Actions is blocked is unchecked")"
+rm -f "$FIX/fx/fail-runs" "$FIX/fx/runs" "$FIX/fx/jobs"
+mv "$FIX/.github/workflows" "$FIX/wf.bak"; mkdir -p "$FIX/.github/workflows"
+ac "$(ten)" "$(J "")";                    check 0 "actions: no adlc workflows (local-recipe mode) → nothing to check" $?
+eq 0 "…and no run list is made" "$(grep -c '^run list ' "$FIX/fx/calls")"
+rm -rf "$FIX/.github/workflows"; mv "$FIX/wf.bak" "$FIX/.github/workflows"; rm -f "$FIX/fx/runs" "$FIX/fx/jobs"
 gate true 1 none; rm "$FIX/fx/default"
 DFX="$FIX/fx" DFX_ROOT="$FIX" PATH="$FIX/bin:$PATH" bash "$S/adlc-doctor.sh" "$FIX" >/dev/null 2>&1; check 1 "gate: an unreadable default branch is flagged" $?
 lane 'jobs:\n  t:\n    steps:\n      - run: echo hi\n'   # no lane runs an agent: nothing to gate

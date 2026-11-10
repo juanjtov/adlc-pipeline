@@ -596,7 +596,8 @@ function page(D, U, now) {
   const notice = A.lost ? 'Lost the connection to Mission Control. Is it still running? This page reconnects on its own.'
     : A.trouble ? 'Mission Control could not build this view: ' + A.trouble + '. The page shows what it had; the terminal it runs in has the details.'
     : D.mode !== 'demo' && !D.repo ? 'No GitHub repo was found. Start Mission Control inside a repo, or pass --repo owner/name.'
-    : D.mode !== 'demo' && !D.github.ok && D.github.msg ? 'GitHub could not be read: ' + D.github.msg + '. Showing what was read last.' : '';
+    : D.mode !== 'demo' && !D.github.ok && D.github.msg ? 'GitHub could not be read: ' + D.github.msg + '. Showing what was read last.'
+    : D.mode !== 'demo' && D.github.actions && D.github.actions.blocked ? 'GitHub Actions looks blocked for this repo: its last ' + D.github.actions.runs + ' runs that ran all failed within seconds and the latest ran no step, which is what an exhausted Actions budget looks like. Every workflow is dead, the tripwire included: nothing watches the default branch. Settings → Billing and plans → Actions.' : '';
   return h`<div class="mc ${U.playing ? '' : 'is-paused'}" data-theme="${U.dark ? 'dark' : 'light'}" data-pal="${U.pal}" style="height: 100vh; min-height: 720px; display: flex; flex-direction: column; gap: 12px; padding: 0 20px 16px; background: var(--page); color: var(--ink); font-size: 13px; line-height: 1.4; overflow: hidden">
 ${U.repoMenu ? h`<button class="b0" aria-label="Close the repository menu" data-act="closeMenus" style="position: absolute; inset: 0; z-index: 30; cursor: default"></button>` : ''}
 ${topBar(D, U, waiting)}
