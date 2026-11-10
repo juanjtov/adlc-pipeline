@@ -1,0 +1,149 @@
+{
+  "role": "architect",
+  "tools": [
+    "Read",
+    "Grep",
+    "Glob",
+    "Edit",
+    "Write",
+    "Bash",
+    "Skill"
+  ],
+  "shell": {
+    "gh": {
+      "auth": [
+        "status"
+      ],
+      "repo": [
+        "view"
+      ],
+      "version": null,
+      "help": null,
+      "issue": [
+        "view",
+        "comment",
+        "edit",
+        "list",
+        "status"
+      ],
+      "pr": [
+        "view",
+        "diff",
+        "comment",
+        "review",
+        "list",
+        "checks",
+        "status"
+      ]
+    },
+    "git": [
+      "status",
+      "diff",
+      "log",
+      "show",
+      "ls-files",
+      "ls-tree",
+      "rev-parse",
+      "rev-list",
+      "blame",
+      "grep",
+      "merge-base",
+      "describe",
+      "cat-file",
+      "shortlog",
+      "branch",
+      "remote"
+    ]
+  },
+  "write_paths": [
+    "docs/**"
+  ],
+  "labels": {
+    "may_add": [
+      "stage:build"
+    ],
+    "moves": [
+      {
+        "from": "stage:design",
+        "to": "stage:build",
+        "by": "in a local session: the role, with .adlc/scripts/adlc-relabel.sh; in the design lane: the workflow's handoff step (the lane grants the role no label change)"
+      }
+    ]
+  },
+  "outputs": {
+    "design": {
+      "where": "issue comment (the task breakdown)",
+      "markers": [
+        {
+          "marker": "ADLC-BREAKDOWN",
+          "form": "ADLC-BREAKDOWN: <ADR path>",
+          "required": true,
+          "check": {
+            "line": "any",
+            "ere": "ADLC-BREAKDOWN:[[:space:]`*_]*[^[:space:]`*_]"
+          },
+          "read_by": "templates/github/adlc-design.yml (the handoff step, which also requires the line to name an ADR file the run changed)"
+        }
+      ]
+    },
+    "review": {
+      "where": "PR comment, in the Actions review lane (a local session submits `gh pr review` instead)",
+      "markers": [
+        {
+          "marker": "ADLC-ARCH",
+          "form": "ADLC-ARCH: PASS|CHANGES",
+          "required": true,
+          "check": {
+            "line": "last",
+            "ere": "(^|[^[:alnum:]_-])ADLC-ARCH:[*`_[:space:]]*(PASS|CHANGES)([^[:alnum:]_].*)?$"
+          },
+          "read_by": "templates/scripts/adlc-verdict.sh, called by templates/github/adlc-review.yml"
+        }
+      ]
+    }
+  },
+  "lanes": [
+    {
+      "workflow": "adlc-design.yml",
+      "step": "Run Architect (design)",
+      "allowedTools": [
+        "Edit(docs/**)",
+        "Skill",
+        "Bash(gh issue view:*)",
+        "Bash(gh issue comment:*)",
+        "Bash(gh issue list:*)",
+        "Bash(gh pr view:*)",
+        "Bash(gh pr list:*)",
+        "Bash(gh pr diff:*)",
+        "Bash(git status:*)",
+        "Bash(git diff:*)",
+        "Bash(git log:*)",
+        "Bash(git show:*)"
+      ]
+    },
+    {
+      "workflow": "adlc-review.yml",
+      "step": "Architect conformance review",
+      "allowedTools": [
+        "Skill",
+        "Bash(gh pr view:*)",
+        "Bash(gh pr diff:*)",
+        "Bash(gh pr comment:*)",
+        "Bash(gh pr list:*)",
+        "Bash(gh pr checks:*)",
+        "Bash(gh issue view:*)",
+        "Bash(git status:*)",
+        "Bash(git diff:*)",
+        "Bash(git log:*)",
+        "Bash(git show:*)"
+      ]
+    }
+  ],
+  "inputs": [
+    "the issue with its stories and acceptance criteria",
+    "the repository, read-only",
+    "open stage:build and stage:qa issues (the blast-radius check)",
+    "on a review: the PR diff, the ADR, the task breakdown and the adversarial reviewer's comment",
+    "the skills its agent file lists"
+  ]
+}

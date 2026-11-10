@@ -67,9 +67,10 @@ here, the project skills win on specifics; this charter wins on process.
 | Prod logs/metrics read | — | — | — | ✅ | ✅ |
 
 Enforcement is layered: agent frontmatter `tools:` (which tools a role has at all), the
-plugin's guard hook (command-level, in every permission mode: no merge, push-to-main or
-force-push for anyone, and only the listed `gh`/`git` subcommands for the Analyst, Architect
-and Adversarial Reviewer), each Actions lane's `--allowedTools` (what runs unattended), the
+plugin's guard hook (in every permission mode: no merge, push-to-main or force-push for anyone;
+for the Analyst, Architect and Adversarial Reviewer, only the `gh`/`git` subcommands and the
+label each role's contract lists, and with the edit tools only the Architect writes, under
+`docs/`), each Actions lane's `--allowedTools` (what runs unattended), the
 `diff-scope` CI job (path-level; it takes the stage from the PR's linked issue, where the
 `stage:*` labels live), and the role prompt (advisory). A role that holds the shell can write
 anywhere, so for the Builder and QA a path rule can't live in a tool grant — the diff-scope
@@ -77,7 +78,8 @@ check (run from the default branch, so a PR cannot edit it) is what blocks an ou
 write: a Builder PR is held to the scope it declares in `.adlc/scope/<issue>.txt` (plus the
 test dirs once the issue is at `stage:qa`), and fails if it declares none or touches another
 issue's scope file. The Architect holds no shell in the Actions design lane, so there its
-docs-only rule IS the grant (`Edit(docs/**)`); elsewhere it, and QA's tests-only rule, are
+docs-only rule IS the grant (`Edit(docs/**)`); elsewhere the guard hook holds it for the edit
+tools only. A file the Architect writes through the shell, and QA's tests-only rule, are
 checked only on a PR labelled `stage:design` / `stage:qa`, and otherwise by the review. The
 hook reads command text, so it is a guardrail, not a sandbox: the hard merge gate is branch
 protection (or the tripwire) plus Gate 2.

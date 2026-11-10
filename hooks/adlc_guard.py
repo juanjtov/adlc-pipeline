@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""ADLC guard — the logic behind the plugin's PreToolUse(Bash) hook (hooks/hooks.json).
+"""ADLC guard — the logic behind the plugin's PreToolUse hooks (hooks/hooks.json): one on
+Bash, one on the tools that write a file (Edit, Write, MultiEdit, NotebookEdit).
 
 Run through hooks/adlc-guard.sh, which decides scope. Reads the hook input JSON on STDIN.
 Exit 2 blocks the tool call (STDERR is shown to the agent); exit 0 leaves the call to the
@@ -13,10 +14,22 @@ force-pushes):
     (comma- or space-separated) — or a destination the guard cannot name
   * a force-push, and a push of every branch (--all / --mirror / the `:` refspec)
 
-Blocked per role (ROLE_RULES): for the three roles whose gh/git surface is deliberately
-narrow, any gh or git subcommand outside the role's list. Agent `tools:` frontmatter takes
-tool NAMES only, so these per-command limits live here. The role is read from the hook's
-agent_type: the plugin's `adlc:<role>` and a repo's vendored copy `adlc-<role>` alike.
+Blocked per role, as the role's contract says (contracts/<role>.json, read when this starts).
+The role is read from the hook's agent_type: the plugin's `adlc:<role>` and a repo's vendored
+copy `adlc-<role>` alike. A role whose contract is missing or unreadable is blocked outright.
+  * `shell` (ROLE_RULES): for the roles whose gh/git surface is deliberately narrow, any gh
+    or git subcommand outside the role's list. Agent `tools:` frontmatter takes tool NAMES
+    only, so these per-command limits live here.
+  * `labels.may_add`, for the same roles: `gh issue edit --add-label X` and
+    `adlc-relabel.sh <issue> X` when X is not on the list, or cannot be read as one written
+    word (computed, "$@", an unquoted variable, a command that sets IFS).
+  * `write_paths` (WRITE_PATHS): an Edit, Write, MultiEdit or NotebookEdit call whose file is
+    outside the role's globs, taken from the top level of the repository the session is in.
+    The path is resolved as the tool would resolve it (the session's directory, `..`, `~`,
+    symbolic links), so a link under docs/ that points elsewhere is not a way out.
+    NOT covered: a file written through the shell (`echo > f`, `sed -i`, `tee`, a script).
+    A role that holds Bash can still do that in a local session; in the Actions lanes the
+    shell is limited to the commands the lane's tool grant names. Hard links are not followed.
 
 The command is parsed (quotes, heredocs, $(...), subshells, `sh -c '...'`), so flag order, a
 compound command, or a wrapper does not hide a call, and text inside a quoted comment body is
@@ -29,6 +42,7 @@ It reads command TEXT. A script written to disk, or code handed to an interprete
 (`python -c`, `node -e`), is invisible to it. This is a guardrail, not a sandbox — the hard
 gate stays server-side (branch protection or the tripwire) and with the human Gate 2.
 """
+import fnmatch
 import json
 import os
 import re
@@ -37,34 +51,102 @@ import sys
 
 DEFAULT_PROTECTED = ("main", "master")
 
-READ_GIT = {
-    "status", "diff", "log", "show", "ls-files", "ls-tree", "rev-parse", "rev-list", "blame",
-    "grep", "merge-base", "describe", "cat-file", "shortlog", "branch", "remote",
-}
-# Harmless lookups every narrow role keeps (an agent checks these when gh misbehaves).
-READ_GH = {"auth": {"status"}, "repo": {"view"}, "version": None, "help": None}
-# role -> the gh command groups it may use (None = every subcommand of that group) and the
-# git subcommands it may use. Roles not listed (builder, qa-release-ops, the main thread) get
-# the universal blocks only.
-ROLE_RULES = {
-    "product-analyst": {
-        "gh": dict(READ_GH, issue={"view", "comment", "edit", "list", "status"}, label={"list"},
-                   search=None),
-        "git": READ_GIT,
-    },
-    "architect": {
-        "gh": dict(
-            READ_GH,
-            issue={"view", "comment", "edit", "list", "status"},
-            pr={"view", "diff", "comment", "review", "list", "checks", "status"},
-        ),
-        "git": READ_GIT,
-    },
-    "adversarial-reviewer": {
-        "gh": dict(READ_GH, pr={"view", "diff", "comment", "list", "checks"}, issue={"view"}),
-        "git": READ_GIT,
-    },
-}
+# The five roles. Each has a contract, contracts/<role>.json; a session that runs as one of
+# them is judged by it. (Fixed here, not read from the folder's listing: a contract that goes
+# missing must block its role, not un-limit it.)
+ROLES = ("product-analyst", "architect", "builder", "adversarial-reviewer", "qa-release-ops")
+CONTRACTS = os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir, "contracts")
+# The tools that write a file. Each names it in `file_path` (NotebookEdit: `notebook_path`).
+WRITE_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
+WRITE_KEYS = ("file_path", "notebook_path")
+# `gh issue edit` options that take a value: the word after one is that value, whatever it holds.
+ISSUE_EDIT_VALUE_OPTS = {"-t", "--title", "-b", "--body", "-F", "--body-file", "-m", "--milestone",
+                         "--remove-label", "--add-assignee", "--remove-assignee", "--add-project",
+                         "--remove-project", "-R", "--repo"}
+
+
+class ContractError(Exception):
+    pass
+
+
+def glob_regex(glob):
+    """A write-path glob as a regex over a path relative to the repository's top level:
+    `**` is any run of directories (at the end: everything below), `*` and `?` stay in one name."""
+    parts = glob.split("/")
+    if glob.startswith("~") or any(part in ("", ".", "..") for part in parts):
+        raise ContractError("write path %r must be relative to the repository's top level" % (glob,))
+    out = []
+    for k, part in enumerate(parts):
+        last = k == len(parts) - 1
+        if part == "**":
+            out.append(".+" if last else "(?:[^/]+/)*")
+        else:
+            out.append("".join("[^/]*" if c == "*" else "[^/]" if c == "?" else re.escape(c) for c in part)
+                       + ("" if last else "/"))
+    return re.compile("".join(out), re.S)
+
+
+def read_contract(role, folder=None):
+    """What this guard enforces of contracts/<role>.json:
+      shell  — None (the role is not narrowed), or the gh command groups it may use (None =
+               every subcommand of that group), the git subcommands, and the labels it may put
+               on an issue (None = not limited)
+      writes — None (not limited), or the paths it may write, each as (glob, its regex);
+               [] = it writes no file
+    Every enforced key must be present and well-formed: a typo must not read as "no limit"."""
+    path = os.path.join(folder or CONTRACTS, role + ".json")
+    try:
+        with open(path, encoding="utf-8") as f:
+            doc = json.load(f)
+    except (OSError, ValueError) as e:
+        raise ContractError("%s: %s" % (path, e))
+
+    def names(value):
+        return isinstance(value, list) and all(isinstance(x, str) and x for x in value)
+
+    def need(ok, what):
+        if not ok:
+            raise ContractError("%s: %s" % (path, what))
+
+    need(isinstance(doc, dict) and doc.get("role") == role, "`role` must be %r" % role)
+    for key in ("shell", "write_paths", "labels"):
+        need(key in doc, "no `%s` (write null for \"not limited\")" % key)
+    shell, writes, labels = doc["shell"], doc["write_paths"], doc["labels"]
+    need(isinstance(labels, dict) and "may_add" in labels, "`labels.may_add` is missing")
+    may_add = labels["may_add"]
+    need(may_add is None or names(may_add), "`labels.may_add` must be null or a list of label names")
+    if shell is None:
+        need(may_add is None, "`labels.may_add` is enforced with the shell surface: where `shell` is "
+                              "null it must be null too")
+    else:
+        need(isinstance(shell, dict) and isinstance(shell.get("gh"), dict) and names(shell.get("git")),
+             "`shell` must be null or hold `gh` (an object) and `git` (a list of subcommands)")
+        need(all(isinstance(g, str) and g and (subs is None or names(subs)) for g, subs in shell["gh"].items()),
+             "`shell.gh` maps a command group to null or a list of subcommands")
+        shell = {"gh": {g: None if subs is None else set(subs) for g, subs in shell["gh"].items()},
+                 "git": set(shell["git"]), "labels": None if may_add is None else set(may_add)}
+    if writes is not None:
+        need(isinstance(writes, list) and all(isinstance(g, str) for g in writes),
+             "`write_paths` must be null or a list of globs")
+        writes = [(g, glob_regex(g)) for g in writes]
+    return {"shell": shell, "writes": writes}
+
+
+# role -> its shell surface (the gh groups, the git subcommands, the labels it may add) and
+# role -> the paths it may write, both as its contract gives them. A role in neither (builder,
+# qa-release-ops) and the main thread get the universal blocks only. UNREADABLE: role -> why
+# its contract could not be read; every guarded call that role makes is then blocked.
+ROLE_RULES, WRITE_PATHS, UNREADABLE = {}, {}, {}
+for _role in ROLES:
+    try:
+        _contract = read_contract(_role)
+    except Exception as _e:  # whatever went wrong, the role's limits are unknown
+        UNREADABLE[_role] = str(_e) or type(_e).__name__
+        continue
+    if _contract["shell"] is not None:
+        ROLE_RULES[_role] = _contract["shell"]
+    if _contract["writes"] is not None:
+        WRITE_PATHS[_role] = _contract["writes"]
 
 PREFIX_KEYWORDS = {"if", "then", "elif", "else", "while", "until", "do", "!", "coproc"}
 DECLARERS = {"export", "local", "declare", "typeset", "readonly"}
@@ -111,6 +193,8 @@ RAW_MERGE = re.compile(r"(?<![\w.-])gh\b[^\n;|&]*?\bpr\s+merge\b")
 RAW_API = re.compile(r"(?<![\w.-])gh\b[^\n;|&]*?\bapi\b")
 RAW_HTTP = re.compile(r"^(?=.*(?<![\w.-])(?:curl|wget)\b)(?=.*(?:(?:api|uploads)\.github\.com|GITHUB_(?:API|GRAPHQL)_URL))",
                       re.I | re.M)  # one line naming both, in either order
+NOEXEC_SWITCHES = re.compile(r"-[nevxu]+")  # shell options that take no value in any of SHELLS
+IFS_NAME = re.compile(r"(?<![A-Za-z0-9_])IFS(?![A-Za-z0-9_])")
 MAX_DEPTH = 12
 
 
@@ -718,6 +802,9 @@ class Guard:
         self.data = []
         self.pending = []  # opaque constructs seen, checked once all the data is collected
         self.ids = [0]
+        # The command sets IFS (an assignment, or the name anywhere in its text: `read IFS`,
+        # `for IFS in`): how an unquoted variable splits into words is then unknown.
+        self.ifs = bool(IFS_NAME.search(raw))
 
     def cwd_of(self, scope):
         for k in range(len(scope), -1, -1):
@@ -855,6 +942,7 @@ class Guard:
         name, value = word.text.split("=", 1)
         append = name.endswith("+")
         name = name.rstrip("+")
+        self.ifs = self.ifs or name == "IFS"
         if word.dynamic or (append and name not in self.vars):
             self.vars.pop(name, None)
         else:
@@ -874,6 +962,7 @@ class Guard:
             env.append(words.pop(0))
         for word in env:
             self.data.append(word.text.split("=", 1)[1])
+            self.ifs = self.ifs or word.text.startswith(("IFS=", "IFS+="))
         if not words:
             for word in env:  # `NAME=value` on its own sets a shell variable
                 self.assign(word)
@@ -882,6 +971,11 @@ class Guard:
         head, args = words[0], words[1:]
         prog = base(head)
 
+        if self.role and prog not in ("[", "[[") and (any(c in prog for c in "*?[{") or prog.startswith("=")):
+            # `adlc-relabel.s[h]`, `g?`, `{gh,x}`, zsh's `=gh`: the shell makes another program's name of it
+            raise Block("a program name the shell expands (a glob, a brace, a leading `=`: `%s`) can't be checked "
+                        "against the %s role's limits. Write the program name out."
+                        % (head.text, self.role))
         if head.dynamic and any(mark in head.text.rsplit("/", 1)[-1] for mark in EXPANSIONS):
             # The program's NAME is computed ("$GIT", $(command -v gh)): it may be git, gh or
             # curl. ("$HOME/bin/gh" is not this case: its last part is literal, so it is gh.)
@@ -984,7 +1078,7 @@ class Guard:
             # The plugin's relabel script (.adlc/scripts/adlc-relabel.sh <issue> <label>) is
             # `gh issue edit` by another name: judge it as that call, so a role that may not move
             # an issue's labels cannot move them through the script.
-            self.check_gh([Word("issue"), Word("edit")] + list(args), scope)
+            self.check_relabel(args, scope)
         elif prog in ("curl", "wget"):
             self.check_http(prog, args)
         else:
@@ -1049,24 +1143,22 @@ class Guard:
                     self.check_text(args[k + 1].text, depth + 1, self.child_scope(scope))
                 return
         # `bash .adlc/scripts/adlc-relabel.sh 12 stage:qa` is the relabel script all the same (a
-        # script file's contents are not read here; this one is known by name). The script is the
-        # first word that is not an option (`-x`, `+x`, `--norc`) or an option's value (`-o pipefail`);
+        # script file's contents are not read here; this one is known by name). The first word
+        # that names it counts, wherever it stands: which options of which shell take a value
+        # (`-euo pipefail`, `--rcfile f`, zsh's `--emulate sh`) is not the guard's to guess. The
+        # name is read as the shell reads it: a glob that matches it is it, and so may a brace be.
         # "$S/adlc-relabel.sh" is that script too, as a computed prefix with a literal last part is
-        # read everywhere else here. `bash -n script` parses and runs nothing.
-        takes_value = ("-o", "+o", "-O", "+O", "--rcfile", "--init-file")
-        skip = False
+        # read everywhere else here. Only `bash -n script` parses and runs nothing — when all that
+        # stands before the script is plain switches, with nothing to turn -n off again (`+n`).
         for k, a in enumerate(args):
-            if skip:
-                skip = False
+            last = a.text.rsplit("/", 1)[-1]
+            if any(mark in last for mark in EXPANSIONS) or not (
+                    fnmatch.fnmatchcase("adlc-relabel.sh", last) or ("{" in last and "}" in last)):
                 continue
-            if a.text.startswith(("-", "+")):
-                if a.text in takes_value:
-                    skip = True
-                elif a.text.startswith("-") and not a.text.startswith("--") and "n" in a.text[1:]:
-                    return
-                continue
-            if base(a) == "adlc-relabel.sh" and not any(mark in a.text.rsplit("/", 1)[-1] for mark in EXPANSIONS):
-                self.check_gh([Word("issue"), Word("edit")] + list(args[k + 1:]), scope)
+            before = args[:k]
+            if not (any("n" in b.text for b in before)
+                    and all(not b.dynamic and NOEXEC_SWITCHES.fullmatch(b.text) for b in before)):
+                self.check_relabel(args[k + 1:], scope)
             break
         if cmd.fed or any("<(…)" in a.text for a in args):
             self.opaque("a shell reading a process substitution")
@@ -1515,6 +1607,8 @@ class Guard:
                     groups = ROLE_RULES[self.role]["gh"]
                     if group.dynamic or g not in groups or (groups[g] is not None and s not in groups[g]):
                         raise Block("`gh %s` is outside the %s role." % ((g + " " + s).strip(), self.role))
+                    if (g, s) == ("issue", "edit") and ROLE_RULES[self.role]["labels"] is not None:
+                        self.check_labels(args, ROLE_RULES[self.role]["labels"])  # the label list, for this reading too
                 if unread(group) or (g == "pr" and sub is not None and unread(sub)):
                     if strict:
                         raise Block("the gh command `%s` can't be verified. Write it literally." % (g + " " + s).strip())
@@ -1556,6 +1650,8 @@ class Guard:
                     for g, s in sorted(groups.items()))
                 raise Block("`gh %s` is outside the %s role. Allowed gh: %s."
                             % ((group + " " + sub).strip(), self.role, allowed))
+            if ROLE_RULES[self.role]["labels"] is not None and group == "issue" and sub == "edit":
+                self.check_labels(args, ROLE_RULES[self.role]["labels"])
         # A computed group may be `pr` or `api`; under `pr`, a computed subcommand may be `merge`.
         # (`gh api "repos/$OWNER/…"` has a computed ENDPOINT — check_gh_api reads that.)
         if positional[0].dynamic or (group == "pr" and len(positional) > 1 and positional[1].dynamic):
@@ -1572,6 +1668,78 @@ class Guard:
             self.move(self.cwd_of(scope), named[0] if named else PR_BRANCH)
         if group == "api":
             self.check_gh_api(args[args.index(positional[0]) + 1:])
+
+    def check_relabel(self, args, scope):
+        """`adlc-relabel.sh <issue> <label>` is `gh issue edit` by another name, and its second
+        word is the one label it puts on the issue. For a role with a label list each of the two
+        must be ONE word for certain: the issue a number written out or one quoted variable
+        ("$N"), the label written out. "$@", "${a[@]}", an unquoted variable, or any variable
+        once the command sets IFS, can carry the label in the issue's place."""
+        self.check_gh([Word("issue"), Word("edit")], scope)
+        allowed = ROLE_RULES[self.role]["labels"] if self.role else None
+        if allowed is None or not args:
+            return
+        self.check_ifs()
+        issue = args[0]
+        if issue.dynamic:
+            if issue.splits or not VAR_REF.fullmatch(issue.text) or len(args) < 2:
+                self.check_label(issue, allowed)  # computed: this raises
+        elif not issue.text.isdigit():
+            raise Block("the issue of this relabel (`%s`) is not a number written out, so the "
+                        "label it puts on can't be checked against the %s role's list. Write "
+                        "`adlc-relabel.sh <number> <label>`." % (issue.text, self.role))
+        if len(args) > 1:
+            self.check_label(args[1], allowed)
+
+    def check_ifs(self):
+        if self.ifs:
+            raise Block("this command names IFS, which decides how a variable splits into "
+                        "words, so the labels it adds can't be checked against the %s role's "
+                        "list. Run the label change as a command of its own." % self.role)
+
+    def check_labels(self, args, allowed):
+        """`gh issue edit` by a role whose contract lists the labels it may put on an issue:
+        every `--add-label` value must be written out and on that list. A computed word that
+        could hold the option itself blocks too: an unquoted one anywhere, or a quoted one that
+        is not the value of another option."""
+        self.check_ifs()
+        k = 0
+        while k < len(args):
+            word = args[k]
+            k += 1
+            name, glued, value = word.text.partition("=")
+            if name == "--add-label":
+                if glued:
+                    self.check_label(Word(value, word.dynamic), allowed)
+                elif k < len(args):
+                    self.check_label(args[k], allowed)
+                    k += 1
+            elif word.text in ISSUE_EDIT_VALUE_OPTS and not word.dynamic:
+                if k < len(args) and not args[k].splits:
+                    k += 1  # that option's value, as one word
+            elif word.dynamic:
+                t = word.text
+                literal_name = not any(c in name for c in "$`<")
+                if not word.splits and (
+                        (t.startswith("--") and glued and literal_name)  # --body="$B"
+                        or (t[:2] in ISSUE_EDIT_VALUE_OPTS and len(t) > 2)  # -b"$B"
+                        or not t.startswith(("-",) + EXPANSIONS)):  # an argument that starts literally
+                    continue
+                raise Block("an argument of this `gh issue edit` call is computed (`%s`), so the "
+                            "labels it adds can't be checked against the %s role's list. Write "
+                            "the issue number and the options out." % (t, self.role))
+
+    def check_label(self, value, allowed):
+        may = "It may add: %s." % ", ".join(sorted(allowed)) if allowed else "It adds no label."
+        if value.dynamic:
+            raise Block("the label this command puts on the issue is computed (`%s`), so it "
+                        "can't be checked against the %s role's list. Write it out. %s"
+                        % (value.text, self.role, may))
+        for label in value.text.split(","):
+            if label not in allowed:
+                raise Block("the %s role may not put the label `%s` on an issue. %s Any other "
+                            "label move is the Principal's or the workflow's."
+                            % (self.role, label, may))
 
     def check_gh_api(self, args):
         method, implied, from_file, fields, endpoint, unread = None, False, False, [], None, []
@@ -1679,17 +1847,63 @@ def block(message):
     return 2
 
 
+def writes_outside(path, cwd, allowed):
+    """Why a write to `path` falls outside the `allowed` (glob, regex) pairs; None when it is
+    inside. Judged as every way the tool may resolve the path: relative to `cwd`, with `~`
+    expanded or not, `..` taken before or after a symbolic link is followed. Each result must
+    lie under the top level of the repository `cwd` is in, at a path one of the globs matches."""
+    top = git_out(cwd, "rev-parse", "--show-toplevel")
+    if not top:
+        return "the repository this session is in can't be found (no git work tree at `%s`)" % cwd
+    root = os.path.realpath(top).rstrip(os.sep) + os.sep
+    for spelling in {path, os.path.expanduser(path)}:
+        full = os.path.join(cwd, spelling)
+        for candidate in (full, os.path.normpath(full)):
+            real = os.path.realpath(candidate)
+            if not real.startswith(root):
+                return "`%s` is outside the repository (it resolves to `%s`)" % (path, real)
+            if not any(rx.fullmatch(real[len(root):]) for _, rx in allowed):
+                return "`%s` is not a path this role may write (in the repository it is `%s`)" % (
+                    path, real[len(root):])
+    return None
+
+
+def check_write(role, tool, tool_input, cwd):
+    """An Edit / Write / MultiEdit / NotebookEdit call. Only a role whose contract limits its
+    write paths is judged; the main thread, another agent and an unlimited role pass."""
+    if role in UNREADABLE:
+        return block("the %s role's contract could not be read (%s), so where it may write "
+                     "can't be checked. Update or reinstall the ADLC plugin." % (role, UNREADABLE[role]))
+    allowed = WRITE_PATHS.get(role)
+    if allowed is None:
+        return 0
+    if not allowed:
+        return block("the %s role writes no files: its contract (contracts/%s.json) lists no "
+                     "write path." % (role, role))
+    may = "The %s role may write only under: %s (from the repository's top level)." % (
+        role, ", ".join(glob for glob, _ in allowed))
+    paths = [tool_input[key] for key in WRITE_KEYS if key in tool_input] if isinstance(tool_input, dict) else []
+    if not paths or not all(isinstance(p, str) and p for p in paths):
+        return block("this %s call names no file, so it can't be checked. %s" % (tool, may))
+    for path in paths:
+        try:
+            why = writes_outside(path, cwd, allowed)
+        except Exception as e:  # a path the guard cannot resolve is not a path it can allow
+            why = "`%s` could not be resolved (%s)" % (path, type(e).__name__)
+        if why:
+            return block("%s. %s" % (why, may))
+    return 0
+
+
 def main():
     try:
         data = json.loads(sys.stdin.buffer.read().decode("utf-8", "replace"))
     except ValueError:
         return block("unreadable hook input, so nothing could be checked.")
-    if not isinstance(data, dict) or data.get("tool_name") != "Bash":
+    tool = data.get("tool_name") if isinstance(data, dict) else None
+    if tool != "Bash" and not (isinstance(tool, str) and tool in WRITE_TOOLS):
         return 0
     tool_input = data.get("tool_input")
-    command = tool_input.get("command") if isinstance(tool_input, dict) else None
-    if not isinstance(command, str) or not command.strip():
-        return 0
     agent = data.get("agent_type")
     agent = agent if isinstance(agent, str) else ""
     # The plugin's agents report as "adlc:<role>"; a repo's own copies of them, which /adlc-init
@@ -1697,8 +1911,16 @@ def main():
     # are the role. A bare "<role>" (a hand-vendored copy) is too; another plugin's is not.
     role = agent[len("adlc:"):] if agent.startswith(("adlc:", "adlc-")) else agent
     cwd = data.get("cwd")
-    guard = Guard(role,
-                  cwd if isinstance(cwd, str) and cwd else os.getcwd(), command)
+    cwd = cwd if isinstance(cwd, str) and cwd else os.getcwd()
+    if tool != "Bash":
+        return check_write(role, tool, tool_input, cwd)
+    command = tool_input.get("command") if isinstance(tool_input, dict) else None
+    if not isinstance(command, str) or not command.strip():
+        return 0
+    if role in UNREADABLE:
+        return block("the %s role's contract could not be read (%s), so its limits can't be "
+                     "checked. Update or reinstall the ADLC plugin." % (role, UNREADABLE[role]))
+    guard = Guard(role, cwd, command)
     try:
         guard.check_text(command)
     except Block as b:

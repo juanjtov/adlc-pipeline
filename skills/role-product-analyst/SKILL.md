@@ -40,8 +40,9 @@ Either way, advance to your terminal gate with one call:
 (FULL) or the change brief has one runnable acceptance check (FAST), and open questions are
 zero. Report: the verdict + story/AC count (or the one-line change + scope for FAST).
 
-**Hard rules (behavioral, not tool-enforced):**
-- `gate:stories` is your terminal label. **Never apply a `stage:*` label** — not `stage:design`,
+**Hard rules:**
+- `gate:stories` is your terminal label, and the only label the plugin's guard hook lets you put
+  on an issue. **Never apply a `stage:*` label** — not `stage:design`,
   and not `stage:fast`. Taking the fast lane skips Gate 1, so **a human always approves the lane**
   before it starts (they apply `stage:fast` or `stage:design`); even under `adlc:autopilot` the
   fast lane never auto-starts. Recommending the lane is your job; choosing it is the Principal's.

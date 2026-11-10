@@ -36,9 +36,44 @@ does not run uncapped; a PR open across the refresh can be in that state too, it
 holding the older scripts, until the base branch is merged into it, as the step's comment on the
 PR says), and the RUNBOOK copy gains the capped fix cycle. From issue 36: the RUNBOOK template
 gains a paragraph pointing at `/adlc:autopilot`; the two new skills themselves live in the plugin.
-The security-gate, code-review and efficient-runs skills, the retro and cycle-retro recipes, the
-role prompts and the guard hook live in the plugin, which every session loads from the installed
-plugin, so those parts need no refresh.
+From issue 4: `adlc-outputs.sh` is new (no lane calls it yet); the role contracts themselves live
+in the plugin. The security-gate, code-review and efficient-runs skills, the retro and cycle-retro
+recipes, the role prompts and the guard hook live in the plugin, which every session loads from
+the installed plugin, so those parts need no refresh.
+
+- **One contract per role, and the guard reads it** (part of issue 4). What an agent may use
+  was written by hand in four places that had to agree: each agent's `tools:` line (and its
+  copy under `templates/agents/`), each lane's `--allowedTools`, the `ROLE_RULES` table in the
+  guard hook, and the grant table in `tests/run.sh`. "The Architect writes under `docs/` only"
+  and "the Analyst applies `gate:stories` only" held in a lane through its grant, and in a
+  local session through the prompt alone. New `contracts/<role>.json` states each role's
+  tools, shell surface, write paths, label moves, marker lines and lane grants
+  (`contracts/README.md` says which fields are enforced, by what, and which are documentation).
+  `contracts/render.py --write` renders the `tools:` lines, the role steps' `--allowedTools`
+  lines and the marker table of the new `adlc-outputs.sh` from them (every existing line came
+  out unchanged); `--check`, run by `tests/run.sh`, fails on a difference, on a lane grant
+  that goes past the role's own contract, and on any flag in a step's `claude_args` besides its
+  agent, `--permission-mode dontAsk` and that one grant (a second grant spelt `--allowed-tools`
+  would otherwise never be compared). The guard hook builds `ROLE_RULES` from the contracts
+  when it starts, and blocks a role whose contract is missing or unreadable. It gains two
+  blocks, in the lanes and in a local session in an adopted repo alike. For the Analyst and
+  the Architect: a `gh issue edit --add-label` or `adlc-relabel.sh` call whose label is not on
+  the role's list (`gate:stories`; `stage:build`), or is not one written word (computed, `"$@"`,
+  in a command that sets `IFS`); the script is recognised behind any shell option spelling
+  (`bash -euo pipefail …`), and a narrow role's program name may hold no glob or brace. This
+  stops a role that types the call: `contracts/README.md` lists what still gets past (a script
+  on disk, text piped into a shell, a brace expansion). And, through a second
+  `PreToolUse` entry on Edit, Write, MultiEdit and NotebookEdit: a file outside the role's
+  write paths, with `..` and symbolic links resolved (the Architect: `docs/**`; the Analyst
+  and the reviewer: no file). Mission Control's permissions panel reads the same table and
+  marks a role's limits unknown when its contract cannot be read.
+  Still open on issue 4: a narrow role in a local session can write a file through the shell
+  (`echo >`, `sed -i`, `tee`), which the hook does not see; the Builder's and QA's paths and
+  label moves are written in their contracts but not enforced by the hook (the diff-scope
+  check judges their paths); no lane validates its outputs through `adlc-outputs.sh`, each
+  still reads its marker in its own step; what a role reads is documentation; the retro's two
+  agent-less steps keep their grant pinned in `tests/run.sh`; and a host repo's workflow and
+  agent copies are frozen files, so they match a contract only as of the last refresh.
 
 - **A local orchestrator and a context budget, as plugin skills: `/adlc:autopilot <issue>` and
   `context-budget`** (issue 36). The README described autopilot only as the Actions lanes and
@@ -392,6 +427,30 @@ plugin, so those parts need no refresh.
   script does not look is a visible skip. The recipe in the `retro` skill reads comments and review bodies, stamps each
   row with its comment's time, and lists 500 PRs instead of 50: on a repo past 50 PRs the older
   ones fell off the end without a word (349 markers, 220 read, on the same host).
+
+- **Guard: a flag before the gh subcommand no longer hides it.** `gh` accepts flags before
+  the subcommand, and while it looks for the command it takes the word after `--flag` or `-f`
+  as that flag's value. The guard read that word as the subcommand: `gh pr --subject view
+  merge 5` runs `gh pr merge 5` and was judged as `gh pr view`, so it passed, for every agent,
+  the released 0.3.1 included. The same spelling hid a subcommand outside a narrow role's list
+  (`gh pr --body view review 5 --approve` as the reviewer), and a flag written before `api`
+  was not read at all (`gh -X DELETE api …`, `gh --method=DELETE api …`). The guard still
+  judges a `gh` call the way it always read it, and now also by every other way `gh` may read
+  the same words; a further reading can only add a block. In those readings the word after a
+  `--flag` or `-f` written before the subcommand may be that flag's value or the command
+  (`-R`, `--repo` and `--hostname` always take theirs; `--flag=value` and a cluster such as
+  `-XPUT` take nothing), and an empty word is passed over, as `gh` passes over it
+  (`gh pr "" merge`). A call is blocked when any reading is `gh pr merge`, `gh alias set` or
+  `import`, a `gh api` write judged by all of its flags, or, for the Analyst, the Architect
+  and the reviewer, a command outside the role's list or a label outside its label list.
+  Before the subcommand is settled, a word that may split into several blocks (`gh -R $REPO pr
+  view 5` must quote `$REPO`), and so does a computed word, a glob or a brace where the group
+  or a `gh pr` subcommand stands (`gh pr merg[e] 5`). After a `gh pr … checkout` that may be
+  read another way, a later bare `git push` is not trusted. Text handed to a shell
+  (`echo "…" | bash`, a heredoc to a program named by a variable) is now also parsed, so
+  `gh pr --body "a;b" merge 5` inside it is found. Still not seen: a `gh` alias or extension
+  set up outside the commands the guard reads; a brace expansion anywhere else in the call
+  (`gh api {-X,DELETE} …`); and what the guard never read: a script on disk, zsh's `=gh`.
 
 - **One Mission Control shows every adopted repo on the machine, and says so** (issue 52).
   It always could: the hook sends each event with its working directory, the server maps that

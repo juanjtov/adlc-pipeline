@@ -30,9 +30,12 @@ plain-language tour with a [one-page diagram](docs/adlc-pipeline-diagram.png).
 .claude-plugin/plugin.json     # manifest (plugin name: "adlc")
 .claude-plugin/marketplace.json  # marketplace "adlc-pipeline" — how the lanes install it
 agents/                        # the 4 role agents + adversarial-reviewer: thin wrappers (tools, model, the skills to preload)
+contracts/                     # one <role>.json per agent: tools, shell surface, write paths, label moves, markers, lane grants
+  render.py                    # --check / --write: the tools: lines, the lanes' --allowedTools and the marker table come from them
 hooks/
   hooks.json                   # wires both hooks below into every session that enables the plugin
-  adlc-guard.sh · adlc_guard.py  # the guard, on every Bash command: no merge / push-to-main / force-push
+  adlc-guard.sh · adlc_guard.py  # the guard, on every Bash command: no merge / push-to-main / force-push; and on file
+                               #   writes: a role's contract paths (the Architect: docs/ only)
 skills/
   charter/                     # portable process rules: principles, roles, state machine, gates
   role-<role>/                 # the five role prompts (what each agent is told); the wrappers preload them
@@ -84,6 +87,7 @@ templates/                     # what the wizard fills into the host repo
             adlc-refresh.sh                                                            # the refresh: per-file diff, skips host-owned copies; runs from the plugin, not copied
             adlc-chains.sh                                                             # follow-up chains: which issue follows which, how deep, decided or not
             adlc-rounds.sh                                                             # fix rounds of a PR (reviews that sent it back): what the cap and the cycle ledger count
+            adlc-outputs.sh                                                            # does a comment carry its duty's required markers? (table rendered from contracts/)
             #   adlc-cache.sh        = prompt-cache hit-rate rollup
             #   adlc-run-log.sh      = run ledger: tokens · cost · seconds per agent run (Mission Control / OTel / Actions)
             #   adlc-cycle.sh        = cycle time per stage + fix rounds per issue, from the label timeline; the ranked report
@@ -91,7 +95,7 @@ templates/                     # what the wizard fills into the host repo
             #   adlc-pr-stage.sh     = which diff-scope stage a PR is in (from its linked issue)
             #   adlc-branch-issue.sh = which issue a lane branch names (feat/<issue>-<slug>)
   hooks/pre-commit             # local diff-scope guard (reuses adlc-diff-scope.sh)
-tests/run.sh                   # unit tests: guardrail scripts, guard hook, lane wiring
+tests/run.sh                   # unit tests: guardrail scripts, guard hook, contracts, lane wiring
 telemetry/                     # ready-to-run local OTel collector (docker compose) for token/cost
 ```
 
@@ -207,9 +211,9 @@ Actions lanes do with them.
 
 ### Two layers, on purpose
 
-- **Portable core** (ships in the plugin, never changes per project): the role agents and their
-  role prompts, the `charter`/`edd-spec`/`security-gate` skills, the guard hook, the deny rules,
-  the Action Card format.
+- **Portable core** (ships in the plugin, never changes per project): the role agents, their
+  role prompts and their contracts, the `charter`/`edd-spec`/`security-gate` skills, the guard
+  hook, the deny rules, the Action Card format.
 - **Project substrate** (the wizard generates it per repo): `project-conventions` and
   `release-ops` skills, the per-project charter, RUNBOOK, ADRs, and the agent copies whose
   `model:` lines you own — the only place your stack, commands, deploy topology, roles, tenancy
@@ -261,7 +265,8 @@ each:
 Everything else stays local. Mission Control's page is served on `127.0.0.1` only, and the hook
 that feeds it posts to that address and exits at once when Mission Control's marker file is
 absent. Token and cost telemetry is opt-in and points at `localhost` unless you change the
-endpoint. The guard hook reads the command it checks and sends nothing. It acts only in a repo
+endpoint. The guard hook reads the command, or the path of the file write, it checks and sends
+nothing. It acts only in a repo
 that adopted ADLC, that is one holding a marker `/adlc-init` writes (`.adlc/scripts/`,
 `.adlc/VERSION` or `docs/adlc/CHARTER.md`) in the directory you opened Claude Code in or one of
 its parents, and in the Actions lanes. Elsewhere it is a no-op.
@@ -432,8 +437,13 @@ nothing about this plugin. So every agent step in the lane templates does three 
   and the reviewers get named `gh`/`git` commands and no edit tools; the Architect, in the
   design lane, gets those plus file edits under `docs/` only; the Builder and QA get the shell.
   Anything else that would need approval is denied; file reads and read-only commands (`ls`,
-  `grep`, read-only `git`) still run. `tests/run.sh` pins every lane's agent and grant, so
-  widening one is a visible change.
+  `grep`, read-only `git`) still run. A role step's grant is written in the role's contract
+  (`contracts/<role>.json`) and the workflow line is rendered from it; `tests/run.sh` fails when
+  the two differ, or when a step's `claude_args` holds any flag besides its agent,
+  `--permission-mode dontAsk` and that one grant line, and it pins which agent each lane runs.
+  So a wider grant in `claude_args` is a visible change to a contract; the action's other
+  inputs are not checked. (The retro's two steps run a skill as no role; their grant is pinned
+  in `tests/run.sh` itself.)
 
 **The design lane hands its ADR over on a branch.** The Architect cannot commit or push, so
 after it runs the workflow commits its `docs/` changes to `adlc/design-<issue>` and only then
@@ -448,14 +458,42 @@ If `ADLC_DISPATCH_TOKEN` is a GitHub App token, the App is the actor on every ch
 the action refuses bot-triggered runs unless the bot is in `allowed_bots` — the wizard fills it
 from the same `{{BUILDER_BOT}}` handle as the allowlists.
 
+**One contract per role.** What an agent may use has one machine-readable source,
+`contracts/<role>.json`: its tools, the `gh`/`git` subcommands of the three narrow roles (the
+Analyst, the Architect and the adversarial reviewer), the paths it may write with the edit
+tools, the labels it may put on an issue, the marker line each duty's comment must carry, and
+its grant in each lane. (The role prompts and the charter describe the same limits in prose,
+written by hand.)
+`python3 contracts/render.py --write` renders three things from them: the `tools:` line of each
+agent and of its copy under `templates/agents/`, the `--allowedTools` line of each role step in
+the lane templates, and the marker table inside `adlc-outputs.sh`. `--check`, which
+`tests/run.sh` runs, fails on any difference, and on a lane grant that goes past the role's own
+contract. The guard hook reads the same files each time it starts. Not everything in a contract
+is enforced: [`contracts/README.md`](contracts/README.md) says field by field what is, by which
+code, and what is documentation only (what a role reads, the Builder's and QA's label moves,
+and the marker check, which no lane calls yet).
+
 **What blocks a merge or a push to main.** The plugin ships a `PreToolUse` hook
 (`hooks/adlc_guard.py`) that parses every Bash command and blocks `gh pr merge`, a non-GET
 `gh api` call, a GitHub API write through `curl`/`wget`, any force-push, and a push whose
 destination is `main`/`master`/the default branch (add names with `ADLC_PROTECTED_BRANCHES`)
 — for every agent, in every permission mode, in the lanes and in any local session that
-starts in, or moves into, a repo that adopted ADLC. The same hook holds the per-command limits
-of the three narrow roles (an agent's `tools:` field takes tool *names*, so `Bash(gh issue:*)`
-there limits nothing). It is sturdier than the prefix deny rules in `settings.json`, which
+starts in, or moves into, a repo that adopted ADLC. The same hook holds, from each role's
+contract, the per-command limits of the three narrow roles (an agent's `tools:` field takes tool
+*names*, so `Bash(gh issue:*)` there limits nothing) and the labels each may put on an issue
+with `gh issue edit --add-label` or `adlc-relabel.sh`: the Analyst `gate:stories`, the Architect
+`stage:build`, the reviewer none. Like the rest of the guard, that holds for a call it can
+read: [`contracts/README.md`](contracts/README.md) lists the spellings that still get past it
+(a script, text piped into a shell, a brace expansion). A role whose contract is missing or
+unreadable is blocked.
+The same launcher also runs on Edit, Write, MultiEdit and NotebookEdit, and there it blocks a
+file outside the role's write paths: the Architect writes under `docs/` only, the Analyst and
+the reviewer write no file, in a lane and in a local session alike (a `..`, or a symbolic link
+under `docs/` that leads elsewhere, does not get around it). That covers those four tools, not
+the shell: in a local session a narrow role still holds Bash, and a file it writes with
+`echo >`, `sed -i` or `tee` is not seen. In the lanes the shell is limited to the commands the
+lane's grant names.
+The Bash guard is sturdier than the prefix deny rules in `settings.json`, which
 `git push origin HEAD:main` or `bash -c "gh pr merge 5"` walk straight past. How it judges:
 
 - **It follows the shell.** Quotes, heredocs, `$(…)`, `bash -c`, `eval`, `source`, `trap`,
@@ -545,7 +583,7 @@ Two licenses, drawn along one line: what runs as the plugin, and what the wizard
 your repo.
 
 - **Everything outside `templates/` is licensed under the [AGPL v3](LICENSE-AGPL)** — the
-  `adlc:*` skills, the agents, the commands, the guard hook, `bin/`, Mission Control, the
+  `adlc:*` skills, the agents, their contracts, the commands, the guard hook, `bin/`, Mission Control, the
   telemetry, the tests and the docs. Installing
   and running it, at your company or anywhere else, triggers no obligation: AGPL applies if you
   modify the plugin *and* distribute or host that modified version for others. Open forks are

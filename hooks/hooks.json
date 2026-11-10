@@ -1,10 +1,11 @@
 {
-  "description": "Guard every Bash command (no merge, no push to a protected branch, no force-push), and report pipeline agent activity to ADLC Mission Control when it is running.",
+  "description": "Guard every Bash command (no merge, no push to a protected branch, no force-push) and the file writes of a role whose contract limits its paths, and report pipeline agent activity to ADLC Mission Control when it is running.",
   "hooks": {
     "SessionStart": [{ "hooks": [{ "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/mission-control/hook.sh\"", "timeout": 5 }] }],
     "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/mission-control/hook.sh\"", "timeout": 5 }] }],
     "PreToolUse": [
       { "matcher": "Bash", "hooks": [{ "type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/adlc-guard.sh\"" }] },
+      { "matcher": "Edit|Write|MultiEdit|NotebookEdit", "hooks": [{ "type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/adlc-guard.sh\"" }] },
       { "hooks": [{ "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/mission-control/hook.sh\"", "timeout": 5 }] }
     ],
     "PostToolUse": [{ "hooks": [{ "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/mission-control/hook.sh\"", "timeout": 5 }] }],
