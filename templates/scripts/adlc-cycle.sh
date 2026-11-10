@@ -140,11 +140,14 @@ case "$cmd" in
              | "\(.stage|.[0:12]|. + " " * (12 - length))  \(.n|tostring|" " * (4 - length) + .)  \(.tel|tostring|" " * (14 - length) + .)  \(.usd*100|round/100|tostring|" " * (7 - length) + .)  \(.share|round|tostring|" " * (8 - length) + .)%  \(.avg|round|tostring|" " * (8 - length) + .)  \(.sshare|round|tostring|" " * (8 - length) + .)%  \(if .rd == null then "-" else (.rd|round|tostring) + "%" end)"),
           "TOTAL        \($r|length)  usd=\($usd*100|round/100)  agent_hours=\($sec/3600*10|round/10)"' "$runs"
       echo
-      echo "## GitHub Actions lanes (runs.jsonl; agent lanes and guard lanes alike): avg seconds and failures"
+      # blocked = a run GitHub failed within 60 s with no step run (adlc-run-log.sh's `outcome`; an
+      # exhausted Actions budget looks like that). It is not the lane's failure and it did no work,
+      # so it is in runs= and in blocked=, and in neither failed= nor avg_sec.
+      echo "## GitHub Actions lanes (runs.jsonl; agent lanes and guard lanes alike): avg seconds, failures, and runs GitHub blocked (in neither of the two)"
       jq -rs --arg since "$SINCE" '
-        [.[] | select(.ts >= $since and .source == "actions")]
-        | group_by(.stage)[] | (map(.seconds) | add / length) as $avg
-        | "\(.[0].stage): runs=\(length) avg_sec=\($avg|round) failed=\([.[] | select(.conclusion == "failure")] | length)"' "$runs"
+        [.[] | select(.ts >= $since and .source == "actions") | .outcome //= .conclusion]
+        | group_by(.stage)[] | [.[] | select(.outcome != "blocked")] as $ran
+        | "\(.[0].stage): runs=\(length) avg_sec=\(if ($ran | length) > 0 then ($ran | map(.seconds) | add / length | round) else "-" end) failed=\([$ran[] | select(.outcome == "failure")] | length) blocked=\(length - ($ran | length))"' "$runs"
     else
       echo "runs.jsonl: empty or missing — materialize it with adlc-run-log.sh (mc | otel | actions) first"
     fi

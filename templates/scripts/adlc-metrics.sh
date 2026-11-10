@@ -50,37 +50,79 @@ echo "first_pass_approved: $firstpass / $merged"
 # installs, setup actions, caches, registry logins, provisioning, and creating an ephemeral
 # database or branch anywhere in the name. "Login flow tests" or "Test cache invalidation" are not
 # matched; a host whose test step starts with one of those words ("Install and test") sets its own.
+#
+# A run GitHub failed before it started is not a test signal either (issue 34). The doctor's rule,
+# per run: it concluded `failure`, at most 60 s after it was created, and no step of it ran; that
+# is what an exhausted Actions budget looks like, and any other reason GitHub fails a run before
+# its first step reads the same. Such a run is `blocked`: it leaves the iterations count like an
+# infra failure and gets a `blocked:` line of its own, printed only when there is one. The same
+# `gh run view` call answers both questions, so this costs no call; a run that cannot be read
+# stays a plain failure.
+#
+# Where the checks did not run on GitHub, adlc-local-ci.sh leaves one PR comment per battery run
+# whose last line is the marker `ADLC-CI: PASS|FAIL head <sha>`. Each comment on a merged PR whose
+# last non-blank line starts with that marker (markup around it allowed; the last marker on the
+# line is read) counts as one CI run of that PR, a FAIL as a red one, so a host with no Actions
+# runs is not blind here. A comment that quotes the marker anywhere else, as QA's verdict may, is
+# not a run. The comments come
+# with the PR list above: no call more. A `local_ci:` line says how many were counted, only when
+# there is one. The marker is a record anyone who can comment can write, not a gate. A battery
+# that ran both on Actions and locally for one push counts twice.
 ADLC_SETUP_STEPS="${ADLC_SETUP_STEPS:-^(set up |post run |run actions/|checkout|install|setup|provision|(restore |save )?cache|docker log ?in|log ?in to |create .*(branch|database|db))|ephemeral}"
 oldest=$(echo "$prs" | jq -r '[.[].createdAt] | min // empty')
-runs=$(gh run list --limit 500 --json databaseId,workflowName,headBranch,status,conclusion,createdAt \
+runs=$(gh run list --limit 500 --json databaseId,workflowName,headBranch,status,conclusion,createdAt,updatedAt \
         --jq "[.[] | select(.status == \"completed\" and .createdAt >= \"${oldest:-$SINCE}\" and (.workflowName | test(\"CI\"; \"i\")))]")
-# the red runs on a merged PR's branch, after that PR was opened: the only ones whose steps matter
+# the red runs on a merged PR's branch, after that PR was opened: the only ones whose steps matter.
+# One line each: the run's id, then 1 when it concluded `failure` within 60 s of its creation.
 red_ids=$(jq -rn --slurpfile runs <(echo "$runs") --slurpfile prs <(echo "$prs") '
   $runs[0] as $runs | $prs[0] as $prs
-  | [$prs[] as $p | $runs[] | select(.headBranch == $p.headRefName and .createdAt >= $p.createdAt and .conclusion != "success") | .databaseId] | unique[]')
-infra='[]'
-for id in $red_ids; do
-  step=$(gh run view "$id" --json jobs --jq '[.jobs[] | select(.conclusion == "failure" or .conclusion == "timed_out")
-           | .steps[]? | select(.conclusion == "failure")] | first | .name // empty' 2>/dev/null) || step=""
-  if [ -n "$step" ] && printf '%s' "$step" | grep -qiE "$ADLC_SETUP_STEPS"; then
+  | [$prs[] as $p | $runs[] | select(.headBranch == $p.headRefName and .createdAt >= $p.createdAt and .conclusion != "success")
+     | {id: .databaseId, fast: (if .conclusion == "failure" and (((.updatedAt | fromdate?) // null) as $u | $u != null and $u - (.createdAt | fromdate) <= 60) then 1 else 0 end)}]
+  | unique_by(.id)[] | "\(.id) \(.fast)"')
+infra='[]'; blocked='[]'
+while read -r id fast; do
+  [ -n "$id" ] || continue
+  # "<steps that ran>, a tab, <name of the first failed step>" (the name is empty when there is none)
+  look=$(gh run view "$id" --json jobs --jq '"\([.jobs[]?.steps[]? | select(.conclusion != null and .conclusion != "" and .conclusion != "skipped")] | length)\t\([.jobs[]? | select(.conclusion == "failure" or .conclusion == "timed_out")
+           | .steps[]? | select(.conclusion == "failure")] | first | .name // "")"' </dev/null 2>/dev/null) || continue
+  IFS=$'\t' read -r ran step <<<"$look"
+  if [ "$fast" = 1 ] && [ "$ran" = 0 ]; then
+    blocked=$(jq -cn --argjson a "$blocked" --argjson id "$id" '$a + [$id]')
+  elif [ -n "$step" ] && printf '%s' "$step" | grep -qiE "$ADLC_SETUP_STEPS"; then
     infra=$(jq -cn --argjson a "$infra" --argjson id "$id" '$a + [$id]')
   fi
-done
+done <<<"$red_ids"
 # Both lists go in through file descriptors: 200 PRs with their comments overflow an argument.
-jq -rn --slurpfile runs <(echo "$runs") --slurpfile prs <(echo "$prs") --argjson infra "$infra" '
-  $runs[0] as $runs | $prs[0] as $prs
-  | [$prs[] as $p | ($runs | map(select(.headBranch == $p.headRefName and .createdAt >= $p.createdAt))) | select(length > 0)
+jq -rn --slurpfile runs <(echo "$runs") --slurpfile prs <(echo "$prs") --argjson infra "$infra" --argjson blocked "$blocked" '
+  # the local CI comments of one PR: those whose last non-blank line starts with the ADLC-CI
+  # marker (a comment that quotes one in its prose is not a run); the last marker on that line
+  def local_ci: [(.comments // [])[] | (.body // "") | split("\n") | map(select(test("\\S"))) | (last // "")
+    | select(test("^[*`_\\s]*ADLC-CI:"))
+    | [match("(?<![A-Za-z0-9_-])ADLC-CI:[*`_\\s]*(PASS|FAIL)[*`_\\s]+head[*`_\\s]+[0-9a-f]{40}(?![0-9a-f])"; "g").captures[0].string]
+    | last | select(. != null)];
+  $runs[0] as $runs | $prs[0] as $prs | ($infra + $blocked) as $out
+  | [$prs[] as $p | ($p | local_ci) as $lc
+   | ($runs | map(select(.headBranch == $p.headRefName and .createdAt >= $p.createdAt))) | select(length > 0 or ($lc | length) > 0)
    | {all: length,
       infra: ([.[] | select(.databaseId as $i | $infra | index($i))] | length),
-      n: ([.[] | select(.databaseId as $i | $infra | index($i) | not)] | length),
-      red: ([.[] | select(.conclusion != "success" and (.databaseId as $i | $infra | index($i) | not))] | length)}] as $per
-  | ($per | map(.all) | add // 0) as $all | ($per | map(.infra) | add // 0) as $inf
+      blocked: ([.[] | select(.databaseId as $i | $blocked | index($i))] | length),
+      lc: ($lc | length), lcfail: ([$lc[] | select(. == "FAIL")] | length),
+      n: (([.[] | select(.databaseId as $i | $out | index($i) | not)] | length) + ($lc | length)),
+      red: (([.[] | select(.conclusion != "success" and (.databaseId as $i | $out | index($i) | not))] | length) + ([$lc[] | select(. == "FAIL")] | length))}] as $per
+  | ($per | map(.all) | add // 0) as $all | ($per | map(.infra) | add // 0) as $inf | ($per | map(.blocked) | add // 0) as $blk
+  | ($per | map(.lc) | add // 0) as $lc
   | ([$per[] | select(.n > 0)]) as $counted
+  | "blocked: \($blk) / \($all) CI runs were failed by GitHub within 60 s with no step run (what an exhausted Actions budget looks like)" as $bline
   | if ($per | length) == 0 then "iterations_to_green: no CI runs found for the merged PRs of the window"
-    elif ($counted | length) == 0 then "iterations_to_green: every CI run of the window\u0027s merged PRs failed in a setup step (\($inf) runs); no test signal",
+    elif ($counted | length) == 0 and $blk == 0 then "iterations_to_green: every CI run of the window\u0027s merged PRs failed in a setup step (\($inf) runs); no test signal",
          "infra_failed: \($inf) / \($all) CI runs died in a setup step (ADLC_SETUP_STEPS), before any test ran"
+    elif ($counted | length) == 0 then "iterations_to_green: every CI run of the window\u0027s merged PRs was blocked or failed in a setup step (\($blk + $inf) runs); no test signal",
+         "infra_failed: \($inf) / \($all) CI runs died in a setup step (ADLC_SETUP_STEPS), before any test ran",
+         $bline
     else "iterations_to_green: avg \(($counted | map(.n) | add) / ($counted | length) * 10 | round / 10) CI runs per merged PR; failed_first: \([$counted[] | select(.red > 0)] | length) / \($counted | length)",
-         "infra_failed: \($inf) / \($all) CI runs died in a setup step (ADLC_SETUP_STEPS), before any test ran; not counted above"
+         "infra_failed: \($inf) / \($all) CI runs died in a setup step (ADLC_SETUP_STEPS), before any test ran; not counted above",
+         (if $blk > 0 then $bline + "; not counted above" else empty end),
+         (if $lc > 0 then "local_ci: \($lc) ADLC-CI marker comments on \([$per[] | select(.lc > 0)] | length) merged PRs (\($per | map(.lcfail) | add // 0) FAIL), counted above as CI runs" else empty end)
     end'
 
 # --- Change failure signal (bugs filed by Ops after a deploy) ---

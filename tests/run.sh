@@ -137,6 +137,9 @@ printf 'src/a.py\nsrc/b.py\nREADME.md\n'      | bash "$S/adlc-triage.sh" >/dev/n
 printf 'src/a.py\ndb/migrations/003.sql\n'    | bash "$S/adlc-triage.sh" >/dev/null 2>&1; check 1 "migrations force full" $?
 printf '.github/workflows/x.yml\n'            | bash "$S/adlc-triage.sh" >/dev/null 2>&1; check 1 "CI config forces full" $?
 printf '.adlc/scripts/adlc-triage.sh\n'       | bash "$S/adlc-triage.sh" >/dev/null 2>&1; check 1 "the guard scripts themselves force full" $?
+printf '.adlc/local-ci.txt\n'                 | bash "$S/adlc-triage.sh" >/dev/null 2>&1; check 1 "the local CI battery file forces full (a fast-lane PR may not choose what adlc-local-ci.sh runs on it)" $?
+printf '1\t3\t.adlc/local-ci.txt\n'           | bash "$S/adlc-triage.sh" >/dev/null 2>&1; check 1 "…in numstat form too" $?
+printf 'docs/local-ci.txt\n'                  | bash "$S/adlc-triage.sh" >/dev/null 2>&1; check 0 "a file merely named like it elsewhere is not" $?
 printf 'package.json\n'                       | bash "$S/adlc-triage.sh" >/dev/null 2>&1; check 1 "dependency manifest forces full" $?
 printf '.gitmodules\n'                        | bash "$S/adlc-triage.sh" >/dev/null 2>&1; check 1 ".gitmodules is a dependency manifest: forces full (it names where submodules come from)" $?
 printf '2\t1\t.gitmodules\n'                  | bash "$S/adlc-triage.sh" >/dev/null 2>&1; check 1 "…in numstat form too (a url or branch change leaves the pointer alone)" $?
@@ -439,6 +442,7 @@ ac "$(ten)" "$(J "")";                    check 1 "actions: ten fast failures an
 eq yes "…naming the cause and the tripwire" "$(says_gate "GitHub Actions looks blocked")"
 eq yes "…and what it means for main" "$(says_gate "the tripwire included")"
 eq yes "…with the run it read" "$(says_gate "(run 101)")"
+eq yes "…and the local CI recipe to use meanwhile" "$(says_gate ".adlc/scripts/adlc-local-ci.sh <pr>")"
 eq 1 "…from one run list of the last 10" "$(grep -c '^run list --limit 10 ' "$FIX/fx/calls")"
 eq 1 "…and one run view, of the latest" "$(grep -c '^run view 101 ' "$FIX/fx/calls")"
 ac "$(ten)" "$(J failure)";               check 0 "actions: ten fast failures whose steps ran are a failing workflow, not a block" $?
@@ -1315,6 +1319,7 @@ ADLC-ADV: PASS' 'ADLC-ARCH: PASS'
   eq "merged_prs: 9"             "merged PRs: those in the window"                                   "$(printf '%s\n' "$OUT" | grep '^merged_prs:')"
   eq "first_pass_approved: 6 / 9" "first pass: no comment whose last verdict is CHANGES (a later PASS comment does not undo one; a PR with no verdict counts; a CHANGES quoted in the prose of a PASS comment is not one; a bold **ADLC-ADV:** CHANGES is one, as adlc-verdict.sh reads it; PASSED and CHANGESET are no verdict)" "$(printf '%s\n' "$OUT" | grep '^first_pass_approved:')"
   eq 1 "…from one gh pr list call, whatever the number of PRs" "$(grep -c '^pr list$' "$MX/calls")"
+  eq 0 "a host with no blocked run and no local CI marker gets no blocked: or local_ci: line (the lines above are as they were)" "$(printf '%s\n' "$OUT" | grep -cE '^(blocked|local_ci):')"
   OUT=$( cd "$MX/repo" && env PATH="$MX/bin:$PATH" MX_PRS="$MX/prs.json" MX_RUNS="$MX/runs.json" MX_JOBS="$MX/jobs" MX_CALLS="$MX/calls" ADLC_SETUP_STEPS='^nothing matches$' bash "$S/adlc-metrics.sh" 30 2>&1 )
   eq "iterations_to_green: avg 1.8 CI runs per merged PR; failed_first: 4 / 5" "ADLC_SETUP_STEPS is the rule: a regex that matches no step counts every red run as a test failure" "$(printf '%s\n' "$OUT" | grep '^iterations_to_green:')"
   eq "infra_failed: 0 / 9 CI runs died in a setup step (ADLC_SETUP_STEPS), before any test ran; not counted above" "…and reports 0 setup failures" "$(printf '%s\n' "$OUT" | grep '^infra_failed:')"
@@ -1329,6 +1334,56 @@ ADLC-ADV: PASS' 'ADLC-ARCH: PASS'
   jq -n --arg at "$now" '[{databaseId: 31, workflowName: "ADLC CI", headBranch: "feat/3", status: "completed", conclusion: "failure", createdAt: $at}]' > "$MX/only-infra.json"
   OUT=$( cd "$MX/repo" && env PATH="$MX/bin:$PATH" MX_PRS="$MX/prs.json" MX_RUNS="$MX/only-infra.json" MX_JOBS="$MX/jobs" MX_CALLS="$MX/calls" bash "$S/adlc-metrics.sh" 30 2>&1 )
   eq "iterations_to_green: every CI run of the window's merged PRs failed in a setup step (1 runs); no test signal" "only setup failures: says there is no test signal instead of dividing by zero" "$(printf '%s\n' "$OUT" | grep '^iterations_to_green:')"
+  # Issue 34: a host whose Actions is blocked, running the battery with adlc-local-ci.sh. PR 20: two runs GitHub
+  # failed in 3 s with no step (no job at all; a job with no step), and two local CI comments, FAIL then PASS
+  # (the second ends in blank lines). PR 21: no Actions run, two PASS markers wearing markup, the second on a
+  # last line that holds a FAIL marker before it (the last one is read). PR 22: a run that failed in 3 s but RAN its steps (a
+  # real failure), a green one, and a comment that quotes a FAIL marker and ends in PASS (one PASS). PR 23: a fast
+  # failure gh cannot describe and a no-step failure that took five minutes both stay failures; its four
+  # near-markers (PASSED, a short sha, another word ending in ADLC-CI, no "head") are none, and neither are two
+  # comments that QUOTE a real marker (QA's verdict does): one in the prose of its only line, one on a line that
+  # is not the comment's last. PR 24: one blocked
+  # run (exactly 60 s; its only steps skipped or never concluded) and nothing else: no test signal from it.
+  H1=1111111111111111111111111111111111111111; H2=2222222222222222222222222222222222222222
+  {
+    mxpr 20 "$now" "Local CI on \`$H1\`, run on a local machine.
+
+| check | result | exit | seconds |
+|---|---|---|---|
+| tests | FAIL | 1 | 12 |
+
+ADLC-CI: FAIL head $H1" "ADLC-CI: PASS head $H2
+
+  "
+    mxpr 21 "$now" "**ADLC-CI: PASS** head \`$H1\`" "\`ADLC-CI: FAIL head $H1\` \`ADLC-CI: PASS head $H2\`"
+    mxpr 22 "$now" "The marker reads \`ADLC-CI: FAIL head $H1\`; this run:
+ADLC-CI: PASS head $H2"
+    mxpr 23 "$now" "ADLC-CI: PASSED head $H1" 'ADLC-CI: PASS head abc1234' "MY-ADLC-CI: PASS head $H1" "ADLC-CI: PASS $H1" \
+      "QA: the local run says ADLC-CI: PASS head $H1" "ADLC-CI: FAIL head $H1
+
+That is the local run; the battery is red, so the verdict is CHANGES."
+    mxpr 24 "$now"
+  } | jq -s . > "$MX/prs2.json"
+  jq -n --arg at "$now" 'def r(id; br; c; s): {databaseId: id, workflowName: "ADLC CI", headBranch: br, status: "completed", conclusion: c, createdAt: $at, updatedAt: ($at | fromdate + s | todate)};
+    [r(201; "feat/20"; "failure"; 3), r(202; "feat/20"; "failure"; 3), r(221; "feat/22"; "failure"; 3), r(222; "feat/22"; "success"; 300),
+     r(231; "feat/23"; "failure"; 3), r(232; "feat/23"; "failure"; 300), r(233; "feat/23"; "success"; 300), r(241; "feat/24"; "failure"; 60)]' > "$MX/runs2.json"
+  mkdir -p "$MX/jobs2"
+  echo '{"jobs": []}' > "$MX/jobs2/201.json"; echo '{"jobs": []}' > "$MX/jobs2/232.json"
+  echo '{"jobs": [{"name": "tests", "conclusion": "failure", "steps": []}]}' > "$MX/jobs2/202.json"
+  echo '{"jobs": [{"name": "tests", "conclusion": "failure", "steps": [{"name": "Set up job", "conclusion": "success"}, {"name": "Run tests", "conclusion": "failure"}]}]}' > "$MX/jobs2/221.json"
+  echo '{"jobs": [{"name": "tests", "conclusion": "failure", "steps": [{"name": "Set up job", "conclusion": "skipped"}, {"name": "Run tests", "conclusion": ""}]}]}' > "$MX/jobs2/241.json"
+  : > "$MX/calls"
+  OUT=$( cd "$MX/repo" && env PATH="$MX/bin:$PATH" MX_PRS="$MX/prs2.json" MX_RUNS="$MX/runs2.json" MX_JOBS="$MX/jobs2" MX_CALLS="$MX/calls" bash "$S/adlc-metrics.sh" 30 2>&1 ); check 0 "blocked runs + local CI markers: the script runs to the end" $?
+  eq "iterations_to_green: avg 2.5 CI runs per merged PR; failed_first: 3 / 4" "a run GitHub failed within 60 s with no step is not a red test run, and a local CI marker comment is a CI run (FAIL = red): a PR with only blocked runs and markers is counted from its markers, one with markers and no Actions run too, one with only blocked runs not at all; a fast failure whose steps ran, one gh cannot describe and a slow no-step failure stay red" "$(printf '%s\n' "$OUT" | grep '^iterations_to_green:')"
+  eq "blocked: 3 / 8 CI runs were failed by GitHub within 60 s with no step run (what an exhausted Actions budget looks like); not counted above" "blocked: its own line, against every Actions CI run of the merged PRs (60 s is still within; a skipped step and one with no conclusion did not run)" "$(printf '%s\n' "$OUT" | grep '^blocked:')"
+  eq "local_ci: 5 ADLC-CI marker comments on 3 merged PRs (1 FAIL), counted above as CI runs" "local_ci: one per comment whose last non-blank line starts with the marker (trailing blank lines allowed; the last marker on that line is read; a FAIL quoted on an earlier line does not count); bold and backtick markup read; PASSED, a short sha, a longer word ending in ADLC-CI and a marker with no 'head' are not markers; a marker quoted in prose, or on a line that is not the last, is not a run" "$(printf '%s\n' "$OUT" | grep '^local_ci:')"
+  eq "infra_failed: 0 / 8 CI runs died in a setup step (ADLC_SETUP_STEPS), before any test ran; not counted above" "…and the infra_failed line keeps its shape beside them" "$(printf '%s\n' "$OUT" | grep '^infra_failed:')"
+  eq 6 "…from the run view calls the script already made: one per red run on a merged PR's branch, none added" "$(grep -c '^run view$' "$MX/calls")"
+  eq 1 "…and still one pr list call: the markers come with the comments it already carries" "$(grep -c '^pr list$' "$MX/calls")"
+  jq '[.[] | select(.number == 24)]' "$MX/prs2.json" > "$MX/prs3.json"
+  OUT=$( cd "$MX/repo" && env PATH="$MX/bin:$PATH" MX_PRS="$MX/prs3.json" MX_RUNS="$MX/runs2.json" MX_JOBS="$MX/jobs2" MX_CALLS="$MX/calls" bash "$S/adlc-metrics.sh" 30 2>&1 )
+  eq "iterations_to_green: every CI run of the window's merged PRs was blocked or failed in a setup step (1 runs); no test signal" "only blocked runs: says there is no test signal, and why" "$(printf '%s\n' "$OUT" | grep '^iterations_to_green:')"
+  eq "blocked: 1 / 1 CI runs were failed by GitHub within 60 s with no step run (what an exhausted Actions budget looks like)" "…with the blocked line" "$(printf '%s\n' "$OUT" | grep '^blocked:')"
   echo '[]' > "$MX/prs.json"
   OUT=$( cd "$MX/repo" && env PATH="$MX/bin:$PATH" MX_PRS="$MX/prs.json" MX_RUNS="$MX/runs.json" MX_JOBS="$MX/jobs" MX_CALLS="$MX/calls" bash "$S/adlc-metrics.sh" 30 2>&1 )
   eq "first_pass_approved: 0 / 0" "no merged PRs: 0 / 0" "$(printf '%s\n' "$OUT" | grep '^first_pass_approved:')"
@@ -1815,7 +1870,8 @@ if command -v jq >/dev/null 2>&1 && command -v sqlite3 >/dev/null 2>&1; then
 #!/usr/bin/env bash
 echo "$1 $2" >> "$CY_CALLS"
 case "$1 $2" in
-  "run list")   src="$CY_FX/runs.json" ;;
+  "run list")   [ -n "${CY_FAIL_RUNS:-}" ] && { echo "gh: HTTP 502" >&2; exit 1; }; src="${CY_RUNS:-$CY_FX/runs.json}" ;;
+  "run view")   src="$CY_FX/jobs-$3.json"; [ -f "$src" ] || { echo "run $3 not found" >&2; exit 1; } ;;
   "issue list") src="$CY_FX/issues.json" ;;
   "pr list")    src="$CY_FX/prs.json" ;;
   "pr view")    src="$CY_FX/pr-$3.json"; [ -f "$src" ] || src="$CY_FX/pr-none.json" ;;
@@ -1832,14 +1888,18 @@ SH
   T1=$(date -u -v-2H +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d '-2 hours' +%Y-%m-%dT%H:%M:%SZ)
   T2=$(date -u -v-1H +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d '-1 hour' +%Y-%m-%dT%H:%M:%SZ)
   jq -n --arg a "$T1" --arg b "$T2" '[
-    {databaseId: 1, workflowName: "ADLC Builder",  headBranch: "Feat/042-thing", status: "completed", conclusion: "success", startedAt: $a, updatedAt: ($a | fromdate + 120 | todate)},
-    {databaseId: 2, workflowName: "ADLC CI",       headBranch: "feat/42-thing", status: "completed", conclusion: "failure", startedAt: $a, updatedAt: ($a | fromdate + 30 | todate)},
-    {databaseId: 3, workflowName: "ADLC CI",       headBranch: "feat/42-thing", status: "completed", conclusion: "success", startedAt: $b, updatedAt: ($b | fromdate + 40 | todate)},
-    {databaseId: 4, workflowName: "ADLC review",   headBranch: "main",          status: "in_progress", conclusion: null, startedAt: $b, updatedAt: $b},
-    {databaseId: 6, workflowName: "ADLC preview deploy", headBranch: "main",    status: "completed", conclusion: "success", startedAt: $b, updatedAt: ($b | fromdate + 7 | todate)},
-    {databaseId: 5, workflowName: "Deploy site",   headBranch: "main",          status: "completed", conclusion: "success", startedAt: $b, updatedAt: $b}]' > "$CY/fx/runs.json"
+    {databaseId: 1, workflowName: "ADLC Builder",  headBranch: "Feat/042-thing", status: "completed", conclusion: "success", createdAt: $a, startedAt: $a, updatedAt: ($a | fromdate + 120 | todate)},
+    {databaseId: 2, workflowName: "ADLC CI",       headBranch: "feat/42-thing", status: "completed", conclusion: "failure", createdAt: $a, startedAt: $a, updatedAt: ($a | fromdate + 30 | todate)},
+    {databaseId: 3, workflowName: "ADLC CI",       headBranch: "feat/42-thing", status: "completed", conclusion: "success", createdAt: $b, startedAt: $b, updatedAt: ($b | fromdate + 40 | todate)},
+    {databaseId: 4, workflowName: "ADLC review",   headBranch: "main",          status: "in_progress", conclusion: null, createdAt: $b, startedAt: $b, updatedAt: $b},
+    {databaseId: 6, workflowName: "ADLC preview deploy", headBranch: "main",    status: "completed", conclusion: "success", createdAt: $b, startedAt: $b, updatedAt: ($b | fromdate + 7 | todate)},
+    {databaseId: 5, workflowName: "Deploy site",   headBranch: "main",          status: "completed", conclusion: "failure", createdAt: $b, startedAt: $b, updatedAt: $b}]' > "$CY/fx/runs.json"
+  # run 2 failed in 30 s, so it is looked up: its steps ran, so it is a failure of the lane, not a blocked run
+  echo '{"jobs": [{"name": "tests", "conclusion": "failure", "steps": [{"name": "Set up job", "conclusion": "success"}, {"name": "Run tests", "conclusion": "failure"}]}]}' > "$CY/fx/jobs-2.json"
   OUT=$( cd "$CY/repo" && env PATH="$CY/bin:$PATH" CY_FX="$CY/fx" CY_CALLS="$CY/calls" ADLC_REPO=acme/shop bash "$S/adlc-run-log.sh" actions 7 2>&1 ); check 0 "actions: runs to the end" $?
   eq 4 "actions: completed ADLC workflows only (not the live run, not another workflow)" "$(printf '%s\n' "$OUT" | wc -l | tr -d ' ')"
+  eq "failure failure success" "actions: outcome is the conclusion for a run that ran its steps, a failure included" "$(printf '%s\n' "$OUT" | jq -rs '[.[] | select(.run_id == "actions:2") | .conclusion, .outcome] + [.[] | select(.run_id == "actions:3") | .outcome] | join(" ")')"
+  eq 1 "actions: one run view call, for the one ADLC run that failed within 60 s (none for a green run, a slow one, or another workflow's fast failure)" "$(grep -c '^run view$' "$CY/calls")"
   eq "builder 42 120 null" "actions: the template's lane name → stage, branch → issue by adlc-branch-issue.sh's rule (case, leading zeros), seconds from the run; no tokens" \
      "$(printf '%s\n' "$OUT" | jq -r 'select(.run_id == "actions:1") | "\(.stage) \(.issue) \(.seconds) \(.tokens)"')"
   eq "adlc-ci failure" "actions: a guard lane keeps its own name and its conclusion" "$(printf '%s\n' "$OUT" | jq -r 'select(.run_id == "actions:2") | "\(.stage) \(.conclusion)"')"
@@ -1853,6 +1913,27 @@ SH
   ( cd "$CY/repo" && ADLC_REPO="o'brien/shop" bash "$S/adlc-run-log.sh" actions 7 >/dev/null 2>&1 ); check 2 "run-log: a repo name that is not owner/name is refused before any query" $?
   ( cd "$CY/repo" && ADLC_REPO= bash "$S/adlc-run-log.sh" otel "$CY/fx/telemetry.jsonl" >/dev/null 2>&1 ); check 2 "run-log: otel with no repo exits 2 like mc, not an empty-repo row" $?
   printf '%s\n' "$OUT" > "$CY/repo/.adlc/metrics/runs.jsonl"; printf '%s\n' "$B" >> "$CY/repo/.adlc/metrics/runs.jsonl"
+  # Issue 34: a blocked account. Runs 7 and 8 failed 3 s after creation with no step (no job; a job with no step):
+  # blocked, the tripwire's included. Run 9 failed in 20 s but ran its steps: a real diff-scope failure. Run 10 sat
+  # queued 200 s and failed 3 s after it STARTED: more than 60 s from creation, never looked up. Run 11 failed fast
+  # and gh cannot describe it: it stays a failure, and stderr says one was not read. Runs 12 and 13, neither with a
+  # step: 60 s from creation is still blocked, 61 s is a failure and is never looked up.
+  jq -n --arg b "$T2" 'def r(id; wf; c; q; s): {databaseId: id, workflowName: wf, headBranch: "feat/42-thing", status: "completed", conclusion: c, createdAt: ($b | fromdate - q | todate), startedAt: $b, updatedAt: ($b | fromdate + s | todate)};
+    [r(7; "ADLC CI"; "failure"; 0; 3), r(8; "ADLC main tripwire"; "failure"; 0; 3), r(9; "ADLC diff-scope"; "failure"; 0; 20),
+     r(10; "ADLC CI"; "failure"; 200; 3), r(11; "ADLC CI"; "failure"; 0; 7),
+     r(12; "ADLC fast lane"; "failure"; 0; 60), r(13; "ADLC fast lane"; "failure"; 0; 61)]' > "$CY/fx/runs-blocked.json"
+  echo '{"jobs": []}' > "$CY/fx/jobs-12.json"; echo '{"jobs": []}' > "$CY/fx/jobs-13.json"
+  echo '{"jobs": []}' > "$CY/fx/jobs-7.json"; echo '{"jobs": [{"name": "tripwire", "conclusion": "failure", "steps": []}]}' > "$CY/fx/jobs-8.json"
+  echo '{"jobs": [{"name": "scope", "conclusion": "failure", "steps": [{"name": "Check scope", "conclusion": "failure"}]}]}' > "$CY/fx/jobs-9.json"
+  : > "$CY/calls"
+  BL=$( cd "$CY/repo" && env PATH="$CY/bin:$PATH" CY_FX="$CY/fx" CY_RUNS="$CY/fx/runs-blocked.json" CY_CALLS="$CY/calls" ADLC_REPO=acme/shop bash "$S/adlc-run-log.sh" actions 7 2>"$CY/err" ); check 0 "actions, blocked account: runs to the end" $?
+  eq "7:blocked 8:blocked 9:failure 10:failure 11:failure 12:blocked 13:failure" "actions: a run that failed within 60 s of its creation with no step run is blocked (60 s included, 61 s not); one whose steps ran, one that was slow from creation, and one gh cannot describe stay failures" "$(printf '%s\n' "$BL" | jq -rs 'map((.run_id | sub("actions:"; "")) + ":" + .outcome) | join(" ")')"
+  eq "failure failure failure" "actions: a blocked row keeps GitHub's own conclusion beside the outcome" "$(printf '%s\n' "$BL" | jq -rs '[.[] | select(.outcome == "blocked") | .conclusion] | join(" ")')"
+  eq 5 "actions: one run view call per run that failed within 60 s of its creation, none for the queued one or the 61 s one" "$(grep -c '^run view$' "$CY/calls")"
+  eq 1 "actions: the run it could not read is counted on stderr, not guessed" "$(grep -c '1 run(s) that failed within 60 s could not be read' "$CY/err")"
+  ( cd "$CY/repo" && env PATH="$CY/bin:$PATH" CY_FX="$CY/fx" CY_FAIL_RUNS=1 CY_CALLS="$CY/calls" ADLC_REPO=acme/shop bash "$S/adlc-run-log.sh" actions 7 >"$CY/out" 2>"$CY/err" ); check 1 "actions: a failed run listing exits 1" $?
+  eq "0 1" "…with no row on stdout, and a line on stderr that says what failed" "$(wc -l < "$CY/out" | tr -d ' ') $(grep -c 'could not list the workflow runs' "$CY/err")"
+  printf '%s\n' "$BL" >> "$CY/repo/.adlc/metrics/runs.jsonl"
   # --- cycle: issue 7 goes intake (10 min) → gate:stories (5 min) → design → build; PR 9 references it and drew one changes-requested
   tl() { jq -cn --arg t "$1" --arg e "$2" --arg l "$3" '{event: $e, created_at: $t, label: (if $l == "" then null else {name: $l} end), actor: {login: "bot"}}'; }
   xref() { jq -cn --arg t "$1" --argjson n "$2" --argjson pr "$3" --arg repo "${4:-acme/shop}" '{event: "cross-referenced", created_at: $t, source: {issue: ({number: $n, repository: {full_name: $repo}} + (if $pr then {pull_request: {url: "x"}} else {} end))}}'; }
@@ -1912,7 +1993,14 @@ SH
   printf '%s\n' "$OUT" > "$CY/repo/.adlc/metrics/cycle.jsonl"
   OUT=$( cd "$CY/repo" && CLAUDE_PROJECT_DIR="$CY/repo" bash "$S/adlc-cycle.sh" report 7 2>&1 ); check 0 "cycle report: runs to the end" $?
   eq "builder          1               1      0.2       100%        60       100%  82%" "report: the per-stage spend table (agent runs only; cached share of the prompt)" "$(printf '%s\n' "$OUT" | grep '^builder ')"
-  eq "adlc-ci: runs=2 avg_sec=35 failed=1" "report: guard lanes by name with avg seconds and failures" "$(printf '%s\n' "$OUT" | grep '^adlc-ci:')"
+  eq "adlc-ci: runs=5 avg_sec=20 failed=3 blocked=1" "report: guard lanes by name; a blocked run is in runs= and blocked=, not in failed= and not in avg_sec ((30+40+3+7)/4)" "$(printf '%s\n' "$OUT" | grep '^adlc-ci:')"
+  eq "adlc-main-tripwire: runs=1 avg_sec=- failed=0 blocked=1" "report: a lane whose every run was blocked has no avg and no failure" "$(printf '%s\n' "$OUT" | grep '^adlc-main-tripwire:')"
+  eq "fast: runs=2 avg_sec=61 failed=1 blocked=1" "report: 60 s with no step is blocked, 61 s is the lane's failure" "$(printf '%s\n' "$OUT" | grep '^fast:')"
+  eq "adlc-diff-scope: runs=1 avg_sec=20 failed=1 blocked=0" "report: a fast failure that ran its steps is the lane's failure" "$(printf '%s\n' "$OUT" | grep '^adlc-diff-scope:')"
+  # a ledger written before the outcome field existed: the conclusion is read, nothing is called blocked
+  jq -c 'select(.source == "actions") | del(.outcome)' "$CY/repo/.adlc/metrics/runs.jsonl" > "$CY/old.jsonl"; cp "$CY/repo/.adlc/metrics/runs.jsonl" "$CY/new.jsonl"; cp "$CY/old.jsonl" "$CY/repo/.adlc/metrics/runs.jsonl"
+  eq "adlc-ci: runs=5 avg_sec=17 failed=4 blocked=0" "report: rows with no outcome field (an older ledger) are read by their conclusion" "$( cd "$CY/repo" && CLAUDE_PROJECT_DIR="$CY/repo" bash "$S/adlc-cycle.sh" report 7 2>&1 | grep '^adlc-ci:')"
+  cp "$CY/new.jsonl" "$CY/repo/.adlc/metrics/runs.jsonl"
   eq "issues=4  with_pr=2  fast_lane=1" "report: issue counts" "$(printf '%s\n' "$OUT" | grep '^issues=')"
   eq "rounds: total=3  issues_with_a_fix_round=1" "report: fix rounds" "$(printf '%s\n' "$OUT" | grep '^rounds:')"
   rm -f "$CY/repo/.adlc/metrics/runs.jsonl" "$CY/repo/.adlc/metrics/cycle.jsonl"
@@ -2121,6 +2209,141 @@ grep -q 'templates/settings.cache.json' "$BS" && ok "bootstrap merges settings.c
 grep -q 'removing the two keys undoes it' "$BS" && ok "…and tells the user how to undo it" || bad "bootstrap must say removing the two keys undoes it"
 grep -q 'A wait longer than the cache lifetime re-prices the next turn' "$ROOT/skills/efficient-runs/SKILL.md" && ok "efficient-runs: a wait longer than the cache lifetime re-prices the next turn" || bad "efficient-runs must carry the cache-lifetime rule"
 grep -q 'settings.cache.json  ' "$ROOT/README.md" && ok "README's layout tree lists settings.cache.json" || bad "README layout tree must list settings.cache.json"
+echo "adlc-ci-budget.sh (Actions minutes: will the CI battery fit):"
+# Issue 34: one host's battery of 17 to 23 job-minutes ran 4.6 times per merged PR and used about 8,000 minutes
+# in a month against 2,000 included; nothing had sized it. The helper is one multiplication with a verdict.
+bud() { OUT=$(bash "$S/adlc-ci-budget.sh" "$@" 2>/dev/null); }
+bud 20 4.6 87; check 1 "that host's figures do not fit" $?
+eq "estimate: 8004 CI minutes/month (20 min/run x 4.6 runs/PR x 87 PRs/month)|included: 2000 minutes/month|OVER: 401% of the included minutes (4.0x)" "…and the three lines say by how much (2000 is the default)" "$(printf '%s' "$OUT" | tr '\n' '|')"
+bud 10 4 20; check 0 "a small battery fits" $?
+eq "FITS: 40% of the included minutes" "…with its share" "$(printf '%s\n' "$OUT" | tail -1)"
+bud 23 4.6 20; check 1 "a decimal runs-per-PR is taken (4.6 is the measured figure)" $?
+eq "estimate: 2116 CI minutes/month (23 min/run x 4.6 runs/PR x 20 PRs/month)" "…and the product is exact to the minute (2116, not 2117 from a binary tail)" "$(printf '%s\n' "$OUT" | head -1)"
+bud 10 4 50; check 0 "an estimate equal to the included minutes fits" $?
+bud 10 4 50 1999; check 1 "one minute over does not, against an included figure given as the fourth argument" $?
+eq "OVER: 101% of the included minutes (1.0x)" "…and reads 101%" "$(printf '%s\n' "$OUT" | tail -1)"
+bud 2000.001 1 1; check 1 "a thousandth of a minute over is over" $?
+eq "OVER: 101% of the included minutes (1.0x)" "…and OVER never reads 100%" "$(printf '%s\n' "$OUT" | tail -1)"
+bud 0.5 3 1 1; check 1 "a fraction of a minute is rounded up in the estimate only (1.5 against 1 is over)" $?
+for a in "" "10" "10 4" "10 4 20 2000 1" "0 4 20" "10 0 20" "10 4 0" "10 4 20 0" "0.0 4 20" "x 4 20" "10 4.6.1 20" "10 4 2.5" "10 4 20 1e3" "-10 4 20" ".5 4 20" "10 4 20 2000.5"; do
+  # shellcheck disable=SC2086
+  bud $a; check 2 "bad arguments are an error, never a FITS: '$a'" $?
+done
+eq "" "…and print no verdict" "$OUT"
+grep -q 'adlc-ci-budget.sh <minutes/run> <runs/PR> <PRs/month>' "$ROOT/skills/bootstrap/SKILL.md" && ok "bootstrap runs the sizing helper from the plugin's templates" || bad "bootstrap: must run adlc-ci-budget.sh in the sizing step"
+BS="$(sed -n '/^7a\. \*\*Actions minutes\*\*/,/^7b\. /p' "$ROOT/skills/bootstrap/SKILL.md")"
+[ -n "$BS" ] && ok "bootstrap has the Actions minutes step (7a)" || bad "bootstrap: the Actions minutes step (7a) is missing"
+# (a here-string, not a pipe: under pipefail a `grep -q` that exits on its match can fail the writer)
+for w in 'PRIVATE repo' '4–5' 'PRs per month' '`paths` filters' '`stage:qa`' 'adlc-local-ci.sh' 'the tripwire' 'adlc-doctor.sh'; do
+  grep -qF -- "$w" <<<"$BS" && ok "bootstrap 7a names: $w" || bad "bootstrap 7a must name: $w"
+done
+eq "paths-heavy-local" "bootstrap 7a proposes in order: paths filters, heavy jobs later, the local recipe" "$(printf '%s' "$BS" | tr '\n' ' ' | sed -nE 's/.*\(1\)[^(]*paths.*\(2\)[^(]*heavy jobs.*\(3\)[^(]*local CI recipe.*/paths-heavy-local/p')"
+grep -q '~2,000 Actions min/month free' "$ROOT/README.md" "$ROOT/skills/bootstrap/SKILL.md" && bad "the bare '~2,000 Actions min/month free' is back" || ok "README and bootstrap no longer quote the free minutes bare"
+grep -q 'adlc-ci-budget.sh' "$ROOT/README.md" && grep -q 'adlc-local-ci.sh' "$ROOT/README.md" && ok "README names both new scripts" || bad "README must name adlc-ci-budget.sh and adlc-local-ci.sh"
+
+echo "adlc-local-ci.sh (the battery run locally, one marker comment):"
+# Issue 34: a host whose Actions was blocked posted free-form "Local CI on head X" comments. The recipe: run the
+# host's own list of commands on the PR's head commit, post ONE comment whose last line is the marker. A real git
+# repo, a stub gh that serves the PR's head and records the comment.
+if command -v jq >/dev/null 2>&1; then
+  LC="$(mktemp -d)"; mkdir -p "$LC/bin" "$LC/fx" "$LC/repo/.adlc"
+  cat > "$LC/bin/gh" <<'SH'
+#!/usr/bin/env bash
+echo "$1 $2" >> "$LC_CALLS"
+case "$1 $2" in
+  "pr view")    [ -f "$LC_FX/fail-view" ] && { echo "gh: HTTP 502" >&2; exit 1; }; cat "$LC_FX/head" ;;
+  "pr comment") [ -f "$LC_FX/fail-comment" ] && { echo "gh: HTTP 403" >&2; exit 1; }
+                [ "$3" = 7 ] || exit 2; b=""; while [ $# -gt 0 ]; do [ "$1" = "--body" ] && b="$2"; shift; done; printf '%s\n' "$b" > "$LC_FX/posted" ;;
+  "pr list")    jq -n --arg b "$(cat "$LC_FX/posted")" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '[{number: 7, mergedAt: $at, createdAt: $at, changedFiles: 1, headRefName: "feat/7", comments: [{body: $b}]}]' > "$LC_FX/prs.json"
+                f=.; while [ $# -gt 0 ]; do [ "$1" = "--jq" ] && f="$2"; shift; done; jq -r "$f" "$LC_FX/prs.json" ;;
+  "run list"|"issue list") f=.; while [ $# -gt 0 ]; do [ "$1" = "--jq" ] && f="$2"; shift; done; echo '[]' | jq -r "$f" ;;
+  *) exit 2 ;;
+esac
+SH
+  chmod +x "$LC/bin/gh"
+  git -C "$LC/repo" init -q . && git -C "$LC/repo" config user.email t@example.com && git -C "$LC/repo" config user.name t
+  # the battery: a comment, a blank line, a name with a space around its colon, a command that holds colons and
+  # must run from the repo root, a failing check in the middle, and a check after it that must still run
+  printf '# the battery\n\ntests: true\n  lint : echo "a: b" >/dev/null && test -f .adlc/local-ci.txt\nimage build: exit 3\nafter: test -z "$(cat)" && echo ran >> "%s/ran"\n' "$LC" > "$LC/repo/.adlc/local-ci.txt"
+  mkdir "$LC/repo/src"; echo x > "$LC/repo/src/x"
+  git -C "$LC/repo" add -A && git -C "$LC/repo" commit -qm init
+  HEAD_SHA="$(git -C "$LC/repo" rev-parse HEAD)"; echo "$HEAD_SHA" > "$LC/fx/head"; : > "$LC/calls"
+  lci() { ( cd "$LC/repo/src" && env PATH="$LC/bin:$PATH" LC_FX="$LC/fx" LC_CALLS="$LC/calls" bash "$S/adlc-local-ci.sh" "$@" ) >"$LC/out" 2>"$LC/err"; }   # run from a subdirectory
+  lci 7 --dry-run <<<"the caller's stdin"; check 1 "a battery with a failing check exits 1" $?
+  eq "ADLC-CI: FAIL head $HEAD_SHA" "the LAST line of the comment is the marker, with the full sha" "$(tail -1 "$LC/out")"
+  eq "| tests | pass | 0 |,| lint | pass | 0 |,| image build | FAIL | 3 |,| after | pass | 0 |," "one table row per check: name, result, exit code (seconds follow); a command with colons runs from the repo root; a failure does not stop the checks after it; a check that reads stdin gets none of the caller's" "$(grep -E '^\| (tests|lint|image build|after) ' "$LC/out" | sed -E 's/ [0-9]+ \|$//' | tr '\n' ',')"
+  eq 1 "…the check after the failure ran, once" "$(wc -l < "$LC/ran" | tr -d ' ')"
+  eq "1 0" "--dry-run reads the PR's head and posts nothing" "$(grep -c '^pr view$' "$LC/calls") $(grep -c '^pr comment$' "$LC/calls")"
+  grep -q 'A record, not a gate' "$LC/out" && ok "the comment says it is a record, not a gate" || bad "the comment must say it is a record, not a gate"
+  : > "$LC/calls"; lci 7; check 1 "posting: the exit code is still the battery's" $?
+  eq 1 "…in ONE gh pr comment call" "$(grep -c '^pr comment$' "$LC/calls")"
+  eq "ADLC-CI: FAIL head $HEAD_SHA" "…whose last line is the marker" "$(tail -1 "$LC/fx/posted")"
+  eq "" "…and stdout stays empty (the checks' output and the progress go to stderr)" "$(cat "$LC/out")"
+  # the reader: adlc-metrics.sh counts the comment this script wrote as one red CI run of the merged PR
+  M=$( cd "$LC/repo" && env PATH="$LC/bin:$PATH" LC_FX="$LC/fx" LC_CALLS="$LC/calls" bash "$S/adlc-metrics.sh" 30 2>&1 )
+  eq "local_ci: 1 ADLC-CI marker comments on 1 merged PRs (1 FAIL), counted above as CI runs" "adlc-metrics.sh reads the comment adlc-local-ci.sh writes" "$(printf '%s\n' "$M" | grep '^local_ci:')"
+  eq "iterations_to_green: avg 1 CI runs per merged PR; failed_first: 1 / 1" "…as a CI run of a PR that has no Actions run at all" "$(printf '%s\n' "$M" | grep '^iterations_to_green:')"
+  # a green battery, from a commands file named on the command line
+  printf 'tests: true\nlint: test -d src\n' > "$LC/green.txt"
+  : > "$LC/calls"; rm -f "$LC/fx/posted"; lci 7 "$LC/green.txt"; check 0 "a green battery exits 0 (commands file given as an argument)" $?
+  eq "ADLC-CI: PASS head $HEAD_SHA" "…and posts the PASS marker" "$(tail -1 "$LC/fx/posted" 2>/dev/null)"
+  # refusals: exit 2, nothing runs, nothing is posted
+  refuse() { rm -f "$LC/ran" "$LC/fx/posted"; : > "$LC/calls"; lci "${@:2}"; check 2 "$1: exit 2" $?
+             eq "no no 0" "…no check ran, nothing posted" "$([ -f "$LC/ran" ] && echo yes || echo no) $([ -f "$LC/fx/posted" ] && echo yes || echo no) $(grep -c '^pr comment$' "$LC/calls")"; }
+  echo y > "$LC/repo/untracked.txt"; refuse "an untracked file (the tree is not clean)" 7
+  grep -q 'working tree is not clean' "$LC/err" && ok "…and says why" || bad "a dirty tree must be named"
+  rm "$LC/repo/untracked.txt"; echo changed > "$LC/repo/src/x"; refuse "a modified tracked file" 7; git -C "$LC/repo" checkout -q -- src/x
+  echo 3333333333333333333333333333333333333333 > "$LC/fx/head"; refuse "HEAD is not the PR's head commit" 7
+  grep -q "PR #7's head is 3333333333333333333333333333333333333333" "$LC/err" && ok "…and names both commits" || bad "a wrong head must be named"
+  echo "$HEAD_SHA" > "$LC/fx/head"; touch "$LC/fx/fail-view"; refuse "the PR's head cannot be read from gh" 7; rm "$LC/fx/fail-view"
+  refuse "no PR number" --dry-run; refuse "a PR that is not a number" abc; refuse "an unknown option" 7 --post; refuse "a third argument" 7 a b
+  refuse "a commands file that does not exist" 7 "$LC/none.txt"
+  printf 'tests: touch "%s/ran"\njust a command\n' "$LC" > "$LC/bad.txt"; refuse "a line with no '<name>: <command>' (the checks before it do not run either)" 7 "$LC/bad.txt"
+  printf 'tests: touch "%s/ran"\nlint:\n' "$LC" > "$LC/bad.txt"; refuse "a name with no command" 7 "$LC/bad.txt"
+  printf 'te|sts: touch "%s/ran"\n' "$LC" > "$LC/bad.txt"; refuse "a name that would break the table" 7 "$LC/bad.txt"
+  printf '# nothing yet\n\n' > "$LC/bad.txt"; refuse "a commands file with no check" 7 "$LC/bad.txt"
+  ( cd "$LC" && env PATH="$LC/bin:$PATH" LC_FX="$LC/fx" LC_CALLS="$LC/calls" bash "$S/adlc-local-ci.sh" 7 --dry-run "$LC/green.txt" >/dev/null 2>&1 ); check 2 "outside a git checkout: exit 2" $?
+  # a repo that hides untracked files from git status: they count all the same
+  git -C "$LC/repo" config status.showUntrackedFiles no; echo y > "$LC/repo/untracked.txt"
+  refuse "an untracked file in a repo with status.showUntrackedFiles=no" 7; rm "$LC/repo/untracked.txt"; git -C "$LC/repo" config --unset status.showUntrackedFiles
+  # a check that changes the tree: the checks after it ran on something that is not the commit the marker names.
+  # A formatter that fixes a tracked file and a generator that leaves an untracked one, each followed by a check
+  # that is green only BECAUSE of the change.
+  printf 'fmt: echo fixed >> src/x\ntests: grep -q fixed src/x\n' > "$LC/fmt.txt"
+  rm -f "$LC/fx/posted"; : > "$LC/calls"; lci 7 "$LC/fmt.txt"; check 2 "a check that rewrote a tracked file: exit 2, although every check was green" $?
+  eq "no 0" "…and nothing is posted" "$([ -f "$LC/fx/posted" ] && echo yes || echo no) $(grep -c '^pr comment$' "$LC/calls")"
+  grep -q 'the battery changed the working tree' "$LC/err" && grep -q '^ M src/x$' "$LC/err" && ok "…and stderr names the changed file" || bad "a tree the battery changed must be named"
+  lci 7 --dry-run "$LC/fmt.txt"; check 2 "…with --dry-run too" $?
+  eq "" "…which prints no comment" "$(cat "$LC/out")"
+  git -C "$LC/repo" checkout -q -- src/x
+  printf 'gen: echo y > src/gen.py\ntests: test -f src/gen.py\n' > "$LC/gen.txt"
+  rm -f "$LC/fx/posted"; : > "$LC/calls"; lci 7 "$LC/gen.txt"; check 2 "a check that left an untracked file: exit 2" $?
+  eq "no 0" "…and nothing is posted" "$([ -f "$LC/fx/posted" ] && echo yes || echo no) $(grep -c '^pr comment$' "$LC/calls")"
+  rm -f "$LC/repo/src/gen.py"
+  # a check that moves HEAD: the sha the marker would name is no longer what is checked out
+  printf 'tests: true\nmoves head: git commit -q --allow-empty -m moved\n' > "$LC/move.txt"
+  rm -f "$LC/fx/posted"; : > "$LC/calls"; lci 7 "$LC/move.txt"; check 2 "HEAD moved during the battery: exit 2" $?
+  eq "no 0" "…and nothing is posted" "$([ -f "$LC/fx/posted" ] && echo yes || echo no) $(grep -c '^pr comment$' "$LC/calls")"
+  git -C "$LC/repo" reset -q --hard "$HEAD_SHA"
+  # the post fails: exit 2 (no record exists), and the comment is printed so the result is not lost
+  touch "$LC/fx/fail-comment"; lci 7 "$LC/green.txt"; check 2 "a failed gh pr comment: exit 2, although the battery was green" $?
+  eq "ADLC-CI: PASS head $HEAD_SHA" "…with the comment on stdout" "$(tail -1 "$LC/out")"
+  grep -q 'nothing was posted' "$LC/err" && ok "…and stderr says nothing was posted" || bad "a failed post must be said"
+  rm -rf "$LC"
+else
+  echo "  · skipped the local CI checks (no jq here)"
+fi
+LCS="$S/adlc-local-ci.sh"
+grep -q 'RECORD, not a gate' "$LCS" && grep -q 'Anyone who can comment on the PR can write that line' "$LCS" && ok "the script's header says the marker is a record, not a gate" || bad "adlc-local-ci.sh: the header must say the marker is a record, not a gate"
+grep -q 'per-command timeout' "$LCS" && ok "…and that there is no per-command timeout" || bad "adlc-local-ci.sh: the header must say there is no per-command timeout"
+QA="$ROOT/skills/role-qa-release-ops/SKILL.md"
+grep -q 'ADLC-CI: PASS|FAIL head <sha>' "$QA" && ok "QA's role prompt names the local CI marker" || bad "role-qa-release-ops: must name the ADLC-CI marker"
+grep -q "only when that SHA is the PR's current head" <<<"$(tr '\n' ' ' < "$QA")" && ok "…as the battery result only for the PR's current head" || bad "role-qa-release-ops: a local CI marker counts only for the PR's current head"
+grep -q 'one for an older commit does not' <<<"$(tr '\n' ' ' < "$QA")" && ok "…and not for an older commit" || bad "role-qa-release-ops: must say an older marker does not count"
+grep -q 'a record, not a gate' "$QA" && ok "…and calls it a record, not a gate" || bad "role-qa-release-ops: must call the marker a record, not a gate"
+grep -q '\.adlc/scripts/adlc-local-ci\.sh <pr>' "$RB" && grep -q '\.adlc/local-ci\.txt' "$RB" && ok "RUNBOOK has the local CI recipe (script and commands file)" || bad "RUNBOOK must name adlc-local-ci.sh and .adlc/local-ci.txt"
+grep -q 'a record, not a gate: anyone who can comment can write that line' <<<"$(tr '\n' ' ' < "$RB")" && ok "…and says the marker is a record, not a gate" || bad "RUNBOOK: must say the marker is a record, not a gate"
+grep -q '`blocked=`' "$ROOT/skills/cycle-retro/SKILL.md" && ok "cycle-retro explains the blocked= figure" || bad "cycle-retro must explain blocked="
 
 echo ""
 echo "== $pass passed, $fail failed =="

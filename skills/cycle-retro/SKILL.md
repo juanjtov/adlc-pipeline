@@ -28,7 +28,11 @@ mkdir -p .adlc/metrics
   cache-read share, USD, model. Tokens and cost exist only where Claude Code exported telemetry
   (Mission Control or the collector); a run with `tokens: 0` ran with telemetry off — count it for
   latency, not for spend. In GitHub Actions only the `actions` source is available: lane latency
-  and failure rate, no tokens.
+  and failure rate, no tokens. An `actions` row whose `outcome` is `blocked` is a run GitHub
+  failed within 60 s with no step run (what an exhausted Actions budget looks like); the report
+  prints those per lane as `blocked=`, outside `failed=` and `avg_sec`. Blocked runs mean the
+  lane was not running: say so first (a billing fix for the Principal), and do not tune a lane
+  on them.
 - **`cycle.jsonl`** — one row per issue: seconds in each `stage:*` / `gate:*` label,
   `stage_seconds` (queue time plus agent time — an issue can wait at `stage:intake` for days before
   anything runs) vs `gate_seconds` (waiting on the Principal), `intake_to_pr_seconds`, fix `rounds`
@@ -38,7 +42,9 @@ mkdir -p .adlc/metrics
   close as PASS-with-findings leaves no marker on GitHub, and two rounds in which a different
   reviewer asked each time read as one; a re-posted CHANGES comment reads as one more. The
   agents' own minutes are in `runs.jsonl`; the gap between the two is queue time.
-- **`adlc-metrics.sh`** — first-pass acceptance and iterations-to-green from the same window.
+- **`adlc-metrics.sh`** — first-pass acceptance and iterations-to-green from the same window
+  (with a `blocked:` line when GitHub blocked CI runs, and a `local_ci:` line when local CI
+  marker comments stood in for them; neither is printed at zero).
 
 ## Step 1 — Rank
 

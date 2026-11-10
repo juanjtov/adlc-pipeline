@@ -77,6 +77,7 @@ templates/                     # what the wizard fills into the host repo
             adlc-run-log.sh · adlc-cycle.sh                                            # the cycle-retro's two ledgers
             adlc-relabel.sh                                                            # one state per issue: move to a stage:/gate: label in one call
             adlc-adr-check.sh                                                          # an ADR's Scope = its issue's scope file, once that exists; each Guarantees row names a test that exists
+            adlc-ci-budget.sh · adlc-local-ci.sh                                       # Actions minutes: will the CI battery fit · the battery run locally, one marker comment on the PR
             #   adlc-cache.sh        = prompt-cache hit-rate rollup
             #   adlc-run-log.sh      = run ledger: tokens · cost · seconds per agent run (Mission Control / OTel / Actions)
             #   adlc-cycle.sh        = cycle time per stage + fix rounds per issue, from the label timeline; the ranked report
@@ -343,9 +344,10 @@ Everything that makes a change safe is kept:
   approval — autopilot auto-approves Gate 1 into the *full* pipeline only.
 - **Author/verifier separation** — an independent adversarial + security review still runs.
 - **A deterministic cap** — `adlc-triage.sh` re-checks the *real* diff (≤ 5 files / ≤ 40 lines by
-  default, nothing touching migrations, auth, infra, CI, deps (`.gitmodules` included) or secrets,
-  and no change to a submodule's pointer, which is one line in a diff however much code it
-  brings in). Over-cap or sensitive ⇒ the change is **bounced back to the full pipeline**
+  default, nothing touching migrations, auth, infra, CI (the local battery `.adlc/local-ci.txt`
+  included), deps (`.gitmodules` included) or secrets, and no change to a submodule's pointer,
+  which is one line in a diff however much code it brings in). Over-cap or sensitive ⇒ the
+  change is **bounced back to the full pipeline**
   (`stage:design`). So a mis-triage — or a crafted issue arguing it's "trivial" — can't smuggle a
   big change through.
   The same cap also runs from the default branch (in `adlc-diff-scope.yml`), so a PR that edits the
@@ -361,13 +363,19 @@ The wizard offers three levels, and **GitHub Actions auto-triggering needs no Gi
 Pro was only ever about server-side branch protection on private repos:
 
 1. **Local recipe** — the Principal drives each lane by hand per the RUNBOOK. No Actions, any
-   plan. The recommended way to prove the pipeline first.
+   plan. The recommended way to prove the pipeline first. Where the checks do not run on
+   GitHub, `adlc-local-ci.sh` runs the battery on your machine and posts the result as one PR
+   comment (a record, not a gate).
 2. **Full automation · public repo** — label transitions auto-trigger the lanes; the merge
    gate is real branch protection (free on public repos); unlimited Actions minutes.
-3. **Full automation · private repo (Free plan)** — lanes still auto-trigger (~2,000 Actions
-   min/month free). Branch protection isn't available, so the merge gate is the plugin's guard
-   hook (backed by the `settings.json` deny rules) + `adlc-main-tripwire.yml` (fails + files a
-   bug on any direct push to main) + human Gate 2.
+3. **Full automation · private repo (Free plan)** — lanes still auto-trigger, on the plan's
+   included Actions minutes (about 2,000 a month on Free): a CI battery with a database, perf
+   or image job on every push can use them up in days, and then every workflow fails at once,
+   the tripwire included, so the wizard sizes the battery first (`adlc-ci-budget.sh`) and
+   `adlc-doctor.sh` and Mission Control say when it has happened. Branch protection isn't
+   available, so the merge gate is the plugin's guard hook (backed by the `settings.json` deny
+   rules) + `adlc-main-tripwire.yml` (fails + files a bug on any direct push to main) + human
+   Gate 2.
 
 Full automation (either kind) needs two repo secrets: `CLAUDE_CODE_OAUTH_TOKEN`
 (`claude setup-token` — subscription, no API key) and `ADLC_DISPATCH_TOKEN` (a PAT or, better,

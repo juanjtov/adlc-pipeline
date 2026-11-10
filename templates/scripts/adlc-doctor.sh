@@ -209,7 +209,7 @@ if ls "${root}"/.github/workflows/adlc-*.yml >/dev/null 2>&1; then
       if [ "$fast" = true ]; then
         steps=$(ask run view "$latest" --json jobs --jq '[.jobs[]?.steps[]? | select(.conclusion != null and .conclusion != "" and .conclusion != "skipped")] | length') || steps=""
         if [ "$steps" = 0 ]; then
-          note "GitHub Actions looks blocked: the last ${n} completed runs (skipped and cancelled ones left out) all failed within 60 s of being created, and the latest (run ${latest}) ran no step. That is what an exhausted Actions budget (included minutes, or the spending limit) looks like; a failing test is not it. Every workflow is dead, the tripwire included: nothing watches the default branch until it is fixed (Settings → Billing and plans → Actions)."
+          note "GitHub Actions looks blocked: the last ${n} completed runs (skipped and cancelled ones left out) all failed within 60 s of being created, and the latest (run ${latest}) ran no step. That is what an exhausted Actions budget (included minutes, or the spending limit) looks like; a failing test is not it. Every workflow is dead, the tripwire included: nothing watches the default branch until it is fixed (Settings → Billing and plans → Actions). Until then .adlc/scripts/adlc-local-ci.sh <pr> can run the battery here (from .adlc/local-ci.txt) and record the result on the PR."
         elif [ -z "$steps" ]; then
           note "GitHub Actions may be blocked: the last ${n} completed runs (skipped and cancelled ones left out) all failed within 60 s of being created; the latest (run ${latest}) could not be read, so whether a step ran is unknown. Check Settings → Billing and plans → Actions."
         else
