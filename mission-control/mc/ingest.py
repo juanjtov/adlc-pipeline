@@ -31,6 +31,20 @@ class Repos:
         self.cache[cwd] = (time.time(), repo, branch)
         return repo, branch
 
+    def root(self, cwd):
+        """The top folder of the git checkout a working directory is in, or '' when it is in none (a plain folder,
+        a bare clone, the inside of a .git folder)."""
+        return _git(cwd, 'rev-parse', '--show-toplevel') if cwd else ''
+
+    def main_root(self, cwd):
+        """For a linked worktree, the top folder of the checkout it was added from; '' for anything else. A worktree
+        shares that checkout's repository, so it is the same repo even when its own branch predates the markers."""
+        common = _git(cwd, 'rev-parse', '--git-common-dir') if cwd else ''
+        if not common:
+            return ''
+        common = os.path.realpath(os.path.join(cwd, common))   # git prints it relative to cwd on some versions
+        return os.path.dirname(common) if os.path.basename(common) == '.git' else ''
+
 
 def _git(cwd, *args):
     try:
@@ -40,17 +54,56 @@ def _git(cwd, *args):
         return ''
 
 
-def adopted(cwd):
+MAX_CWD = 4096   # longer than any real path; the walk below costs a few file checks per level
+
+
+def adopted(cwd, top=None):
     """Whether a working directory is in a repo /adlc-init set up: the same rule as the guard hook (hooks/adlc-guard.sh),
-    one of the wizard's markers at or above it. A bare .adlc/ folder is not one."""
-    d = os.path.abspath(cwd) if cwd else ''
+    one of the wizard's markers at or above it. A bare .adlc/ folder is not one.
+
+    With `top` (the checkout's top folder) the walk stops there, so a marker further up does not count: a clone
+    that sits inside an adopted repo's folder has not adopted anything itself."""
+    if not cwd or not isinstance(cwd, str) or len(cwd) > MAX_CWD or '\0' in cwd:
+        return False
+    d = os.path.abspath(cwd)
+    if top:
+        d, top = os.path.realpath(d), os.path.realpath(top)   # git names the top by its real path; compare like with like
     while d:
         if os.path.isdir(os.path.join(d, '.adlc', 'scripts')) or os.path.isfile(os.path.join(d, '.adlc', 'VERSION')) \
                 or os.path.isfile(os.path.join(d, 'docs', 'adlc', 'CHARTER.md')):
             return True
+        if top and (d == top or _same(d, top)):   # the same folder under another spelling (a case-insensitive disk)
+            return False
         up = os.path.dirname(d)
         d = up if up != d else ''
     return False
+
+
+def _same(a, b):
+    try:
+        return os.path.samefile(a, b)
+    except OSError:
+        return False
+
+
+def session_repo(repos, cwd):
+    """The repo a Claude Code session opening in `cwd` puts on the menu, or None. The one rule for the server (which
+    acts on it) and the launcher (which tells the user what a session would do), so the two cannot disagree.
+
+    A marker at or above the folder comes first, as for the guard (no git call is made for any other folder). It
+    must then belong to the checkout the folder is in: found between the folder and that checkout's top, or, for a
+    linked worktree, at the top of the checkout it was added from. A folder git gives no top for (a plain folder,
+    a bare clone, the inside of a .git folder) adds nothing, whatever sits above it."""
+    if not adopted(cwd):
+        return None
+    top = repos.root(cwd)
+    if not top:
+        return None
+    if not adopted(cwd, top):
+        main = repos.main_root(cwd)
+        if not main or _same(main, top) or not adopted(main, main):
+            return None
+    return repos.lookup(cwd)[0] or None
 
 
 _REMOTE_RE = re.compile(r'[:/]([^/:@\s]+)/([^/:@\s]+)$')
@@ -155,9 +208,7 @@ class Ingest:
     def _session_started(self, cwd):
         """A Claude Code session opened somewhere. In an adopted repo that puts the repo on the page's menu, so it is
         there before any agent has run in it. Anywhere else nothing is kept, not even the path."""
-        if not adopted(cwd):
-            return False
-        repo, _ = self.repos.lookup(cwd)
+        repo = session_repo(self.repos, cwd)
         if not repo or repo in self.store.repos():
             return False
         self.on_repo(repo)

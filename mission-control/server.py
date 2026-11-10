@@ -267,8 +267,14 @@ def already_running(port, repo, demo, open_page, note=''):
         url += '/?repo=' + quote(repo, safe='/')
         print('Mission Control is already running and shows %s too: %s%s' % (repo, url, tail))
     elif repo:
-        print('Mission Control is already running at %s.%s %s is not on its menu yet: it appears once a Claude Code session '
-              'opens in this repo, or a pipeline agent runs here.' % (url, ' ' + note if note else '', repo))
+        # What a session opening in this folder would add is the server's own rule; say it only when it is this repo.
+        if ingest.session_repo(ingest.Repos(), os.getcwd()) == repo:
+            how = ('it appears when a Claude Code session starts in this folder, or when a pipeline agent runs here. A '
+                   'session that is already open is not seen until Claude Code next sends its session-start event.')
+        else:
+            how = ('it appears when a pipeline agent runs in it. A Claude Code session opening in the folder you are in '
+                   'does not add it: the folder is not a checkout of that repo set up with /adlc-init.')
+        print('Mission Control is already running at %s.%s %s is not on its menu yet: %s' % (url, ' ' + note if note else '', repo, how))
     else:
         print('Mission Control is already running at ' + url + tail)
     if open_page:
