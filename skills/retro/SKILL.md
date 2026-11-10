@@ -36,14 +36,25 @@ Inputs (all deterministic — never agent self-report):
   rebuild time rather than losing its findings. The script reports on stderr every finding-shaped
   line it could not read (`ADLC-FINDING:` followed by three `|`-separated fields, not placed at
   the start of the line); look at those before ranking, since a marker shape it does not know is
-  a finding the retro never sees.
+  a finding the retro never sees. It also writes each class as its canonical name from the
+  closed list in `adlc:edd-spec` (`logic-bug` → `logic-contradiction`, `test-coverage` →
+  `test-gap`, …) and reports once per run, on stderr, any class name outside the list.
 - **`CONTEXT-LOG.md`** — what's already been added and why.
 
 ## Step 1 — Rank
 
-Aggregate findings by **class × frequency × severity** over the window. A class that recurs
-across **separate PRs/sessions** is a candidate for a durable fix. A one-off is not — leave it
-to the model (adding context for a single miss is how bloat starts).
+Aggregate findings by **class × frequency × severity** over the window, on the canonical class
+the ledger holds:
+```
+jq -r .class .adlc/metrics/findings.jsonl | sort | uniq -c | sort -rn
+# names outside the closed list, ranked apart (a recurring one is a candidate for the list, in the plugin)
+comm -23 <(jq -r .class .adlc/metrics/findings.jsonl | sort -u) <(.adlc/scripts/adlc-log-findings.sh classes | sort)
+```
+A class that recurs across **separate PRs/sessions** is a candidate for a durable fix. A one-off
+is not — leave it to the model (adding context for a single miss is how bloat starts). Rank the
+names outside the list separately and do not merge them into a canonical class by eye: if one
+recurs, propose it as a synonym or a class in the plugin (Step 5), so every host counts it the
+same way next time.
 
 ## Step 2 — Compound (cheapest durable layer first)
 
@@ -56,6 +67,8 @@ in this order — a lower layer always beats a higher one:
 | tenant-leak, authz-gap, injection, secret-in-code | a **`adlc:security-gate` case** + a regression test |
 | hallucinated-api | a **CI check** (symbol/import lint) + a `project-conventions` "seams" note |
 | contract-violation / diff-scope breach | tighten the ADR template's declared-scope section |
+| test-gap | write the missing test, or make the vacuous one able to fail (an executable fix, like the first row) |
+| doc-drift | correct the doc, and where a check can compare the doc to the code (a table of names, a list of scripts), add that check |
 | flaky-test | fix/quarantine the test — **not** a context line |
 | recurring, un-checkable gotcha | last resort: one line in `project-conventions` or CLAUDE.md |
 

@@ -75,8 +75,9 @@ adversarial: try fetching another tenant's object path.
 | **Medium** | Missing negative tests, verbose errors, rate-limit gap on new endpoint | Merge allowed with a follow-up issue filed at `stage:intake`. |
 | **Low** | Hardening opportunities | Note in review. |
 
-QA/Ops verdict format: finding → file:line → severity → **class** (`adlc:edd-spec` vocabulary,
-e.g. `tenant-leak`, `injection`) → attack demonstrated (or "theoretical") → required fix.
+QA/Ops verdict format: finding → file:line → severity → **class** (one of the closed list in
+`adlc:edd-spec`, e.g. `tenant-leak`, `authz-gap`, `injection`, `secret-in-code`; `other` only with
+a note) → attack demonstrated (or "theoretical") → required fix.
 Add a machine-readable line per finding — `ADLC-FINDING: <severity> | <class> | <file>` — to the
 comment; the `retro` loop materializes the findings ledger from these comment lines. The Principal additionally runs Claude Code's
 `/security-review` on the PR branch before Gate 2 (subscription-billed, no API key) — it

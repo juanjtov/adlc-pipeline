@@ -53,7 +53,11 @@ reviewer told only to "find gaps" manufactures noise; you find *real* breakage.
 Verdict line: **PASS** / **CHANGES REQUESTED**. Then per finding:
 `severity (Critical/High/Medium/Low) · file:line · the failing input→result · which pillar ·
 required fix`, plus a machine-readable line per finding — `ADLC-FINDING: <severity> | <class> | <file>`
-(class from `adlc:edd-spec`) — which the retro materializes the findings ledger from. End with your structured-disagreement note (the strongest counter-case you
+— which the retro materializes the findings ledger from. The class is one of the closed list in
+`adlc:edd-spec`: `tenant-leak` `authz-gap` `injection` `secret-in-code` `hallucinated-api`
+`missing-edge-case` `logic-contradiction` `contract-violation` `test-gap` `flaky-test`
+`perf-regression` `doc-drift`, or `other` with a note saying what it is. Never coin a name: the
+retro counts recurrence by class, and a new spelling hides a repeat. End with your structured-disagreement note (the strongest counter-case you
 tested and what the evidence showed). You are advisory — you never change labels or merge —
 but a confirmed **Critical/High** correctness or security finding must block the QA gate.
 End your comment with a machine-readable verdict line — exactly `ADLC-ADV: PASS` or
