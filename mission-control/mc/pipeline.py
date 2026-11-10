@@ -43,6 +43,10 @@ LABEL_ORDER = ['stage:intake', 'gate:stories', 'stage:design', 'stage:fast', 'st
 TRIAGE_RE = re.compile(r'ADLC-TRIAGE:\s*(FAST|FULL)')
 ADV_RE = re.compile(r'ADLC-ADV:\s*(PASS|CHANGES)')
 ARCH_RE = re.compile(r'ADLC-ARCH:\s*(PASS|CHANGES)')
+# A review verdict as templates/scripts/adlc-rounds.sh reads it for the fix-round count: markup after the colon is
+# fine, PASSED is not PASS. Keep the two alike (tests/run.sh runs both over the same pull requests).
+VERDICT_RE = re.compile(r'ADLC-(ADV|ARCH):[*`_\s]*(PASS|CHANGES)(?![A-Za-z0-9_])')
+CHANGES_LABEL = 'adlc:changes-requested'   # the review lane puts it on a pull request for each review that is not clean
 ACTION_CARD_RE = re.compile(r'Proposed Action Card', re.I)
 ADR_RE = re.compile(r'(?:ADR[ -]?|docs/adr/)(\d{3,4})')
 
@@ -77,6 +81,24 @@ def refs_in(text):
         if first:
             issue_n = int(first.group(1))
     return issue_n, pr_n
+
+
+def fix_rounds(labelled, comments):
+    """When each review sent a pull request back, oldest first. Their number is the pull request's fix rounds, the
+    count the fix-loop cap reads (templates/scripts/adlc-rounds.sh): the larger of its `adlc:changes-requested`
+    label events and its CHANGES verdict comments per marker, a comment's last marker being its verdict.
+
+    `labelled` holds the times of the label events, `comments` the pull request's comments ({'ts', 'body'}).
+    Where two sources are as long, the later time of each pair stands: the label follows the verdict it was put on for.
+    """
+    asked = {'ADV': [], 'ARCH': []}
+    for c in sorted(comments, key=lambda c: c.get('ts') or 0):
+        hits = VERDICT_RE.findall(c.get('body') or '')
+        if hits and hits[-1][1] == 'CHANGES':
+            asked[hits[-1][0]].append(c.get('ts') or 0)
+    sources = [sorted(labelled), asked['ADV'], asked['ARCH']]
+    n = max(len(s) for s in sources)
+    return [max(s[i] for s in sources if len(s) == n) for i in range(n)]
 
 
 def issue_in_branch(branch):

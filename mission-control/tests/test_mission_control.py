@@ -441,12 +441,70 @@ class Line(unittest.TestCase):
         r = line(data)[4]
         self.assertEqual((r['at'], r['round']), ('reviewer', 1))
         self.assertEqual(journey(r)[-3:], [('reviewer', 0), ('builder', 1), ('reviewer', 1)])
-        # three fix commits and still not clean: the loop stops and tags needs:human. No fourth round.
+        self.assertEqual(r['stops'][-2]['t0'], fx.T0 + 2400)       # sent back once both verdicts of that review were in
+        # sent back four times, three fixes pushed: the cap counts 4, stops, and tags needs:human. The fourth
+        # request is counted as the cap counted it, and opens no Builder stop: a person has it now.
         pr['commits'] = {'nodes': [fix(2600), fix(2800), fix(3000)]}
         pr['comments'] = {'nodes': [fx.comment(str(t), t, 'ADLC-ADV: CHANGES') for t in (2300, 2700, 2900, 3100)]}
         pr['labels'] = {'nodes': [{'name': 'needs:human'}]}
         r = line(data)[4]
-        self.assertEqual((r['at'], r['round'], r['alert']), ('reviewer', 3, 'Needs a human'))
+        self.assertEqual((r['at'], r['round'], r['alert']), ('reviewer', 4, 'Needs a human'))
+        self.assertEqual(journey(r)[-2:], [('builder', 3), ('reviewer', 3)])
+
+    def test_a_round_is_a_review_that_sent_it_back_not_a_fix_commit(self):
+        data = fx.repo_data()
+        pr = data['openPrs']['nodes'][0]
+        fix = lambda t: {'commit': {'messageHeadline': 'adlc-fix: again', 'committedDate': fx.iso(t)}}
+        asks = lambda *ts: {'nodes': [fx.comment(str(t), t, 'Still open.\n\nADLC-ADV: CHANGES') for t in ts]}
+        # nine fix commits in three rounds (issue 35): three rounds
+        pr['comments'] = asks(2300, 2700, 3100)
+        pr['commits'] = {'nodes': [fix(t) for t in (2400, 2450, 2500, 2800, 2850, 2900, 3200, 3250, 3300)]}
+        r = line(data)[4]
+        self.assertEqual((r['at'], r['round']), ('reviewer', 3))
+        self.assertEqual(journey(r)[-6:], [('builder', 1), ('reviewer', 1), ('builder', 2), ('reviewer', 2), ('builder', 3), ('reviewer', 3)])
+        # a stacked pull request whose parent was squash-merged, or a promotion one (issue 13): it carries fix
+        # commits, some newer than itself, and no review ever sent it back. Round 0.
+        pr['comments'] = {'nodes': [fx.comment('ok', 2300, 'ADLC-ADV: PASS')]}
+        r = line(data)[4]
+        self.assertEqual((r['at'], r['round']), ('reviewer', 0))
+        self.assertEqual(journey(r)[-2:], [('builder', 0), ('reviewer', 0)])
+        # a Builder that left the prefix out: the round is counted all the same
+        pr['comments'] = asks(2300)
+        pr['commits'] = {'nodes': [{'commit': {'messageHeadline': 'Scope the guest cart query', 'committedDate': fx.iso(2600)}}]}
+        self.assertEqual(line(data)[4]['round'], 1)
+
+    def test_the_review_lanes_label_events_count_as_rounds(self):
+        data = fx.repo_data()
+        pr = data['openPrs']['nodes'][0]
+        # The lane labelled it twice. The first time only the adversarial review asked, the second only the Architect:
+        # one CHANGES comment per marker, two label events, two rounds (the larger, not the sum).
+        pr['comments'] = {'nodes': [fx.comment('a', 2300, 'ADLC-ADV: CHANGES'), fx.comment('b', 2350, 'ADLC-ARCH: PASS'),
+                                    fx.comment('c', 2700, 'ADLC-ADV: PASS'), fx.comment('d', 2750, 'ADLC-ARCH: CHANGES')]}
+        pr['timelineItems'] = {'nodes': [fx.labeled(2360, 'adlc:changes-requested', 'adlc-bot'), fx.labeled(2370, 'lane:full', 'adlc-bot'),
+                                         fx.labeled(2760, 'adlc:changes-requested', 'adlc-bot'), fx.labeled(2770, 'stage:qa', 'someone')]}
+        pr['commits'] = {'nodes': [{'commit': {'messageHeadline': 'adlc-fix: a', 'committedDate': fx.iso(2600)}}]}
+        store = seeded(data)
+        r = by_n(state.build(store, REPO, now=NOW))[4]
+        self.assertEqual((r['at'], r['round']), ('builder', 2))
+        self.assertEqual(journey(r)[-4:], [('reviewer', 0), ('builder', 1), ('reviewer', 1), ('builder', 2)])
+        self.assertEqual(r['stops'][-1]['t0'], fx.T0 + 2760)       # the round starts when the lane put the label on
+        # only the changes-requested events of a pull request are kept: a stage label on one is not a request on the line
+        kept = [(e['label'], e['ts'] - fx.T0) for e in store.label_events(REPO) if e['number'] == 10]
+        self.assertEqual(kept, [('adlc:changes-requested', 2360), ('adlc:changes-requested', 2760)])
+        self.assertIn('timelineItems(last: 40, itemTypes: [LABELED_EVENT])', github.QUERY.split('fragment pr on PullRequest')[1])
+
+    def test_fix_rounds_reads_a_verdict_as_adlc_rounds_sh_does(self):
+        c = lambda ts, body: {'ts': ts, 'body': body}
+        rounds = lambda labelled, *comments: pipeline.fix_rounds(labelled, list(comments))
+        self.assertEqual(rounds([]), [])
+        self.assertEqual(rounds([], c(1, '**ADLC-ADV:** CHANGES'), c(2, '`ADLC-ADV: CHANGES`'), c(3, '- ADLC-ARCH: CHANGES (two findings)')), [1, 2])
+        # a comment's last marker is its verdict: a quoted CHANGES in a comment that ends PASS is a PASS
+        self.assertEqual(rounds([], c(1, 'The earlier ADLC-ADV: CHANGES is addressed.\n\nADLC-ADV: PASS')), [])
+        self.assertEqual(rounds([], c(1, 'ADLC-ADV: CHANGESET'), c(2, 'ADLC-ADV: changes'), c(3, 'ADLC-ADV-X: CHANGES')), [])
+        # the larger of the sources, not their sum; where the label events are as many, their later times stand
+        self.assertEqual(rounds([10, 30], c(5, 'ADLC-ADV: CHANGES'), c(25, 'ADLC-ADV: CHANGES')), [10, 30])
+        self.assertEqual(rounds([10], c(5, 'ADLC-ADV: CHANGES'), c(25, 'ADLC-ADV: CHANGES'), c(26, 'ADLC-ARCH: CHANGES')), [5, 25])
+        self.assertEqual(rounds([40, 10, 30]), [10, 30, 40])
 
     def test_stories_returned_at_gate_1_go_back_to_the_analyst(self):
         data = fx.repo_data()

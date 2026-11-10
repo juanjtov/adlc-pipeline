@@ -75,6 +75,19 @@ directly to a fresh issue (your own triage) or after the Analyst recommends FAST
    It runs `.adlc/scripts/adlc-adr-check.sh` (you can too): the ADR's `## Scope` against the
    scope file, and every `## Guarantees` row against the test it names. Its last line names
    the ADRs it checked.
+4. **Fix cycle, capped.** When a review asked for changes, run
+   `.adlc/scripts/adlc-fix-cap.sh --pr <pr>` before you hand the PR back. On `GO`, invoke the
+   Builder again on the PR, then the reviews again. On `STOP` (the reviews have sent this PR
+   back more than 3 times), label the PR `needs:human` (`gh pr edit <pr> --add-label needs:human`)
+   and stop: a person takes it from there. If it prints neither, the count could not be read;
+   that is not a `GO`. Keep the `--pr`: a bare number is the older form's max, which reads
+   commit subjects from stdin and, given none, prints `GO`. The cap counts reviews, not
+   commits. Run by hand, nothing puts the
+   `adlc:changes-requested` label on, so what it counts here is the reviewers' PR comments
+   whose last verdict marker is `ADLC-ADV: CHANGES` or `ADLC-ARCH: CHANGES`; a request for
+   changes that left no such comment is not counted. Any commenter's marker counts, and an
+   edited or deleted comment no longer does: where others can comment, read the thread before
+   you trust the answer.
 
 ## Stage 5 — QA gate (QA & Release/Ops)
 

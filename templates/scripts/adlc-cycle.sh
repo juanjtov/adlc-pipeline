@@ -17,7 +17,7 @@
 #       stage:intake for days before the Analyst runs; the agent's own minutes are in runs.jsonl);
 #       gate_seconds = time in gate:* labels (waiting on the Principal); rounds = the fix rounds
 #       of the linked PR: its `adlc:changes-requested` label events or its CHANGES review
-#       verdicts, whichever is more (see rounds_of; an estimate, usually low); pr = the first PR that
+#       verdicts, whichever is more (see adlc-rounds.sh; an estimate, usually low); pr = the first PR that
 #       references the issue; intake_to_pr = first stage:intake → that PR (null when no intake label
 #       precedes the PR, e.g. an issue filed from a PR).
 #   adlc-cycle.sh report [DAYS]   the ranked tables the retro reads, from .adlc/metrics/runs.jsonl
@@ -36,28 +36,10 @@ M="${CLAUDE_PROJECT_DIR:-.}/.adlc/metrics"
 NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
 timeline() { gh api "repos/{owner}/{repo}/issues/$1/timeline?per_page=100" --paginate --jq '.[]' | jq -sc .; }
-# Fix rounds of a PR. The Actions review lane marks a round by putting `adlc:changes-requested`
-# on the PR; a repo that runs the pipeline by hand (subagents from a Principal's session) never
-# applies that label, so the label count alone read 0 rounds for every issue on such a host while
-# its merged PRs drew CHANGES verdicts and carried several fix commits. So the review verdict
-# comments that asked for changes count too (`ADLC-ADV: CHANGES` / `ADLC-ARCH: CHANGES`, read as
-# adlc-metrics.sh reads them: a comment's LAST marker is its verdict), per marker, and the result
-# is the largest of the label events and either marker's count: the lane applies the label on the
-# same verdict, so adding them would count one round twice, and both reviewers asking in one round
-# is one round. The figure is an estimate, and usually low: a round the reviewers close as
-# PASS-with-findings leaves no marker on GitHub at all, and two rounds in which a different
-# reviewer asked each time read as one. It reads high when a reviewer re-posts its CHANGES
-# comment within one round, or when a thread's last marker is a quoted CHANGES, which the lane
-# and adlc-metrics.sh read the same way. The cycle-retro says so when rounds read low.
-rounds_of() {
-  local labels verdicts
-  labels="$(timeline "$1" | jq '[.[] | select(.event == "labeled" and .label.name == "adlc:changes-requested")] | length')" || return 1
-  verdicts="$(gh pr view "$1" --json comments | jq '[.comments[].body
-      | [match("ADLC-(ADV|ARCH):[*`_\\s]*(PASS|CHANGES)(?![A-Za-z0-9_])"; "g") | {m: .captures[0].string, v: .captures[1].string}]
-      | select(length > 0) | last | select(.v == "CHANGES") | .m]
-      | group_by(.) | map(length) | max // 0')" || return 1
-  if [ "$labels" -ge "$verdicts" ]; then echo "$labels"; else echo "$verdicts"; fi
-}
+# Fix rounds of a PR: adlc-rounds.sh, the one count the fix-loop cap reads too. Its header says
+# what a round is and why the figure is an estimate, usually low; the cycle-retro says so when
+# rounds read low. Run through bash, from this script's own folder, and off the loop's stdin.
+rounds_of() { bash "$(dirname "$0")/adlc-rounds.sh" "$1" </dev/null; }
 # A cross-referenced event's source repo, lower-cased, in either shape GitHub sends.
 XREF_REPO='((.source.issue.repository.full_name // (.source.issue.repository_url // "" | sub(".*/repos/"; ""))) | ascii_downcase)'
 

@@ -37,6 +37,7 @@ fragment pr on PullRequest {
   number title url state createdAt mergedAt headRefName
   labels(first: 20) { nodes { name } }
   closingIssuesReferences(first: 5) { nodes { number repository { nameWithOwner } } }
+  timelineItems(last: 40, itemTypes: [LABELED_EVENT]) { nodes { ... on LabeledEvent { createdAt label { name } actor { login } } } }
   commits(last: 40) { nodes { commit { messageHeadline committedDate } } }
   comments(last: 40) { nodes { id body createdAt } }
 }
@@ -154,6 +155,13 @@ def apply(store, repo, data):
                 'head': node.get('headRefName'), 'labels': json.dumps([l['name'] for l in _nodes(node, 'labels')]), 'issue': issue,
                 'created': epoch(node.get('createdAt')), 'merged': epoch(node.get('mergedAt')), 'fix_commits': json.dumps(fixes),
             })
+            # The times the review lane sent it back (pipeline.fix_rounds counts them), kept with the label history
+            # under the pull request's own number: issues and pull requests of a repo share one run of numbers.
+            # Only this label: a stage label someone put on a pull request must not read as a request on the line.
+            for ev in _nodes(node, 'timelineItems'):
+                if (ev.get('label') or {}).get('name') == pipeline.CHANGES_LABEL:
+                    store.put('label_events', {'repo': repo, 'number': number, 'label': pipeline.CHANGES_LABEL, 'added': 1,
+                                               'ts': epoch(ev.get('createdAt')), 'actor': (ev.get('actor') or {}).get('login')})
             _comments(store, repo, 'pr', number, node)
 
 

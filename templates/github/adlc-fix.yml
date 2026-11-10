@@ -2,7 +2,9 @@
 # Triggers when the review lane labels a PR `adlc:changes-requested`. It re-invokes the Builder
 # to fix the findings on the SAME branch; the push re-runs the review lane, which re-labels if
 # still not clean — so the loop repeats until both reviews PASS, then the PR waits for your merge.
-# Capped: after 3 fix rounds it stops and tags `needs:human` instead of fixing again.
+# Capped: after 3 fix rounds it stops and tags `needs:human` instead of fixing again. A round is
+# a review that sent this PR back, counted from the PR's own label events and verdict comments
+# (adlc-rounds.sh), not from its commits.
 #
 # It removes the label before fixing so the review lane can re-add it (a re-add is what fires the
 # next round). PREREQUISITES: CLAUDE_CODE_OAUTH_TOKEN + ADLC_DISPATCH_TOKEN. The agent step
@@ -27,27 +29,41 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0   # the loop cap needs the base branch and all of this PR's commits
+          fetch-depth: 0   # full history, so the Builder can compare its branch with the base
           ref: ${{ github.event.pull_request.head.ref }}
           token: ${{ secrets.ADLC_DISPATCH_TOKEN }}
 
-      - name: Loop cap (count prior fix rounds)
+      - name: Loop cap (count this PR's fix rounds)
         id: cap
         env:
-          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          GH_TOKEN: ${{ github.token }}   # used for two reads: the PR's timeline and its comments
+          PR: ${{ github.event.pull_request.number }}
         run: |
           chmod +x .adlc/scripts/adlc-fix-cap.sh
-          # Count the fix rounds of THIS PR only: the commits its branch has that its base branch
-          # does not. A bare `git log` reads the whole history — every merged PR's `adlc-fix:`
-          # commits with it — and a new PR would start at the cap. Known limit: fix commits the
-          # branch carries from another PR, and its base lacks, still count (a stacked PR whose
-          # parent was squash-merged, a promotion PR). A plain assignment, never a pipe from git:
-          # this shell has no pipefail, and a failed read must fail the step, not count as zero
-          # rounds.
-          subjects=$(git log --format='%s' "refs/remotes/origin/$BASE_REF..HEAD" --)
-          d=$(printf '%s\n' "$subjects" | .adlc/scripts/adlc-fix-cap.sh 3)
+          # Count the fix rounds of THIS PR: the reviews that sent it back, read from its own
+          # `adlc:changes-requested` label events and CHANGES verdict comments (adlc-rounds.sh),
+          # the label that started this run included. GO for the first 3, STOP from the 4th.
+          # Nothing is read from the commits: a Builder makes several per round, and a branch can
+          # carry another PR's fix commits (a stacked PR whose parent was squash-merged, a
+          # promotion PR). A plain assignment: a count that cannot be read fails the script, and
+          # that must fail the step, never read as GO.
+          d=$(.adlc/scripts/adlc-fix-cap.sh --pr "$PR" 3)
           echo "decision=$d"
-          if [ "$d" = "STOP" ]; then echo "stop=true" >> "$GITHUB_OUTPUT"; else echo "stop=false" >> "$GITHUB_OUTPUT"; fi
+          case "$d" in
+            STOP) echo "stop=true" >> "$GITHUB_OUTPUT" ;;
+            GO)   echo "stop=false" >> "$GITHUB_OUTPUT" ;;
+            *)    echo "::error::The fix-loop cap gave no decision"; exit 1 ;;
+          esac
+
+      # Only when the cap step itself failed (not when an earlier step did): a red run in the
+      # Actions tab is easy to miss, and the PR would otherwise wait with the label on and no word.
+      - name: Say that the cap could not run
+        if: failure() && steps.cap.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ secrets.ADLC_DISPATCH_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          gh pr comment "$PR" --body "⚠️ The fix-loop cap could not count this PR's fix rounds, so the Builder did not run. Nothing changed: the PR keeps \`adlc:changes-requested\`. Fix the cause (if this branch is from before a tooling refresh it still holds the older scripts: merge the base branch into this PR), then re-run the failed job: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
 
       - name: Escalate to a human (cap reached)
         if: steps.cap.outputs.stop == 'true'
@@ -55,7 +71,7 @@ jobs:
           GH_TOKEN: ${{ secrets.ADLC_DISPATCH_TOKEN }}
           PR: ${{ github.event.pull_request.number }}
         run: |
-          gh pr comment "$PR" --body "⚠️ ADLC fix loop hit 3 rounds without passing — escalating. The Builder will not auto-fix again on this PR."
+          gh pr comment "$PR" --body "⚠️ ADLC fix loop: 3 fix rounds and the review still asks for changes — escalating. The Builder will not auto-fix again on this PR."
           gh pr edit "$PR" --add-label "needs:human" --remove-label "adlc:changes-requested" || true
 
       - name: Clear the flag so the re-review can re-fire the loop

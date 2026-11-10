@@ -203,7 +203,7 @@ eq PASS    "bold markup around the marker is fine" "$(printf '**ADLC-ADV:** PASS
 eq CHANGES "a verdict in a list item"  "$(printf -- '- ADLC-ARCH: CHANGES (two findings)\n' | bash "$S/adlc-verdict.sh" ADLC-ARCH)"
 eq CHANGES "ADLC-ADV does not read ADLC-ADV-X" "$(printf 'ADLC-ADV-X: PASS\nADLC-ADV: CHANGES\n' | bash "$S/adlc-verdict.sh" ADLC-ADV)"
 
-echo "fix-cap:"
+echo "fix-cap (the older form: commit subjects on stdin):"
 eq GO   "GO below cap"   "$(printf 'adlc-fix: a\nadlc-fix: b\n'              | bash "$S/adlc-fix-cap.sh" 3)"
 eq STOP "STOP at cap"    "$(printf 'adlc-fix: a\nadlc-fix: b\nadlc-fix: c\n' | bash "$S/adlc-fix-cap.sh" 3)"
 eq GO   "GO when none"   "$(printf 'feat: x\nfix: y\n'                       | bash "$S/adlc-fix-cap.sh" 3)"
@@ -212,6 +212,156 @@ eq GO   "adlc-fixed: is not a fix round"            "$(printf 'adlc-fixed: a\nad
 printf 'adlc-fix: a\n' | bash "$S/adlc-fix-cap.sh" abc >/dev/null 2>&1; check 2 "a max that is not a number is an error, not a GO" $?
 eq "" "…and prints no verdict" "$(printf 'adlc-fix: a\n' | bash "$S/adlc-fix-cap.sh" 3x 2>/dev/null)"
 eq GO "an empty max is the default 3, not an error" "$(printf 'adlc-fix: a\nadlc-fix: b\n' | bash "$S/adlc-fix-cap.sh" '')"
+# a bare number is this form's max, never a PR number: forgetting --pr reads (no) commit subjects and says GO, so the
+# header and the RUNBOOK's by-hand step both say to keep the --pr
+eq GO "a bare number is the max of this older form, not a PR: with nothing on stdin it prints GO" "$(bash "$S/adlc-fix-cap.sh" 42 </dev/null)"
+grep -q 'A bare number is this form.s max, never a PR' "$S/adlc-fix-cap.sh" && ok "…the header says so" || bad "adlc-fix-cap.sh's header must say a bare number is the older form's max, not a PR"
+grep -q 'Keep the `--pr`: a bare number is the older form.s max' "$ROOT/templates/RUNBOOK.md.tmpl" && ok "…and the RUNBOOK's fix cycle says to keep the --pr" || bad "RUNBOOK: the fix cycle must say a bare number is not the PR form"
+
+echo "fix rounds (adlc-rounds.sh and the cap's --pr form, against a stub gh):"
+# One definition everywhere (issues 35 and 13): a fix round of a PR is a review that sent it back,
+# read from the PR's own `adlc:changes-requested` label events and CHANGES verdict comments, never
+# from its commits. adlc-rounds.sh is the one place that counts; the cap, adlc-cycle.sh and
+# Mission Control must all give its number.
+# rounds_stub <dir>: a stub gh in <dir>/bin serving <dir>/fx. `api …/issues/N/timeline` answers
+# from timeline-N.json (none → no events), `pr view N --json comments` from pr-N.json (none → no
+# comments), `issue list` and `repo view` are there for adlc-cycle.sh; a file fail-timeline-N or
+# fail-comments-N makes that one read fail as gh does. Every call is logged to <dir>/calls, and
+# what `pr comment` was asked to post to <dir>/said.
+rounds_stub() {
+  mkdir -p "$1/bin" "$1/fx"; : > "$1/calls"
+  cat > "$1/bin/gh" <<'SH'
+#!/usr/bin/env bash
+echo "$1 $2" >> "$RD_DIR/calls"
+case "$1 $2" in
+  "pr view")    [ -f "$RD_DIR/fx/fail-comments-$3" ] && { echo "gh: HTTP 502" >&2; exit 1; }
+                src="$RD_DIR/fx/pr-$3.json"; [ -f "$src" ] || src="$RD_DIR/fx/no-comments.json" ;;
+  "repo view")  src="$RD_DIR/fx/repo.json" ;;
+  "issue list") src="$RD_DIR/fx/issues.json" ;;
+  "pr comment") shift 2; echo "comment $*" >> "$RD_DIR/said"; exit 0 ;;
+  api*)         n=$(printf '%s' "$2" | sed -nE 's#.*/issues/([0-9]+)/timeline.*#\1#p')
+                [ -f "$RD_DIR/fx/fail-timeline-$n" ] && { echo "gh: Not Found (HTTP 404)" >&2; exit 1; }
+                src="$RD_DIR/fx/timeline-$n.json"; [ -f "$src" ] || src="$RD_DIR/fx/empty.json" ;;
+  *) exit 2 ;;
+esac
+f=.; while [ $# -gt 0 ]; do [ "$1" = "--jq" ] && f="$2"; shift; done
+jq -r "$f" "$src"
+SH
+  chmod +x "$1/bin/gh"; echo '[]' > "$1/fx/empty.json"; echo '{"comments": []}' > "$1/fx/no-comments.json"
+  echo '{"nameWithOwner":"acme/shop"}' > "$1/fx/repo.json"
+}
+# rounds_labels <dir> <pr> <n>: the PR's timeline as the lanes leave it after n requests for changes: the label
+# put on and taken off again each time, among events that are not a round
+rounds_labels() {
+  jq -n --argjson n "$3" '[{event: "labeled", label: {name: "lane:full"}}, {event: "commented"}]
+    + [range(0; $n) | ({event: "labeled", label: {name: "adlc:changes-requested"}}, {event: "unlabeled", label: {name: "adlc:changes-requested"}})]
+    + [{event: "labeled", label: {name: "needs:human"}}]' > "$1/fx/timeline-$2.json"
+}
+# rounds_comments <dir> <pr> <comment body>…
+rounds_comments() {
+  local d="$1" pr="$2" b; shift 2
+  for b in "$@"; do jq -n --arg b "$b" '{body: $b}'; done | jq -s '{comments: .}' > "$d/fx/pr-$pr.json"
+}
+if command -v jq >/dev/null 2>&1; then
+  RD="$(mktemp -d)"; rounds_stub "$RD"
+  rd()  { ( cd "$RD" && env PATH="$RD/bin:$PATH" RD_DIR="$RD" bash "$S/adlc-rounds.sh" "$@" ); }
+  cap() { ( cd "$RD" && env PATH="$RD/bin:$PATH" RD_DIR="$RD" bash "$S/adlc-fix-cap.sh" "$@" ); }
+  # PR 1: no review sent it back · PR 2: the Actions lane labelled it twice, and no verdict comment is left to read
+  rounds_labels "$RD" 2 2
+  # PR 3: a repo run by hand, no label: the adversarial reviewer asked three times (markup is fine), the Architect once
+  rounds_comments "$RD" 3 $'Two findings.\nADLC-FINDING: High | authz-gap | src/a.py\n\nADLC-ADV: CHANGES' $'Off the ADR.\n\n**ADLC-ARCH: CHANGES**' \
+    $'One left.\n\n`ADLC-ADV: CHANGES`' $'And its test.\n\n**ADLC-ADV:** CHANGES' 'ADLC-ADV: PASS' 'ADLC-ARCH: PASS'
+  # PR 4: both sources, the comments ahead (2 label events, 3 CHANGES) · PR 5: the labels ahead (3 events, 1 CHANGES)
+  rounds_labels "$RD" 4 2; rounds_comments "$RD" 4 'ADLC-ADV: CHANGES' 'ADLC-ADV: CHANGES' 'ADLC-ADV: CHANGES' 'ADLC-ARCH: CHANGES'
+  rounds_labels "$RD" 5 3; rounds_comments "$RD" 5 'ADLC-ARCH: CHANGES' 'ADLC-ADV: PASS'
+  # PR 6: CHANGES only quoted in a comment that ends PASS, and near-markers that are no verdict
+  rounds_comments "$RD" 6 $'The earlier ADLC-ADV: CHANGES is addressed.\n\nADLC-ADV: PASS' 'ADLC-ADV: CHANGESET' 'ADLC-ARCH: changes' 'ADLC-ADV-X: CHANGES'
+  # PR 7: the timeline cannot be read (its comments hold 3 CHANGES) · PR 8: the comments cannot (its timeline holds 2 events)
+  rounds_comments "$RD" 7 'ADLC-ADV: CHANGES' 'ADLC-ADV: CHANGES' 'ADLC-ADV: CHANGES'; : > "$RD/fx/fail-timeline-7"
+  rounds_labels "$RD" 8 2; : > "$RD/fx/fail-comments-8"
+  # PR 9: sent back four times
+  rounds_labels "$RD" 9 4
+  # PR 10: no review at all, four comments by whoever, each of which only quotes a CHANGES verdict
+  rounds_comments "$RD" 10 'As the bot said: ADLC-ADV: CHANGES' '> ADLC-ADV: CHANGES' 'ADLC-ADV: CHANGES' 'I agree with ADLC-ADV: CHANGES'
+  eq 0 "rounds: a PR no review sent back → 0"                                  "$(rd 1 2>&1)"
+  : > "$RD/calls"
+  eq 2 "rounds: label events only (the Actions lane) → one per time the label was put on; taking it off, and other labels, are not rounds" "$(rd 2 2>&1)"
+  eq "1 1" "rounds: one timeline call and one pr view call" "$(grep -c '^api ' "$RD/calls") $(grep -c '^pr view$' "$RD/calls")"
+  eq 3 "rounds: verdict comments only (a repo run by hand) → CHANGES per marker, the larger marker; markup after the colon is fine" "$(rd 3 2>&1)"
+  eq 3 "rounds: both sources, comments ahead → the larger (not 2, not 2 + 3)"  "$(rd 4 2>&1)"
+  eq 3 "rounds: both sources, labels ahead → the larger (not 1, not 3 + 1)"    "$(rd 5 2>&1)"
+  eq 0 "rounds: a CHANGES quoted inside a comment that ends PASS is a PASS; CHANGESET, lowercase and ADLC-ADV-X are no verdict" "$(rd 6 2>&1)"
+  eq 4 "rounds: four requests → 4"                                             "$(rd 9 2>&1)"
+  rd 7 >"$RD/out" 2>"$RD/err"; check 1 "rounds: a timeline that cannot be read is exit 1" $?
+  eq "" "…with nothing on stdout (not the 3 its comments would give, not 0)" "$(cat "$RD/out")"
+  eq 1 "…and a line on stderr that names the PR" "$(grep -c 'adlc-rounds: could not read the timeline of PR #7' "$RD/err")"
+  eq 1 "…beside gh's own error" "$(grep -c 'HTTP 404' "$RD/err")"
+  rd 8 >"$RD/out" 2>"$RD/err"; check 1 "rounds: comments that cannot be read are exit 1" $?
+  eq "" "…with nothing on stdout (not the 2 its label events would give)" "$(cat "$RD/out")"
+  eq 1 "…and a line on stderr that names the PR" "$(grep -c 'adlc-rounds: could not read the comments of PR #8' "$RD/err")"
+  rd >/dev/null 2>&1;       check 2 "rounds: no PR number is a usage error" $?
+  rd abc >/dev/null 2>&1;   check 2 "rounds: a PR number that is not a number is a usage error" $?
+  rd 2 3 >/dev/null 2>&1;   check 2 "rounds: a second argument is a usage error (the max belongs to the cap)" $?
+  # the cap, --pr form: GO while rounds <= max, STOP past it; the request being handled is one of the rounds
+  eq GO   "cap --pr: 0 rounds → GO"                                            "$(cap --pr 1 2>&1)"
+  eq GO   "cap --pr: 3 rounds → GO (the third request still gets its Builder round)" "$(cap --pr 4 2>&1)"
+  # the trust model, as the header and the RUNBOOK state it: the count asks nobody who wrote a comment
+  eq "4 STOP" "every comment counts, whoever wrote it: four that merely quote a CHANGES verdict are 4 rounds, and the cap says STOP" "$(rd 10 2>&1) $(cap --pr 10 2>&1)"
+  grep -q 'every comment on the PR counts, whoever wrote it' "$S/adlc-rounds.sh" && grep -q 'when a verdict comment is edited or deleted' "$S/adlc-rounds.sh" \
+    && ok "…adlc-rounds.sh's header says who can raise the count and what lowers it" || bad "adlc-rounds.sh's header must state the trust model (every commenter counts; an edited or deleted comment lowers it)"
+  grep -q "Any commenter's marker counts" "$ROOT/templates/RUNBOOK.md.tmpl" && ok "…and so does the RUNBOOK's fix cycle" || bad "RUNBOOK: the fix cycle must say any commenter's marker counts"
+  eq STOP "cap --pr: 4 rounds → STOP"                                          "$(cap --pr 9 2>&1)"
+  eq GO   "cap --pr: max 3 is the default, and an empty max is the default too" "$(cap --pr 5 '' 2>&1)"
+  eq "GO STOP" "cap --pr: a max of its own (2 rounds: GO at max 2, STOP at max 1)" "$(cap --pr 2 2 2>&1) $(cap --pr 2 1 2>&1)"
+  cap --pr 7 >"$RD/out" 2>"$RD/err"; check 1 "cap --pr: a timeline that cannot be read is exit 1" $?
+  eq "" "…and no decision on stdout: never a GO" "$(cat "$RD/out")"
+  eq 1 "…and it says so on stderr" "$(grep -c 'adlc-fix-cap: could not count the fix rounds of PR #7' "$RD/err")"
+  cap --pr 8 >"$RD/out" 2>/dev/null; check 1 "cap --pr: comments that cannot be read are exit 1" $?
+  eq "" "…and no decision on stdout" "$(cat "$RD/out")"
+  eq "" "cap --pr: no PR number → no decision"                  "$(cap --pr 2>/dev/null)";      cap --pr >/dev/null 2>&1;     check 2 "…exit 2" $?
+  eq "" "cap --pr: a PR number that is not a number → no decision" "$(cap --pr abc 2>/dev/null)"; cap --pr abc >/dev/null 2>&1; check 2 "…exit 2" $?
+  eq "" "cap --pr: a max that is not a number → no decision"    "$(cap --pr 1 3x 2>/dev/null)"; cap --pr 1 3x >/dev/null 2>&1; check 2 "…exit 2" $?
+  # the cap finds adlc-rounds.sh beside itself, whatever the working directory; a copy without it gives no decision
+  mkdir -p "$RD/alone"; cp "$S/adlc-fix-cap.sh" "$RD/alone/"
+  ( cd "$RD" && env PATH="$RD/bin:$PATH" RD_DIR="$RD" bash "$RD/alone/adlc-fix-cap.sh" --pr 1 ) >"$RD/out" 2>/dev/null; rc=$?
+  [ "$rc" -ne 0 ] && ok "cap --pr: without adlc-rounds.sh beside it the cap fails (exit $rc)" || bad "cap --pr: without adlc-rounds.sh beside it the cap must fail"
+  eq "" "…and prints no decision" "$(cat "$RD/out")"
+  grep -q 'bash "$(dirname "$0")/adlc-rounds.sh" "$pr"' "$S/adlc-fix-cap.sh" && ok "the cap counts through adlc-rounds.sh" || bad "adlc-fix-cap.sh --pr must count through adlc-rounds.sh"
+  # adlc-cycle.sh: the same script, so the same number; its own callers still get rounds: null when the PR cannot be read
+  grep -q 'bash "$(dirname "$0")/adlc-rounds.sh" "$1"' "$S/adlc-cycle.sh" && ok "adlc-cycle.sh counts through adlc-rounds.sh" || bad "adlc-cycle.sh must count rounds through adlc-rounds.sh"
+  eq 0 "…and holds no copy of the count" "$(grep -cE 'ADLC-\(ADV\|ARCH\)|changes-requested"' "$S/adlc-cycle.sh" || true)"
+  rnow=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  rounds_issue() { # <issue> <its PR>: an issue at intake, cross-referenced by that PR
+    jq -n --arg t "$rnow" --argjson pr "$2" '[{event: "labeled", created_at: $t, label: {name: "stage:intake"}},
+      {event: "cross-referenced", created_at: $t, source: {issue: {number: $pr, repository: {full_name: "acme/shop"}, pull_request: {url: "x"}}}}]' > "$RD/fx/timeline-$1.json"
+  }
+  rounds_issue 20 4; rounds_issue 21 8; rounds_issue 22 7
+  jq -n --arg t "$rnow" '[20, 21, 22] | map({number: ., title: "x", createdAt: $t, closedAt: null, labels: []})' > "$RD/fx/issues.json"
+  OUT=$( cd "$RD" && env PATH="$RD/bin:$PATH" RD_DIR="$RD" bash "$S/adlc-cycle.sh" issues 7 2>"$RD/err" ); check 0 "cycle: runs to the end although two PRs could not be read" $?
+  eq "20=3 21=null 22=null" "cycle: rounds is adlc-rounds.sh's number for the linked PR, and null when its comments or its timeline cannot be read" \
+     "$(printf '%s\n' "$OUT" | jq -r '"\(.issue)=\(.rounds)"' | tr '\n' ' ' | sed 's/ $//')"
+  eq 2 "…each named on stderr, as before" "$(grep -c 'adlc-cycle: could not read the timeline or the comments of PR #[78] (issue #2[12]); rounds unknown' "$RD/err")"
+  # Mission Control counts with the same rule (mission-control/mc/pipeline.py, fix_rounds): run both over the same PRs
+  if command -v python3 >/dev/null 2>&1; then
+    mcr() { python3 -B - "$ROOT/mission-control" "$RD/fx/timeline-$1.json" "$RD/fx/pr-$1.json" <<'PY'
+import json, os, sys
+sys.path.insert(0, sys.argv[1])
+from mc import pipeline
+load = lambda path, default: json.load(open(path)) if os.path.exists(path) else default
+events, comments = load(sys.argv[2], []), load(sys.argv[3], {'comments': []})['comments']
+labelled = [i for i, e in enumerate(events) if e.get('event') == 'labeled' and (e.get('label') or {}).get('name') == pipeline.CHANGES_LABEL]
+print(len(pipeline.fix_rounds(labelled, [{'ts': i, 'body': c['body']} for i, c in enumerate(comments)])))
+PY
+    }
+    same=""; for n in 1 2 3 4 5 6 9; do same="$same$n:$(rd "$n" 2>&1)=$(mcr "$n" 2>&1) "; done
+    eq "1:0=0 2:2=2 3:3=3 4:3=3 5:3=3 6:0=0 9:4=4 " "Mission Control's fix_rounds gives adlc-rounds.sh's number for every PR above" "$same"
+  else
+    bad "the Mission Control half of the fix-rounds checks needs python3"
+  fi
+  rm -rf "$RD"
+else
+  echo "  · skipped the fix-rounds checks (need jq)"
+fi
 
 echo "tripwire-check:"
 printf 'sha1 1\nsha2 2\n' | bash "$S/adlc-tripwire-check.sh" >/dev/null 2>&1; check 0 "OK when all have PRs" $?
@@ -1263,15 +1413,19 @@ else
 fi
 rm -rf "$DS"
 
-echo "fix-loop cap step (the workflow's own run: script, on a real git history):"
-# The cap bounds the fix rounds of ONE pull request. The step once counted `adlc-fix:` subjects
-# over the whole history of the PR head — which holds every earlier PR's fix commits once they
-# are merged — so after a single PR that took 3 rounds, each new PR stopped before its first
-# fix. Run the step as shipped: a scratch repository holding that history, and a checkout shaped
-# like the runner's. Nothing here has a remote, and nothing is pushed.
-if command -v git >/dev/null 2>&1; then
+echo "fix-loop cap step (the workflow's own run: script, on a real git history, against a stub gh):"
+# The cap bounds the fix rounds of ONE pull request, and a round is a review that sent it back
+# (adlc-rounds.sh). The step once counted `adlc-fix:` commit subjects: first over the whole
+# history of the PR head, then over `<base>..HEAD`. That still charged a PR for the fix commits
+# its branch carried from another PR (issue 13: a stacked PR whose parent was squash-merged, a
+# promotion PR), stopped a Builder after one round when it had made three commits in it, and
+# never stopped one that left the prefix out (issue 35). Run the step as shipped, in a checkout
+# shaped like the runner's whose history holds exactly those commits, with each PR's own record
+# served by the stub gh. Nothing here has a remote, and nothing is pushed.
+if command -v git >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
   FC="$(mktemp -d)"; FW="$ROOT/templates/github/adlc-fix.yml"
   step_run "$FW" '- name: Loop cap' > "$FC/cap.sh"
+  rounds_stub "$FC"
   fgit() { env GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 git -c user.name=t -c user.email=t@example.com -c commit.gpgsign=false -c core.hooksPath=/dev/null "$@"; }
   fbranch() { # <new branch> <from> <commit subject>… — cut the branch, one commit per subject
     local b="$1" from="$2" s; shift 2
@@ -1280,60 +1434,140 @@ if command -v git >/dev/null 2>&1; then
   }
   {
     fgit init -q "$FC/seed"; fgit -C "$FC/seed" symbolic-ref HEAD refs/heads/main
-    mkdir -p "$FC/seed/.adlc/scripts"; cp "$S/adlc-fix-cap.sh" "$FC/seed/.adlc/scripts/"
+    mkdir -p "$FC/seed/.adlc/scripts"; cp "$S/adlc-fix-cap.sh" "$S/adlc-rounds.sh" "$FC/seed/.adlc/scripts/"
     fgit -C "$FC/seed" add -A; fgit -C "$FC/seed" commit -q -m init
-    fbranch feat/1-old     main 'feat: old' 'adlc-fix: a' 'adlc-fix: b' 'adlc-fix: c'   # an earlier PR: 3 rounds…
-    fbranch feat/2-behind  main 'feat: behind'                                          # (two PRs opened before
-    fbranch feat/3-synced  main 'feat: synced'                                          #  that one merged)
+    fgit -C "$FC/seed" branch production main                                           # promoted so far: nothing after init
+    fbranch feat/1-old     main 'feat: old' 'adlc-fix: a' 'adlc-fix: b' 'adlc-fix: c'   # an earlier PR: 3 fix commits…
     fgit -C "$FC/seed" checkout -q main
     fgit -C "$FC/seed" merge -q --no-ff -m 'Merge pull request #1 from o/feat/1-old' feat/1-old   # …merged with a merge commit
-    fbranch feat/4-new     main 'feat: new'
-    # 2 rounds, among subjects that only look like one: the prefix mid-subject and in a body
-    # line, in capitals, and as the start of a longer word
-    fbranch feat/5-two     main 'feat: two' 'adlc-fix: a' 'adlc-fix: b' \
-      $'docs: adlc-fix: is the prefix\n\nadlc-fix: a body line' 'ADLC-FIX: shouted' 'adlc-fixture: x'
-    fbranch feat/6-three   main 'feat: three' 'adlc-fix: a' 'adlc-fix: b' 'adlc-fix: c'
-    fbranch feat/7-stacked feat/6-three 'feat: stacked'
-    fgit -C "$FC/seed" checkout -q feat/3-synced
-    fgit -C "$FC/seed" merge -q --no-ff -m "Merge branch 'main' into feat/3-synced" main
-    fgit -C "$FC/seed" commit -q --allow-empty -m 'adlc-fix: a'; fgit -C "$FC/seed" commit -q --allow-empty -m 'adlc-fix: b'
+    fbranch feat/6-parent  main 'feat: parent' 'adlc-fix: a' 'adlc-fix: b' 'adlc-fix: c'
+    fbranch feat/7-stacked feat/6-parent 'feat: stacked'                                # PR 7, built on PR 6's branch
+    fgit -C "$FC/seed" checkout -q main
+    fgit -C "$FC/seed" commit -q --allow-empty -m 'feat: parent (#6)'                   # PR 6 squash-merged: one new commit, none of its own
+    # PR 9: three rounds, three commits each · PR 10: a Builder that left the prefix out
+    fbranch feat/9-nine    main 'feat: nine' 'adlc-fix: a1' 'adlc-fix: a2' 'adlc-fix: a3' 'adlc-fix: b1' 'adlc-fix: b2' 'adlc-fix: b3' 'adlc-fix: c1' 'adlc-fix: c2' 'adlc-fix: c3'
+    fbranch feat/10-plain  main 'feat: plain' 'address the review' 'address the review again' 'and again'
   } >/dev/null 2>&1
-  # caprun <PR head> <base ref> — the step, run as Actions does (bash -e), in a checkout as
-  # actions/checkout leaves it with fetch-depth: 0: every branch a remote-tracking ref, the PR
-  # head the only local branch (there is no local `main` to read).
+  # each PR's own record: 7 (stacked) and 8 (promotion: main → production) were never reviewed; 9 was sent back
+  # three times, by label and by verdict; 10 four times; 11's timeline and 12's comments cannot be read
+  rounds_labels "$FC" 9 3;  rounds_comments "$FC" 9 'ADLC-ADV: CHANGES' 'ADLC-ADV: CHANGES' 'ADLC-ADV: CHANGES' 'ADLC-ARCH: PASS'
+  rounds_labels "$FC" 10 4
+  : > "$FC/fx/fail-timeline-11"; : > "$FC/fx/fail-comments-12"
+  # caprun <PR head> <PR number> — the step, run as Actions does (bash -e), in a checkout as actions/checkout leaves
+  # it with fetch-depth: 0: every branch a remote-tracking ref, the PR head the only local branch.
   caprun() {
     rm -rf "$FC/run"; : > "$FC/out"; : > "$FC/said"
     { fgit init -q "$FC/run" && fgit -C "$FC/run" fetch -q "$FC/seed" '+refs/heads/*:refs/remotes/origin/*' \
         && fgit -C "$FC/run" checkout -q -B "$1" "refs/remotes/origin/$1"; } >/dev/null 2>&1 || return 99
-    ( cd "$FC/run" && env BASE_REF="$2" GITHUB_OUTPUT="$FC/out" GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 bash -e "$FC/cap.sh" ) > "$FC/said" 2>/dev/null
+    ( cd "$FC/run" && env PATH="$FC/bin:$PATH" RD_DIR="$FC" PR="$2" GH_TOKEN=t GITHUB_OUTPUT="$FC/out" GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 bash -e "$FC/cap.sh" ) > "$FC/said" 2>/dev/null
   }
   capsaid() { cat "$FC/said" "$FC/out" | tr '\n' ' '; }   # its decision + the output it set
-  fixes()   { fgit -C "$FC/seed" log --format='%s' "$1" 2>/dev/null | grep -c '^adlc-fix:' || true; }   # <branch> → adlc-fix: commits in its whole history
+  # oldcap <base> — what counting the checkout's `adlc-fix:` commits against that base would decide (the older form)
+  oldcap()  { local subjects; subjects=$(fgit -C "$FC/run" log --format='%s' "refs/remotes/origin/$1..HEAD" --) || { echo "?"; return; }; printf '%s\n' "$subjects" | bash "$S/adlc-fix-cap.sh" 3; }
   [ -s "$FC/cap.sh" ] && ok "run: script extracted from the template" || bad "could not extract the run: script"
-  # the cases mean nothing unless the history really holds another PR's fix commits
-  eq 3 "fixture: main holds an earlier PR's 3 adlc-fix: commits, merged"  "$(fixes main)"
-  eq 3 "fixture: …so they are in the history of a branch cut from it"     "$(fixes feat/4-new)"
-  caprun feat/4-new main;    eq "decision=GO stop=false "  "a new PR with 0 fix rounds → GO (was: STOP, on the merged PR's 3)" "$(capsaid)"
-  caprun feat/5-two main;    eq "decision=GO stop=false "  "2 fix rounds on the PR → GO (only a subject that starts with adlc-fix: is a round)" "$(capsaid)"
-  caprun feat/6-three main;  eq "decision=STOP stop=true " "3 fix rounds on the PR → STOP" "$(capsaid)"
-  caprun feat/2-behind main; eq "decision=GO stop=false "  "a PR cut before the other one merged: fix commits only main has are not its rounds" "$(capsaid)"
-  caprun feat/3-synced main; eq "decision=GO stop=false "  "…nor once it has merged main into itself (2 rounds of its own → GO)" "$(capsaid)"
-  caprun feat/7-stacked feat/6-three
-  eq "decision=GO stop=false " "a PR stacked on another PR's branch is not charged that branch's 3 rounds, while it is its base" "$(capsaid)"
-  # the base branch reaches the script through env:, never written into it by ${{ }}
+  # issue 13's two cases: the branch carries another PR's fix commits, and no review of its own
+  caprun feat/7-stacked 7
+  eq STOP "fixture: the stacked PR, retargeted to main after its parent's squash merge, carries the parent's 3 adlc-fix: commits" "$(oldcap main)"
+  eq "decision=GO stop=false " "a stacked PR whose parent was squash-merged starts at round 0 → GO (was: STOP at its first review)" "$(capsaid)"
+  caprun main 8
+  eq STOP "fixture: the promotion PR (main → production) carries every fix commit merged since the last promotion" "$(oldcap production)"
+  eq "decision=GO stop=false " "a promotion PR starts at round 0 → GO (was: STOP)" "$(capsaid)"
+  # issue 35: rounds, not commits
+  caprun feat/9-nine 9
+  eq STOP "fixture: the PR holds nine adlc-fix: commits" "$(oldcap main)"
+  eq "decision=GO stop=false " "nine fix commits in three rounds: the third request still gets its Builder round → GO" "$(capsaid)"
+  caprun feat/10-plain 10
+  eq GO   "fixture: the PR holds no adlc-fix: commit at all" "$(oldcap main)"
+  eq "decision=STOP stop=true " "sent back a fourth time → STOP, whatever its commits are called (the commit count never stopped it)" "$(capsaid)"
+  # the PR number and the token reach the script through env:, never written into it by ${{ }}
   case "$(cat "$FC/cap.sh")" in *'${{'*) bad "the script has no \${{ }} expression written into it" ;; *) ok "the script has no \${{ }} expression written into it" ;; esac
-  eq 1 "the step's env: hands it the PR's base branch as BASE_REF" \
-     "$(awk '/^      - / { s = ($0 ~ /- name: Loop cap/) } s' "$FW" | tr -d "\"'" | grep -cE '^ +BASE_REF: \$\{\{ github\.(event\.pull_request\.base\.ref|base_ref) \}\}[[:space:]]*$' || true)"
+  capenv() { awk '/^      - / { s = ($0 ~ /- name: Loop cap/) } s' "$FW" | tr -d "\"'" | grep -cE "$1" || true; }
+  eq 1 "the step's env: hands it the PR number as PR"   "$(capenv '^ +PR: \$\{\{ github\.event\.pull_request\.number \}\}[[:space:]]*$')"
+  eq 1 "the step's env: hands gh a token (GH_TOKEN) to read the PR with" "$(capenv '^ +GH_TOKEN: \$\{\{ (github\.token|secrets\.[A-Z_]+) \}\}([[:space:]]|$)')"
+  grep -q 'adlc-fix-cap\.sh --pr "\$PR" 3' "$FC/cap.sh" && ok "the step asks the cap for this PR's rounds (--pr), max 3" || bad "the step must call adlc-fix-cap.sh --pr \"\$PR\" 3"
+  eq 0 "…and its comment claims no more than that: the job's token can write, and the step does not say it cannot" "$(capenv 'no write')"
+  eq 0 "the step reads no commits (no git log)" "$(grep -vE '^[[:space:]]*#' "$FC/cap.sh" | grep -c 'git ' || true)"
   # a count that cannot be taken must stop the step: read as "0 rounds" it would never cap
-  caprun feat/4-new gone; rc=$?   # (99 = the fixture checkout itself failed)
-  case "$rc" in 0|99) bad "a base branch the checkout does not have fails the step (exit $rc)" ;; *) ok "a base branch the checkout does not have fails the step" ;; esac
+  caprun feat/10-plain 11; rc=$?   # (99 = the fixture checkout itself failed)
+  case "$rc" in 0|99) bad "a timeline gh cannot read fails the step (exit $rc)" ;; *) ok "a timeline gh cannot read fails the step" ;; esac
   eq "" "…with no decision and no output (not a GO)" "$(capsaid)"
-  grep -qE '^ +fetch-depth: 0([[:space:]]|$)' "$FW" && ok "adlc-fix.yml checks out the full history (the base branch + every commit of the PR)" \
-    || bad "adlc-fix.yml must check out with fetch-depth: 0 — the cap reads the base branch and every commit of the PR"
+  caprun feat/10-plain 12; rc=$?
+  case "$rc" in 0|99) bad "comments gh cannot read fail the step (exit $rc)" ;; *) ok "comments gh cannot read fail the step" ;; esac
+  eq "" "…with no decision and no output (not a GO)" "$(capsaid)"
+  # …and the next step says so on the PR: the label is still on, the Builder did not run, and a red run is easy to miss
+  step_run "$FW" '- name: Say that the cap could not run' > "$FC/tell.sh"; : > "$FC/said"
+  ( cd "$FC/run" && env PATH="$FC/bin:$PATH" RD_DIR="$FC" PR=12 GH_TOKEN=t GITHUB_SERVER_URL=https://example.test GITHUB_REPOSITORY=o/r GITHUB_RUN_ID=42 bash -e "$FC/tell.sh" ) >/dev/null 2>&1
+  case "$(tr '\n' ' ' < "$FC/said")" in "comment 12 --body ⚠️ The fix-loop cap could not count this PR's fix rounds, so the Builder did not run."*"https://example.test/o/r/actions/runs/42 ") ok "a cap that could not run is said on the PR, with a link to the run" ;;
+    *) bad "a cap that could not run is said on the PR, with a link to the run (got '$(cat "$FC/said")')" ;; esac
+  case "$(cat "$FC/said")" in *"merge the base branch into this PR"*) ok "…and it names the cause a re-run alone cannot fix: a branch from before a tooling refresh, to be brought up to its base" ;;
+    *) bad "the comment must say to merge the base branch into the PR (a branch from before a refresh holds the older scripts)" ;; esac
+  eq 1 "…by a step that runs only when the cap step itself failed" \
+     "$(awk '/^      - / { s = ($0 ~ /- name: Say that the cap could not run/) } s' "$FW" | grep -cE "^ +if: (failure|always)\(\) && steps\.cap\.outcome == 'failure'[[:space:]]*$" || true)"
+  # that case, run: a PR open across a tooling refresh. The workflow is the new one, the branch still holds the cap
+  # from before --pr (its stdin form, which reads `--pr` as a max that is not a number). The step fails; it is no GO.
+  printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail' 'max="${1:-3}"' \
+    'case "$max" in ""|*[!0-9]*) echo "max must be a whole number, got $max" >&2; exit 2 ;; esac' \
+    'n=$(grep -cE "^adlc-fix(\([^)]*\))?:" || true)' 'if [ "${n:-0}" -ge "$max" ]; then echo STOP; else echo GO; fi' > "$FC/seed/.adlc/scripts/adlc-fix-cap.sh"
+  { fgit -C "$FC/seed" checkout -q feat/10-plain && fgit -C "$FC/seed" commit -q -am 'the cap from before --pr'; } >/dev/null 2>&1
+  eq GO "fixture: the older cap still answers its own stdin form" "$(printf 'feat: x\n' | bash "$FC/seed/.adlc/scripts/adlc-fix-cap.sh" 3)"
+  caprun feat/10-plain 7; rc=$?
+  case "$rc" in 0|99) bad "a branch that still holds the cap from before --pr fails the step (exit $rc)" ;; *) ok "a branch that still holds the cap from before --pr fails the step" ;; esac
+  eq "" "…with no decision and no output (it does not run uncapped)" "$(capsaid)"
+  # an answer that is neither STOP nor GO is no GO either
+  printf '#!/usr/bin/env bash\necho MAYBE\n' > "$FC/seed/.adlc/scripts/adlc-fix-cap.sh"
+  { fgit -C "$FC/seed" checkout -q feat/10-plain && fgit -C "$FC/seed" commit -q -am 'a cap that answers neither'; } >/dev/null 2>&1
+  caprun feat/10-plain 7; rc=$?
+  case "$rc" in 0|99) bad "an answer that is neither STOP nor GO fails the step (exit $rc)" ;; *) ok "an answer that is neither STOP nor GO fails the step" ;; esac
+  eq "" "…and sets no output" "$(cat "$FC/out")"
+  grep -qE '^ +fetch-depth: 0([[:space:]]|$)' "$FW" && ok "adlc-fix.yml checks out the full history (the Builder compares its branch with the base)" \
+    || bad "adlc-fix.yml must check out with fetch-depth: 0 — the Builder compares its branch with the base"
   rm -rf "$FC"
 else
-  bad "fix-loop cap step tests need git"
+  bad "fix-loop cap step tests need git and jq"
 fi
+# the same cap by hand, and the scope round trip (issue 35)
+RBK="$ROOT/templates/RUNBOOK.md.tmpl"; RSB="$ROOT/skills/role-builder/SKILL.md"; RSA="$ROOT/skills/role-architect/SKILL.md"
+grep -q '\.adlc/scripts/adlc-fix-cap\.sh --pr <pr>' "$RBK" && ok "RUNBOOK: the fix cycle runs the cap (--pr) before the PR goes back to the Builder" || bad "RUNBOOK: the fix cycle must run adlc-fix-cap.sh --pr <pr>"
+grep -q 'gh pr edit <pr> --add-label needs:human' "$RBK" && ok "RUNBOOK: on STOP the PR is labelled needs:human" || bad "RUNBOOK: on STOP the PR must be labelled needs:human"
+grep -q 'ADLC-SCOPE-REQUEST: <path prefix> | <one-line reason>' "$RSB" && ok "role-builder: a path outside the scope is asked for with ADLC-SCOPE-REQUEST" || bad "role-builder must carry the ADLC-SCOPE-REQUEST marker"
+grep -q 'do not touch it' "$RSB" && ok "…and not touched" || bad "role-builder: a path outside the scope must not be touched"
+for m in 'ADLC-SCOPE: GRANT <path prefix>' 'ADLC-SCOPE: DENY <path prefix>'; do
+  grep -q "$m" "$RSB" && ok "role-builder names the answer '$m'" || bad "role-builder must name '$m'"
+  grep -q "$m" "$RSA" && ok "role-architect answers with '$m'" || bad "role-architect must carry '$m'"
+done
+grep -q 'ADLC-SCOPE-REQUEST: <path prefix> | <reason>' "$RSA" && ok "role-architect knows the request marker" || bad "role-architect must name the ADLC-SCOPE-REQUEST marker"
+grep -q 'end that review CHANGES' "$RSA" && ok "role-architect: a grant comes with a CHANGES verdict (the loop returns the PR to the Builder)" || bad "role-architect: a grant must come with a CHANGES verdict"
+grep -q 'post a PR comment whose last line is `ADLC-ARCH: PASS` or' "$RSA" && ok "role-architect: outside the lanes the verdict is a PR comment marker too (what the cap counts)" || bad "role-architect: outside the lanes the verdict must also be a PR comment marker"
+# A grant must not leave the PR failing adlc-adr-check.sh, which holds the scope file to the ADR's `## Scope` (issue 55):
+# the granted line goes into both, the one ADR edit the Builder may make. Run the check on a checkout after such a grant.
+GR="$(mktemp -d)"; mkdir -p "$GR/docs/adr" "$GR/.adlc/scope"
+gradr() { printf '# ADR-0002: x\n\n**Status:** Proposed  ·  **Issue:** #7\n\n## Scope\n\n```\n%b```\n\n## Guarantees\n\n| Claim | Pinned by |\n|---|---|\n| x | unenforced — a fixture |\n' "$1" > "$GR/docs/adr/0002-x.md"; }   # <Scope lines>
+grc()   { ( cd "$GR" && bash "$S/adlc-adr-check.sh" ) >"$GR/out" 2>"$GR/err"; }
+grds()  { ( cd "$GR" && printf 'docs/adr/0002-x.md\n.adlc/scope/7.txt\nsrc/b/x.py\n' | bash "$S/adlc-diff-scope.sh" build .adlc/scope/7.txt ) >/dev/null 2>&1; }   # the grant commit's files
+gradr 'src/a/\ntests/\n'; printf 'docs/adr/0002-x.md\nsrc/a/\ntests/\n' > "$GR/.adlc/scope/7.txt"
+grc; check 0 "fixture: before the grant the ADR's Scope and the scope file agree" $?
+echo 'src/b/' >> "$GR/.adlc/scope/7.txt"   # ADLC-SCOPE: GRANT src/b/, the scope file alone
+grc; check 1 "a granted line added to the scope file alone fails adlc-adr-check.sh" $?
+eq 1 "…which names the line no ADR lists" "$(grep -c "'src/b/' is in no Scope section" "$GR/err")"
+gradr 'src/a/\ntests/\nsrc/b/\n'       # …and to the ADR's Scope
+grc; check 0 "with the same line in the ADR's Scope too, adlc-adr-check.sh passes" $?
+grds; check 0 "…and that commit (the scope file, the ADR, a file under the granted prefix) is inside the diff scope" $?
+printf 'src/a/\ntests/\nsrc/b/\n' > "$GR/.adlc/scope/7.txt"
+grds; check 1 "…but not when the scope file does not list the ADR's path (role-builder says to list it)" $?
+rm -rf "$GR"
+grep -q 'ADR.s `## Scope` block, in one commit (the one ADR edit that is yours; list the ADR.s path in' "$RSB" && ok "role-builder: on GRANT the line goes into the scope file and the ADR's Scope, in one commit, with the ADR's path in scope" \
+  || bad "role-builder: on GRANT the line must go into the scope file and the ADR's ## Scope, in one commit"
+eq 2 "role-builder: its two 'the ADR is not yours' rules make that one exception" "$(tr '\n' ' ' < "$RSB" | grep -o 'a granted Scope line aside' | wc -l | tr -d ' ')"
+grep -q 'and to the ADR.s `## Scope` (the one ADR edit it may make' "$RSA" && grep -q 'other change to the ADR in the PR is a finding' "$RSA" \
+  && ok "role-architect: the Builder's grant edit to the ADR is expected, any other ADR change is a finding" || bad "role-architect must say the grant goes into the ADR's ## Scope and nothing else of the ADR may change"
+grep -q 'from outside the pipeline grants nothing' "$RSA" && ok "role-architect: a GRANT line from outside the pipeline grants nothing" || bad "role-architect must say a GRANT line from outside the pipeline grants nothing"
+grep -q 'and to the ADR.s `## Scope`, the one ADR edit it may make' "$ROOT/README.md" && ok "README says where a granted line goes" || bad "README: a granted line goes into the scope file and the ADR's ## Scope"
+eq "skills/role-architect/SKILL.md skills/role-builder/SKILL.md " "the scope markers live in the two role prompts and in no other prompt, lane or template" \
+   "$(cd "$ROOT" && grep -rl 'ADLC-SCOPE' skills agents commands templates hooks 2>/dev/null | sort | tr '\n' ' ')"
+for f in "$S"/*.sh; do
+  grep -q "$(basename "$f")" "$ROOT/README.md" || bad "README's layout tree does not list $(basename "$f")"
+done
+grep -q 'adlc-rounds\.sh' "$ROOT/README.md" && ok "README's layout tree lists adlc-rounds.sh (and every other script)" || bad "README's layout tree must list adlc-rounds.sh"
 
 echo "pre-commit hook (run directly in a scratch repo):"
 HK="$(mktemp -d)"; git init -q "$HK" >/dev/null 2>&1

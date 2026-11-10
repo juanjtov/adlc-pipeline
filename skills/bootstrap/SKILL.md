@@ -226,7 +226,7 @@ Create/write:
    `changed` files (scripts executable) and nothing else, and its last lines list what it
    skipped. Relay that list: a host-owned file that differs from the plugin's is the user's to
    bring up to date by hand. These are the **deterministic guardrails** (`adlc-diff-scope`, `adlc-tripwire-check`,
-   `adlc-tripwire-alert`, `adlc-fix-cap`, `adlc-verdict`, `adlc-relabel`, `adlc-adr-check`, `adlc-metrics`, `adlc-run-log`, `adlc-cycle`, `adlc-doctor`) that the workflows and the local
+   `adlc-tripwire-alert`, `adlc-fix-cap`, `adlc-rounds`, `adlc-verdict`, `adlc-relabel`, `adlc-adr-check`, `adlc-metrics`, `adlc-run-log`, `adlc-cycle`, `adlc-doctor`) that the workflows and the local
    hook call — one unit-tested source of truth, not prose. Also write the plugin's version to
    `.adlc/VERSION` (one line): read `.version` from `${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json`.
    That stamp says which plugin release these frozen copies came from, so `adlc-doctor.sh` can tell

@@ -23,13 +23,13 @@ def issue(number, title, labels, timeline, comments=(), state='OPEN', milestone=
             'labels': {'nodes': [{'name': n} for n in labels]}, 'timelineItems': {'nodes': list(timeline)}, 'comments': {'nodes': list(comments)}}
 
 
-def pull(number, title, head, closes, created, labels=(), comments=(), commits=(), state='OPEN', merged=None):
+def pull(number, title, head, closes, created, labels=(), comments=(), commits=(), state='OPEN', merged=None, timeline=()):
     closing = [{'number': closes, 'repository': {'nameWithOwner': REPO}}] if closes else []
     return {'number': number, 'title': title, 'url': 'https://github.com/acme/shop/pull/%d' % number, 'state': state,
             'createdAt': iso(created), 'mergedAt': iso(merged) if merged is not None else None, 'headRefName': head,
             'labels': {'nodes': [{'name': n} for n in labels]}, 'closingIssuesReferences': {'nodes': closing},
             'commits': {'nodes': [{'commit': {'messageHeadline': m, 'committedDate': iso(t)}} for m, t in commits]},
-            'comments': {'nodes': list(comments)}}
+            'comments': {'nodes': list(comments)}, 'timelineItems': {'nodes': list(timeline)}}
 
 
 FULL_LANE = [labeled(100, 'stage:intake'), labeled(400, 'gate:stories', 'adlc-bot'), labeled(900, 'stage:design'), labeled(1500, 'stage:build', 'adlc-bot')]

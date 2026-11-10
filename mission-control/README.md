@@ -69,6 +69,12 @@ page still shows the line and every step; the token and cost figures stay empty.
   (`feat/142-...`) is used. A run with no number still shows at its station, without a request.
 - **A pull request is tied to its issue** by a closing reference in the same repo ("Closes
   #142"), or else by its branch name. That is the rule `adlc-diff-scope.yml` uses.
+- **A fix round is a review that sent the pull request back**, counted as the fix-loop cap
+  counts it (`adlc-rounds.sh`): the larger of the pull request's `adlc:changes-requested` label
+  events and its CHANGES verdict comments per marker, never its commits. Both come with the same
+  GraphQL call, which returns the last 40 label events and the last 40 comments of a pull
+  request, so one with more than that can show fewer rounds than the cap counts. An `adlc-fix:`
+  commit only places the moment a round went back to review.
 - **Capture window.** Steps and tokens are recorded only while Mission Control is running.
 - **GitHub is read only while a page is open.** One read costs about 5 of the 5,000 points of
   your hourly GraphQL budget, so an open page uses about 1,200 an hour per repo. With no page
