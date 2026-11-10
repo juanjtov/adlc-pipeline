@@ -37,9 +37,41 @@ holding the older scripts, until the base branch is merged into it, as the step'
 PR says), and the RUNBOOK copy gains the capped fix cycle. From issue 36: the RUNBOOK template
 gains a paragraph pointing at `/adlc:autopilot`; the two new skills themselves live in the plugin.
 From issue 4: `adlc-outputs.sh` is new (no lane calls it yet); the role contracts themselves live
-in the plugin. The security-gate, code-review and efficient-runs skills, the retro and cycle-retro
+in the plugin. From the documentation pass (issues 18 and 22): the charter template's skills table
+gains two rows, `adlc:autopilot` and `adlc:context-budget`; a `docs/adlc/CHARTER.md` already
+generated is an existing file, so the wizard shows the difference and asks, and no script reads
+the table. The security-gate, code-review and efficient-runs skills, the retro and cycle-retro
 recipes, the role prompts and the guard hook live in the plugin, which every session loads from
 the installed plugin, so those parts need no refresh.
+
+- **Docs: a reference page with a test behind it, a developer guide, what Mission Control
+  keeps, and the explainer brought up to the code** (issues 18, 19, 20 and 22). The names that
+  make up the plugin's interface had no one place: `ADLC_MC_PORT` was documented nowhere,
+  `ADLC-TRIAGE`, `ADLC-ADV` and `ADLC-ARCH` were in neither the README nor the explainer, and no
+  page listed the labels. Nothing told a contributor how to run the tests or what they pin, the
+  Mission Control README did not say what is stored or for how long, and the explainer was last
+  checked against the code on 2026-10-06. New `docs/reference.md`, linked from the README, has
+  three sections: every `ADLC_*` variable the code reads (what it does, its default, what reads
+  it, a user setting or not), with the two repository secrets and the Claude Code settings the
+  templates write; every marker in the form its parser takes, who writes it, what reads it, and
+  whether it decides what a lane does or is a record; every label, who applies it and what
+  holds that. `tests/run.sh` fails when a setting, a marker or a label the code uses has no row
+  on the page, and when a row names one the code no longer has. New `docs/developing.md`
+  (issue 19): loading a checkout, the two test suites, what is pinned on purpose, a lane dry
+  run without GitHub, which document to update with which change. `mission-control/README.md`
+  (issue 20) gains a picture of the `--demo` page, `ADLC_MC_PORT`, and a section on what is
+  kept, for how long, and how to clear it. The explainer (issue 22) now has the submodule rule
+  of the fast-lane cap, the fix round as a review that sent the pull request back, what the
+  guard holds for the Analyst, the Architect and the reviewer and what it does not, the
+  tripwire's force-push alert, the Actions-blocked report, both halves of the improvement loop
+  with follow-up chains, the local autopilot, the model per agent and one state per issue; the
+  diagram's tooltips follow, and its HTML and PNG were rebuilt. The charter template's skills
+  table lists `adlc:autopilot` and `adlc:context-budget`. `plugin.json` gains `homepage` and
+  `repository`, as preparation for issue 23.
+  Not done: the test finds a marker where it is written with its colon (`ADLC-CI:`), so one
+  named only inside a regex alternation would not be seen, and it compares names, not the
+  sentences beside them; the copies of the explainer and the diagram published outside this
+  repository are not updated by this change; issue 23 itself.
 
 - **One contract per role, and the guard reads it** (part of issue 4). What an agent may use
   was written by hand in four places that had to agree: each agent's `tools:` line (and its
@@ -107,8 +139,7 @@ the installed plugin, so those parts need no refresh.
   of this release. With a copy of `adlc-fix-cap.sh` that has no `--pr` form the autopilot stops
   at the first return to the Builder (the script's error is read as not-`GO`). The budget never
   outranks a role skill, and under it QA still attempts every security-gate class. No
-  `/adlc-autopilot` alias was added, and the explainer still describes the local recipe as by
-  hand only.
+  `/adlc-autopilot` alias was added.
 
 - **The fix-loop cap counts rounds, not commits, and the local recipe runs it too** (issue 35).
   The cap was written as "3 rounds" and counted as `adlc-fix:` commits on the PR's branch.

@@ -3531,6 +3531,78 @@ else
   bad "the contract tests need python3 and jq"
 fi
 
+echo "reference page (issue 18: every setting, marker and label the code uses has a row in docs/reference.md):"
+# The page is checked against the code, both ways, so it cannot go stale without a red test.
+# What counts as "the code": the scripts, workflows and other templates, the hooks, the skills,
+# commands and agents (prompts are code here), the contracts and Mission Control. Not the tests
+# (they invent names: ADLC-ADV-X), and not README.md files or docs/, which are prose about the
+# code: a name that only an example sentence there mentions is not a name the code uses.
+#   settings  every ADLC_[A-Z0-9_]+ in those files, except REF_NOT_SETTINGS
+#   markers   every ADLC-<NAME> written WITH its colon (`ADLC-CI:`), which is how every parser and
+#             every prompt spells a marker. A name with no colon is not taken: a line wrap inside
+#             one (`ADLC-FOLLOW-` at the end of a comment line) would otherwise read as a marker
+#             called ADLC-FOLLOW. A marker named only through a regex alternation
+#             (`ADLC-(ADV|ARCH):`) is not seen by this search; today each is also written out.
+#   labels    every label labels.sh creates, plus adlc:plugin-suggestion (the retro files with it)
+# A name "has a row" when a table row STARTS with it: `| \`NAME\` |` for a setting or a label,
+# `| \`NAME: ` for a marker. A mention in a sentence does not count.
+REF="$ROOT/docs/reference.md"
+REF_NOT_SETTINGS="ADLC_OUTPUTS"   # one per line. ADLC_OUTPUTS: a heredoc delimiter in adlc-outputs.sh (and in render.py, which writes it)
+ref_grep() { # <extended regex>: every match in the code, one per line, sorted, unique
+  ( cd "$ROOT" && find templates hooks skills commands agents contracts bin mission-control -type f \
+      ! -path 'mission-control/tests/*' ! -path '*/__pycache__/*' ! -name 'README.md' -print0 \
+    | xargs -0 grep -I -ohE -- "$1" | sort -u )
+}
+# Each list is read once: the searches walk the tree.
+REF_S="$(ref_grep 'ADLC_[A-Z0-9_]+' | grep -vxF -- "$REF_NOT_SETTINGS")"
+REF_M="$(ref_grep 'ADLC-[A-Z]+(-[A-Z]+)*:' | sed 's/:$//' | sort -u)"
+REF_L="$(sed -n 's/^create "\([^"]*\)".*/\1/p' "$ROOT/templates/github/labels.sh"; echo adlc:plugin-suggestion)"
+ref_settings() { printf '%s\n' "$REF_S"; }
+ref_markers()  { printf '%s\n' "$REF_M"; }
+ref_labels()   { printf '%s\n' "$REF_L"; }
+ref_missing() { # <page>: one line per name the code uses that has no row on the page
+  local n
+  for n in $REF_S; do grep -qE "^\| \`$n\` \|" "$1" || echo "setting $n"; done
+  for n in $REF_M; do grep -qE "^\| \`$n: " "$1"    || echo "marker $n"; done
+  for n in $REF_L; do grep -qE "^\| \`$n\` \|" "$1" || echo "label $n"; done
+}
+ref_stale() { # <page>: one line per row that names a setting, marker or label the code does not use
+  local n
+  for n in $(sed -n 's/^| `\(ADLC_[A-Z0-9_]*\)` |.*/\1/p' "$1"); do ref_settings | grep -qx -- "$n" || echo "setting $n"; done
+  for n in $(sed -n 's/^| `\(ADLC-[A-Z-]*\): .*/\1/p' "$1");     do ref_markers  | grep -qx -- "$n" || echo "marker $n"; done
+  for n in $(sed -n 's/^| `\([a-z]*:[a-z-]*\)` |.*/\1/p; s/^| `\(bug\)` |.*/\1/p' "$1"); do ref_labels | grep -qx -- "$n" || echo "label $n"; done
+}
+if [ -f "$REF" ]; then
+  eq "" "every ADLC_* setting, every marker and every label the code uses has a row" "$(ref_missing "$REF" | tr '\n' ';')"
+  eq "" "…and no row names a setting, marker or label the code no longer uses" "$(ref_stale "$REF" | tr '\n' ';')"
+  # The searches find what they are for: an empty list would pass every check above.
+  [ "$(ref_settings | wc -l)" -ge 15 ] && [ "$(ref_markers | wc -l)" -ge 10 ] && [ "$(ref_labels | wc -l)" -ge 18 ] \
+    && ok "the three searches find names (at least 15 settings, 10 markers, 18 labels)" || bad "a reference-page search found too few names: $(ref_settings | wc -l) settings, $(ref_markers | wc -l) markers, $(ref_labels | wc -l) labels"
+  ref_settings | grep -qx 'ADLC_SETUP_STEPS' && ref_settings | grep -qx 'ADLC_MC_PORT' && ref_markers | grep -qx 'ADLC-SCOPE-REQUEST' && ref_markers | grep -qx 'ADLC-FOLLOW-UP' \
+    && ok "…a script's, Mission Control's and a prompt's names among them" || bad "the reference-page searches miss a known name"
+  ref_markers | grep -q 'ADLC-ADV-X' && bad "the marker search read the tests" || ok "…and nothing from the tests"
+  # The check can fail: take one row away, or add one for a name the code does not have.
+  RF="$(mktemp -d)"
+  grep -v '^| `ADLC_CHAINS_LIMIT` |' "$REF" > "$RF/a.md"; eq "setting ADLC_CHAINS_LIMIT;" "a page without the ADLC_CHAINS_LIMIT row fails, and the name is given" "$(ref_missing "$RF/a.md" | tr '\n' ';')"
+  grep -v '^| `ADLC-FOLLOW-UP: ' "$REF" > "$RF/b.md";       eq "marker ADLC-FOLLOW-UP;" "…without the ADLC-FOLLOW-UP row" "$(ref_missing "$RF/b.md" | tr '\n' ';')"
+  grep -v '^| `ADLC-SCOPE: ' "$REF" > "$RF/c.md";           eq "marker ADLC-SCOPE;" "…without the ADLC-SCOPE row (the ADLC-SCOPE-REQUEST row does not stand in for it)" "$(ref_missing "$RF/c.md" | tr '\n' ';')"
+  grep -v '^| `adlc:accepted-risk` |' "$REF" > "$RF/d.md";  eq "label adlc:accepted-risk;" "…without a label labels.sh creates" "$(ref_missing "$RF/d.md" | tr '\n' ';')"
+  grep -v '^| `adlc:plugin-suggestion` |' "$REF" > "$RF/e.md"; eq "label adlc:plugin-suggestion;" "…without adlc:plugin-suggestion" "$(ref_missing "$RF/e.md" | tr '\n' ';')"
+  sed 's/^| `ADLC_MC_PORT` |/| the port, see `ADLC_MC_PORT` |/' "$REF" > "$RF/f.md"; eq "setting ADLC_MC_PORT;" "…a name mentioned inside a row is not a row of its own" "$(ref_missing "$RF/f.md" | tr '\n' ';')"
+  { cat "$REF"; printf '| `ADLC_GONE` | x | x | x | x |\n| `ADLC-GONE: x` | x | x | x |\n| `adlc:gone` | x | x | x |\n'; } > "$RF/g.md"
+  eq "setting ADLC_GONE;marker ADLC-GONE;label adlc:gone;" "a row for a name the code does not have fails too" "$(ref_stale "$RF/g.md" | tr '\n' ';')"
+  # The two markers that are not ADLC-<NAME>: the fix commits' prefix and the host-owned file marker.
+  grep -q '^| `adlc-fix:` ' "$REF" && ok "the page has the adlc-fix: commit prefix" || bad "docs/reference.md: no row for the adlc-fix: commit prefix"
+  grep -q '^| `adlc: host-owned` ' "$REF" && ok "…and the adlc: host-owned file marker" || bad "docs/reference.md: no row for the adlc: host-owned marker"
+  grep -q 'CLAUDE_CODE_OAUTH_TOKEN' "$REF" && grep -q '^| `ADLC_DISPATCH_TOKEN` |' "$REF" && ok "…and both repository secrets" || bad "docs/reference.md: both secrets must be on the page"
+else
+  bad "docs/reference.md is missing"
+fi
+grep -q '(docs/reference\.md)' "$ROOT/README.md" && ok "README links to docs/reference.md" || bad "README must link to docs/reference.md"
+for f in docs/reference.md docs/developing.md tests/guard-cases.sh; do
+  grep -qE "^(  )?${f#docs/} +# " "$ROOT/README.md" && ok "README's layout tree lists $f" || bad "README's layout tree must list $f"
+done
+
 echo ""
 echo "== $pass passed, $fail failed =="
 [ "$fail" -eq 0 ]

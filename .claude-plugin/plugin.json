@@ -5,5 +5,7 @@
   "version": "0.3.1",
   "license": "AGPL-3.0-only AND MIT",
   "author": { "name": "juanjtov" },
+  "homepage": "https://github.com/juanjtov/adlc-pipeline#readme",
+  "repository": "https://github.com/juanjtov/adlc-pipeline",
   "keywords": ["sdlc", "agents", "pipeline", "adlc", "code-review", "release"]
 }

@@ -61,6 +61,8 @@ mission-control/               # ← MISSION CONTROL: local live view (Python st
 bin/adlc-mission-control       # its launcher (on the Bash PATH when the plugin is enabled)
 mission-control/hook.sh        # reports pipeline-agent activity to Mission Control when it is running
 docs/                          # the plain-language explainer, the one-page pipeline diagram, the README hero (readme-hero.py)
+  reference.md                 # every ADLC_* setting, marker line and label: what it does, who writes it, what reads it
+  developing.md                # working on the plugin itself: the tests, what they pin, a lane dry run
 templates/                     # what the wizard fills into the host repo
   agents/adlc-<role>.md.tmpl   # this repo's copies of the five agents; the wizard fills each model line
   host-CLAUDE.md.tmpl          # minimalist CLAUDE.md (commands + gotchas + pointers)
@@ -96,6 +98,7 @@ templates/                     # what the wizard fills into the host repo
             #   adlc-branch-issue.sh = which issue a lane branch names (feat/<issue>-<slug>)
   hooks/pre-commit             # local diff-scope guard (reuses adlc-diff-scope.sh)
 tests/run.sh                   # unit tests: guardrail scripts, guard hook, contracts, lane wiring
+tests/guard-cases.sh           # the guard's allow / deny cases, one command per line; run.sh sources it
 telemetry/                     # ready-to-run local OTel collector (docker compose) for token/cost
 ```
 
@@ -325,6 +328,8 @@ steps arrive through the plugin's hooks, and tokens/cost arrive as telemetry sen
 on GitHub's runners show their GitHub state only. Details and limits: `mission-control/README.md`.
 Try it with made-up data: `adlc-mission-control --demo --open`.
 
+![Mission Control with made-up data: the assembly line, the work list, and one agent's live steps with time and tokens](docs/mission-control-demo.png)
+
 ### Commands
 
 | Command | What it does |
@@ -337,6 +342,9 @@ Try it with made-up data: `adlc-mission-control --demo --open`.
 | `/adlc:retro` | runs the self-improvement review now and proposes durable fixes |
 | `/adlc:cycle-retro [DAYS]` | ranks where a run's time and money go (per agent, per stage, fix rounds, gate waits) and proposes pipeline-shape fixes |
 | `/adlc:ablation` | starts the periodic context reset: on a branch it empties the persistent context, re-adds only what earns its place back, and logs that in `CONTEXT-LOG.md` |
+
+Every `ADLC_*` setting, every marker line the lanes and scripts parse, and every label, with
+what reads each and what enforces it, is in [docs/reference.md](docs/reference.md).
 
 The five agents are not commands: in the local recipe you invoke them by name, as the
 generated `docs/adlc/RUNBOOK.md` lays out, or `/adlc:autopilot` invokes them for you. What the

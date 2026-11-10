@@ -6,8 +6,8 @@ Run:  python3 docs/adlc-pipeline-diagram.py
       -> rewrites docs/adlc-pipeline-diagram.html and prints the artifact-body path
 Then: python3 ~/.claude/skills/diagram/render.py docs/adlc-pipeline-diagram.html docs/adlc-pipeline-diagram.png
 
-Draw the as-built truth: re-read agents/, skills/role-*, skills/charter, skills/triage, skills/intake and
-templates/github/*.yml before changing a flow.
+Draw the as-built truth: re-read agents/, skills/role-*, contracts/, skills/charter, skills/triage,
+skills/intake, skills/autopilot and templates/github/*.yml before changing a flow.
 """
 import sys, os
 sys.path.insert(0, os.path.expanduser("~/.claude/skills/diagram"))
@@ -58,7 +58,7 @@ node("person", 130, 232, "You", "the Principal", size=52, cls="ic-s", tile="tile
 # engine cluster: what starts each agent
 CX, CY, CW, CH = 290, 168, 850, 134
 rect(CX, CY, CW, CH, "cluster", r=16)
-icon("hex", 345, 226, 58, "ic-w", title="GitHub Actions running anthropics/claude-code-action: one workflow per lane, fired by label changes and pull-request events. Each lane installs the plugin on the runner, runs as its named agent (--agent adlc:builder and so on) and is granted that lane's tools only. templates/github/")
+icon("hex", 345, 226, 58, "ic-w", title="GitHub Actions running anthropics/claude-code-action: one workflow per lane, fired by label changes and pull-request events. Each agent step installs the plugin on the runner, runs as its named agent (--agent adlc:builder and so on) and is granted that lane's tools only. templates/github/")
 text(390, 206, "GITHUB ACTIONS", "clu-t", size=15, weight=800)
 text(390, 224, "starts each agent when a label or a pull request changes", "clu-s", size=10)
 text(390, 246, "ONE WORKFLOW PER LANE", "clu-e", size=8.5, weight=700)
@@ -71,8 +71,8 @@ lanes = [("intake", "adlc-intake.yml: runs the Analyst when a requirement is fil
          ("fast", "adlc-fast.yml: fast lane: Builder, size cap on the real diff, adversarial + security review"),
          ("ci", "adlc-ci.yml: the project's tests, type-check and build on every PR"),
          ("scope", "adlc-diff-scope.yml: fails a lane PR that touches files outside its scope file, and re-runs the fast-lane cap; both run from the default branch (pull_request_target), so a PR cannot edit them"),
-         ("tripwire", "adlc-main-tripwire.yml: alerts on any push to main that skipped a PR; installed for private repos without branch protection (optional)"),
-         ("retro", "adlc-retro.yml: weekly retro, opens a proposal PR (optional)")]
+         ("tripwire", "adlc-main-tripwire.yml: alerts on a push to main that skipped a PR, and on a force-push to main; installed for private repos without branch protection (optional)"),
+         ("retro", "adlc-retro.yml: weekly, runs the retro and then the cycle retro; each may open a proposal PR (optional)")]
 for i, (n, tip) in enumerate(lanes):
     cx = 404 + i * 50
     sched = n == "retro"
@@ -80,14 +80,14 @@ for i, (n, tip) in enumerate(lanes):
     text(cx, 291, n, "clu-y lab-m", anchor="middle", size=8)
 a(f'<line x1="955" y1="{CY+18}" x2="955" y2="{CY+CH-18}" stroke="#3A4A78" stroke-width="1"/>')
 text(980, 200, "OR BY HAND", "clu-e", size=8.5, weight=700)
-icon("terminal", 1000, 242, 38, "ic-w", title="Local recipe: you run each agent yourself in Claude Code, following the generated RUNBOOK.md. The recommended way to start.")
+icon("terminal", 1000, 242, 38, "ic-w", title="Local recipe: you run each agent yourself in Claude Code, following the generated RUNBOOK.md. The recommended way to start. /adlc:autopilot <issue> runs the same steps for one issue from your own session, up to a reviewed PR at Gate 2 (QA-approved on the full lane); as shipped in the plugin it has not yet been run end to end.")
 text(1028, 238, "Claude Code", "clu-x", size=12.5, weight=700)
 text(1028, 254, "you run each lane", "clu-y", size=9.5)
 text(1028, 267, "from the runbook", "clu-y", size=9.5)
 
 # setup wizard
 node("toolbox", 1300, 232, "Setup wizard", "/adlc-init · run once", size=44, cls="ic-l", tile="tile-l",
-     title="/adlc-init (bootstrap skill): detects a new or existing project, asks a short questionnaire, writes project-conventions, release-ops, charter, RUNBOOK, first ADR, .claude/settings.json deny rules, labels and (optionally) the workflows. Never commits.")
+     title="/adlc-init (bootstrap skill): detects a new or existing project, asks a short questionnaire, writes project-conventions, release-ops, charter, RUNBOOK, first ADR, your copies of the five agents (.claude/agents/adlc-<role>.md, each with its model line), the check scripts under .adlc/scripts/, .claude/settings.json deny rules and (optionally) the workflows; creates the labels after asking. Never commits.")
 flow("M1266,232 C1220,232 1190,232 1144,232", "fl-teal", "arrow-teal")
 label(1205, 214, "installs lanes + rules", "lbl-t", size=9)
 
@@ -136,7 +136,7 @@ label(198, 780, "reads only", "lbl-g", size=9)
 # ---------------------------------------------------------------- shared start: Analyst + Gate 1
 RY = 610
 node("doc", 330, RY, "Analyst", "stories + lane advice", size=50, cls="ic-l", tile="tile-l",
-     title="Product Analyst (agents/product-analyst.md): asks numbered questions if the request is unclear (auto-start lane: answer, then add adlc:auto back to restart it); otherwise writes stories with Given/When/Then acceptance criteria (full) or a one-check change brief (fast), and ends with ADLC-TRIAGE: FAST or FULL. Writes only issue comments and labels.")
+     title="Product Analyst (agents/product-analyst.md; its prompt is skills/role-product-analyst): asks numbered questions if the request is unclear (auto-start lane: answer, then add adlc:auto back to restart it); otherwise posts a triage verdict line, ADLC-TRIAGE: FAST or FULL, and writes stories with Given/When/Then acceptance criteria (full) or a one-check change brief (fast). Writes only issue comments and labels; the guard lets it add one label, gate:stories.")
 step(298, 578, 2)
 flow("M166,610 C210,610 250,610 292,610", "fl-ind fl-thick", "arrow-ind")
 label(214, 592, "stage:intake", "lbl-i", size=9)
@@ -148,7 +148,7 @@ flow("M367,610 C390,610 410,610 432,610", "fl-ind fl-thick", "arrow-ind")
 label(400, 634, "gate:stories", "lbl-i", size=9)
 # optional autopilot: approves Gate 1 for you, into the full lane only
 node("bolt", 420, 476, "Autopilot", "optional · full lane only", size=26, cls="ic-l", tile=None, dashed=True, label_size=11,
-     title="adlc:autopilot label on an issue: adlc-intake.yml approves Gate 1 for you when the Analyst's verdict is FULL. A FAST verdict still waits for you. Gate 2 is never automated.")
+     title="adlc:autopilot label on an issue: adlc-intake.yml approves Gate 1 for you unless the Analyst's verdict is FAST. A FAST verdict still waits for you. Gate 2 is never automated. /adlc:autopilot <issue> is the local counterpart, run from your own session.")
 a('<path d="M420,524 C420,552 472,546 478,572" class="fl-teal" style="stroke-dasharray:5 4" marker-end="url(#arrow-teal)"/>')
 label(447, 547, "can approve", "lbl-t", size=9)
 
@@ -156,16 +156,16 @@ label(447, 547, "can approve", "lbl-t", size=9)
 AY = 490
 text(566, 428, "FULL LANE · NEW BEHAVIOR", "eyebrow", size=9.5, weight=700)
 node("layers", 620, AY, "Architect", "design + files", size=50, cls="ic-l", tile="tile-l",
-     title="Architect (agents/architect.md): writes docs/adr/NNNN-*.md and a task breakdown where every task declares the exact files it may touch (its diff scope), plus a blast-radius check. Writes only under docs/. In the Actions design lane the workflow commits those files to adlc/design-<issue> and moves the issue on once the ADR and its ADLC-BREAKDOWN line exist.")
+     title="Architect (agents/architect.md; its prompt is skills/role-architect): writes docs/adr/NNNN-*.md and a task breakdown where every task declares the exact files it may touch (its diff scope), plus a blast-radius check. Writes only under docs/: the guard blocks an Edit or Write elsewhere (a file written through the shell is not seen). In the Actions design lane the workflow commits those files to adlc/design-<issue> and moves the issue on once the ADR and its ADLC-BREAKDOWN line exist.")
 step(586, 458, 4)
 node("api", 770, AY, "Builder", "code + tests, a PR", size=50, cls="ic-l", tile="tile-l",
-     title="Builder (agents/builder.md): implements on feat/<issue>-<slug>, records the files it may touch in .adlc/scope/<issue>.txt, a test per acceptance criterion (SN-ACN ids), runs the project's pass/fail command, opens a PR. Never merges, never pushes to main.")
+     title="Builder (agents/builder.md; its prompt is skills/role-builder): implements on feat/<issue>-<slug>, records the files it may touch in .adlc/scope/<issue>.txt, a test per acceptance criterion (SN-ACN ids), runs the project's pass/fail command, opens a PR. Never merges, never pushes to main.")
 step(736, 458, 5)
 node("eye", 920, AY, "Two reviewers", "break it · match design", size=50, cls="ic-l", tile="tile-l",
-     title="Adversarial Reviewer (agents/adversarial-reviewer.md): fresh context, sees only the diff, tries to break it, ends with ADLC-ADV: PASS or CHANGES. Then the Architect checks the PR against the design: ADLC-ARCH: PASS or CHANGES.")
+     title="Adversarial Reviewer (agents/adversarial-reviewer.md; its prompt is skills/role-adversarial-reviewer): fresh context, told to read only the diff and its criteria, tries to break it, ends with ADLC-ADV: PASS or CHANGES. Then the Architect checks the PR against the design: ADLC-ARCH: PASS or CHANGES.")
 step(886, 458, 6)
 node("check", 1070, AY, "QA", "tests + security", size=50, cls="ic-l", tile="tile-l",
-     title="QA & Release-Ops (agents/qa-release-ops.md): runs the full battery, writes missing tests (test folders only), runs the security gate, then adds gate:deploy and posts a Proposed Action Card. Never merges or deploys.")
+     title="QA & Release-Ops (agents/qa-release-ops.md; its prompt is skills/role-qa-release-ops): runs the full battery, writes missing tests (test folders only), runs the security gate, then moves the issue to gate:deploy and posts a Proposed Action Card. Never merges or deploys.")
 step(1036, 458, 7)
 
 # Gate 1 -> lanes (your decision)
@@ -190,9 +190,9 @@ text(600, 676, "FAST LANE · SMALL FIXES", "eyebrow", size=9.5, weight=700)
 node("api", 620, BY, "Builder", "small change + test", size=50, cls="ic-l", tile="tile-l",
      title="Builder on the fast lane (adlc-fast.yml): works from the change brief, no ADR; writes the scope to .adlc/scope/<issue>.txt, adds a test for S1-AC1, opens a PR labelled lane:fast.")
 node("gauge", 790, BY, "Size check", "small, nothing sensitive", size=50, cls="ic-l2", tile="plate",
-     title="adlc-triage.sh re-checks the real diff (in the Actions fast lane; by hand in the local recipe, where a plain file list checks count and paths but skips the line limit): default max 5 files and 40 changed lines, and no paths named for migrations, auth, security or infra, no CI or pipeline files, dependency manifests or secrets. It matches file paths, not what the code does. A change that fails goes to the full lane.")
+     title="adlc-triage.sh re-checks the real diff (in the Actions fast lane and under /adlc:autopilot; by hand in the local recipe, where a plain file list checks count and paths but skips the line limit and cannot see a submodule): default max 5 files and 40 changed lines, and no paths named for migrations, auth, security or infra, no CI or pipeline files, dependency manifests (.gitmodules among them) or secrets. A change to a submodule's pointer is never fast-eligible: it is one line in a diff however much code it brings in. It goes by size, file paths and entry type, not by what the code does. A change that fails goes to the full lane.")
 node("eye", 960, BY, "Reviewer", "break it + security", size=50, cls="ic-l", tile="tile-l",
-     title="Adversarial Reviewer on the fast lane: diff + change brief only, walks every security-gate attack class, ends with ADLC-ADV: PASS or CHANGES.")
+     title="Adversarial Reviewer on the fast lane: told to read only the diff and the change brief, and to walk every security-gate attack class; ends with ADLC-ADV: PASS or CHANGES.")
 flow("M656,730 C690,730 720,730 752,730", "fl-ind", "arrow-ind")
 label(705, 752, "opens a PR", "lbl-i", size=9)
 flow("M826,730 C860,730 890,730 922,730", "fl-ind", "arrow-ind")
@@ -210,7 +210,7 @@ label(411, 790, "only you may pick it", "lbl-r", size=9)
 
 # ---------------------------------------------------------------- both lanes end at the Action card
 node("contract", 1135, RY, "Action card", "risk, proof, undo", size=50, cls="ic-l", tile="tile-l",
-     title="Proposed Action Card (charter skill): action, risk, evidence, migrations none/additive/DESTRUCTIVE, rollback step. Posted with gate:deploy; awaits your approval.")
+     title="Proposed Action Card (charter skill): action, risk, evidence, the base commit the checks ran against, migrations none/additive/DESTRUCTIVE, rollback step. Posted with gate:deploy; awaits your approval.")
 flow("M1106,490 C1135,490 1135,530 1135,572", "fl-ind fl-thick", "arrow-ind")
 label(1135, 532, "all green", "lbl-i", size=9)
 flow("M996,730 C1060,730 1070,610 1097,610", "fl-ind", "arrow-ind")
@@ -231,7 +231,7 @@ c.nogo(BX, 428)
 label(1118, 428, "agents may not merge or push", "lbl-r", size=9)
 # tripwire
 node("flag", 1405, 800, "Tripwire", "alerts on a direct push", size=36, cls="ic-l2", tile="plate", dashed=True,
-     title="adlc-main-tripwire.yml + adlc-tripwire-check.sh: on every push to main, fails and files an alert issue if a commit arrived without a pull request or the branch was force-pushed. Installed for private repos on the free plan, where branch protection is not available; it reports after the fact and cannot stop a merge.")
+     title="adlc-main-tripwire.yml + adlc-tripwire-check.sh + adlc-tripwire-alert.sh: on every push to main, fails and files an alert issue (label adlc:tripwire, one per set of commits while it is open) if a commit arrived without a pull request or the branch was force-pushed. Installed for private repos on the free plan, where branch protection is not available; it reports after the fact and cannot stop a merge.")
 flow("M1362,640 C1385,680 1405,720 1405,772", "fl-grey", "arrow-grey")
 label(1392, 704, "watches pushes", "lbl-g", size=9)
 
@@ -239,12 +239,12 @@ label(1392, 704, "watches pushes", "lbl-g", size=9)
 SY = 870
 rect(250, SY, 560, 128, "legacy-strip", r=12)
 text(266, SY + 20, "SAFETY NETS · PLAIN SCRIPTS, UNIT-TESTED, SAME IN CI AND ON YOUR MACHINE", "eyebrow", size=9, weight=700)
-nets = [("lock", "Guard hook", "no merge, no push", "hooks/adlc_guard.py, a PreToolUse hook on every Bash command: blocks gh pr merge, pushes to main, force-pushes and GitHub API writes, for every agent in every permission mode, in sessions with the plugin enabled. It reads command text, so it is a guardrail; the deny rules in templates/settings.deny.json stay as a second layer."),
-        ("folder", "Scope check", "allowed files only", "adlc-diff-scope.sh: holds a lane PR to the files its own scope file, .adlc/scope/<issue>.txt, declares (test folders count too once QA adds tests), and fails a lane PR that declares no scope. The Builder writes that file; the Architect's review checks it against the design. In CI (automated lanes only) it runs from the default branch's copy, so a PR cannot edit the check that judges it."),
+nets = [("lock", "Guard hook", "no merge, no push", "hooks/adlc_guard.py, a PreToolUse hook on every Bash command: blocks gh pr merge, pushes to main, force-pushes and GitHub API writes, for every agent in every permission mode, in sessions with the plugin enabled (the Actions lanes, and a repo set up with the pipeline). From each role's contract (contracts/<role>.json) it also holds the Analyst, the Architect and the reviewer to their gh and git commands, to the label each may add (the Analyst gate:stories, the Architect stage:build, the reviewer none), and, on Edit and Write calls, to the paths each may write; a file written through the shell is not seen. It reads command text, so it is a guardrail; the deny rules in templates/settings.deny.json stay as a second layer."),
+        ("folder", "Scope check", "allowed files only", "adlc-diff-scope.sh: holds a lane PR to the files its own scope file, .adlc/scope/<issue>.txt, declares (test folders count too once the issue is at stage:qa), and fails a lane PR that declares no scope. The Builder writes that file; the Architect's review checks it against the design. In CI (automated lanes only) it runs from the default branch's copy, so a PR cannot edit the check that judges it."),
         ("json", "Verdict reader", "reads PASS/CHANGES", "adlc-verdict.sh: parses the reviewers' ADLC-ADV / ADLC-ARCH lines; control never trusts GitHub review state."),
-        ("sync", "Fix cap", "then a person", "adlc-fix-cap.sh: counts how many times a review sent this PR back (its adlc:changes-requested label events or its CHANGES verdict comments, whichever is more); past 3 the PR is tagged needs:human."),
+        ("sync", "Fix cap", "then a person", "adlc-fix-cap.sh: counts how many times a review sent this PR back (its adlc:changes-requested label events or its CHANGES verdict comments, whichever is more); past 3 the fix lane tags the PR needs:human. The RUNBOOK and /adlc:autopilot run the same check in the local recipe."),
         ("terminal", "Pre-commit", "same check, locally", "templates/hooks/pre-commit: runs the scope check before each local commit."),
-        ("gear", "Doctor", "checks the setup", "adlc-doctor.sh: fails a setup with missing deny rules, unfilled placeholders, lanes that cannot run their agent, missing guard scripts, skills or labels, and reports whether the default branch has a merge gate.")]
+        ("gear", "Doctor", "checks the setup", "adlc-doctor.sh: fails a setup with missing deny rules, unfilled placeholders, lanes that cannot run their agent, missing guard scripts, skills, agent copies or labels, an open issue carrying two state labels, or GitHub Actions blocked (the recent runs all failed within a minute and the latest ran no step), and reports whether the default branch has a merge gate.")]
 for i, (g, t, s, tip) in enumerate(nets):
     cx = 302 + i * 92
     icon(g, cx, SY + 56, 28, "ic-l2", title=tip)
@@ -254,8 +254,8 @@ for i, (g, t, s, tip) in enumerate(nets):
 rect(830, SY, 342, 128, "legacy-strip", r=12)
 text(846, SY + 20, "LEARNING LOOP · OPTIONAL", "eyebrow", size=9, weight=700)
 loop = [(880, "doc", "Findings", "logged by every review", "Every review and QA finding is written as an ADLC-FINDING line in the PR comment; adlc-log-findings.sh builds .adlc/metrics/findings.jsonl from them."),
-        (1000, "clock", "Retro", "weekly, or /adlc:retro", "retro skill + adlc-retro.yml (Mondays by default): ranks recurring mistakes."),
-        (1120, "docout", "Fix PR", "tests first, then checks", "A propose-only PR: a regression test first, then a CI check, then a convention. It is reviewed like any pull request, and you merge it.")]
+        (1000, "clock", "Two retros", "weekly, or on demand", "Two halves, both propose-only. retro skill (/adlc:retro): ranks the review findings that recur and proposes durable guards. cycle-retro skill (/adlc:cycle-retro): reads the run ledger (adlc-run-log.sh: seconds, tokens and cost per agent run) and the cycle time per stage from the label timeline (adlc-cycle.sh), and proposes changes to the pipeline's shape. adlc-retro.yml runs both, Mondays by default; on GitHub's runners the cycle retro sees times and fix rounds, not tokens. Both list follow-up chains 3 or more issues deep (adlc-chains.sh) as a decision for you."),
+        (1120, "docout", "Fix PR", "tests first, then checks", "A propose-only PR. From the retro: a regression test first, then a CI check, then a convention. From the cycle retro: a change to the pipeline's shape, such as fast-lane routing, what a reviewer reads, or a model tier. Each is reviewed like any pull request, and you merge it.")]
 for x, g, t, s, tip in loop:
     icon(g, x, SY + 56, 30, "ic-a", dashed=True, tile="tile-a", title=tip)
     text(x, SY + 92, t, "lab", anchor="middle", size=10.5, weight=700)
@@ -291,7 +291,7 @@ import shutil, tempfile
 here = os.path.dirname(os.path.abspath(__file__))
 out = os.path.join(tempfile.gettempdir(), "adlc-pipeline-diagram")
 body, standalone = c.write(os.path.join(out, "adlc-pipeline.html"),
-        caption="Drawn from the plugin as built: agents/, hooks/, skills/charter, skills/triage, skills/intake, templates/github/*.yml, templates/scripts/ and mission-control/. "
+        caption="Drawn from the plugin as built: agents/, skills/role-*, contracts/, hooks/, skills/charter, skills/triage, skills/intake, templates/github/*.yml, templates/scripts/ and mission-control/. "
                 "The fast-lane size cap and the fix-loop limit are defaults a project can change; hover the icons for the values and files. "
                 "Without GitHub Actions, you start each lane by hand in Claude Code and the gates are the same.")
 
