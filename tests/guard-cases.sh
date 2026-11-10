@@ -715,6 +715,16 @@ g A - feat './scripts/build-*.sh && ls'                                         
 g D $AN feat 'gh issue --title view edit 5 --add-label stage:fast'               # gh reads this as `gh issue edit`
 g D $AR feat 'gh issue --body view edit 5 --add-label gate:deploy'
 g A $AN feat 'gh -R o/r issue edit 5 --add-label gate:stories'
+g A $AN feat 'gh issue --title view edit 5 --add-label gate:stories'             # …and the role's own label passes in either reading
+g D $AN feat 'gh issue --title view edit 5 --add-label "$L"'
+g D $AN feat 'gh issue "" edit 5 --add-label stage:fast'                         # an empty word, which gh passes over
+g D $AN feat 'gh issue edit "" 5 --add-label stage:fast'
+g D $AN feat 'gh "" issue edit 5 --add-label stage:fast'
+g D $AN feat 'gh issue $X edit 5 --add-label gate:stories'                       # a word that may split, before the subcommand is settled
+g D $AN feat 'gh issue -R $(echo o/r edit 5 --add-label stage:fast --body) view'
+g D $AN feat 'gh issue edi[t] 5 --add-label stage:fast'                          # a glob where the subcommand stands
+g D $AN feat '.adlc/scripts/adlc-relabel.sh "" stage:fast'                       # the relabel script: an empty word is not an issue number
+g D $AN feat '.adlc/scripts/adlc-relabel.sh 5 "" stage:fast'
 
 # ── file writes: a role whose contract limits its paths (architect: docs/**; analyst, reviewer: none) ──
 w A $AR wr Write "$GR/wr/docs/adr/0002-login.md"                 # an absolute path into the repo's docs/

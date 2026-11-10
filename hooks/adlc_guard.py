@@ -1607,6 +1607,8 @@ class Guard:
                     groups = ROLE_RULES[self.role]["gh"]
                     if group.dynamic or g not in groups or (groups[g] is not None and s not in groups[g]):
                         raise Block("`gh %s` is outside the %s role." % ((g + " " + s).strip(), self.role))
+                    if (g, s) == ("issue", "edit") and ROLE_RULES[self.role]["labels"] is not None:
+                        self.check_labels(args, ROLE_RULES[self.role]["labels"])  # the label list, for this reading too
                 if unread(group) or (g == "pr" and sub is not None and unread(sub)):
                     if strict:
                         raise Block("the gh command `%s` can't be verified. Write it literally." % (g + " " + s).strip())
