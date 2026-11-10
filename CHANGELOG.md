@@ -9,9 +9,24 @@ it differs from the installed plugin.
 
 ## Unreleased (on `main` after 0.3.1)
 
-Tooling refresh needed: **no** — the change ships in the plugin's hook script and Mission
-Control, which every session and every start use from the installed plugin.
+Tooling refresh needed: **yes** — the `adlc-log-findings.sh` copy gains the backtick-wrapped
+marker, the per-comment time and the skipped-line report below. The retro's recipe lives in
+the plugin skill, which every session loads from the installed plugin, so that part needs no
+refresh.
 
+- **The finding ledger no longer drops a third of the findings** (issue 27). Measured on a host
+  with 144 markers in its PR threads, the materialized ledger held 94. Three causes, all fixed:
+  `adlc-log-findings.sh` skipped a marker wrapped in code markup
+  (`` `ADLC-FINDING: Medium | tenant-leak | app/tenancy.py` ``), 20 findings on that host; the
+  retro's recipe read `gh pr view --json comments` only, so findings posted as a GitHub review
+  body never reached the ledger, 29 more; and every row carried the time of the rebuild, so a
+  `since` window could not be applied to the ledger. The script now takes the marker after code
+  markup too (prose after the closing backtick stays out of the file field), takes the comment's
+  own time as an optional third argument, and reports on stderr every line it still could not
+  read that carries `ADLC-FINDING:` and three `|`-separated fields, so a marker placed where the
+  script does not look is a visible skip. The recipe in the `retro` skill reads comments and review bodies, stamps each
+  row with its comment's time, and lists 500 PRs instead of 50: on a repo past 50 PRs the older
+  ones fell off the end without a word (349 markers, 220 read, on the same host).
 - **One Mission Control shows every adopted repo on the machine, and says so** (issue 52).
   It always could: the hook sends each event with its working directory, the server maps that
   to a repo, and the page's repo menu switches between them. But a repo reached the menu only

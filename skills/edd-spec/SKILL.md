@@ -82,7 +82,8 @@ ADLC-FINDING: <severity> | <class> | <file>
 ```
 
 The `retro` (via `.adlc/scripts/adlc-log-findings.sh`) reads those lines from PR comments and
-**materializes** the ledger `.adlc/metrics/findings.jsonl` on demand — one object per finding:
+review bodies and **materializes** the ledger `.adlc/metrics/findings.jsonl` on demand — one
+object per finding, stamped with its comment's time:
 
 ```
 {"ts":"<ISO8601>","pr":<n>,"stage":"review|qa|security",
