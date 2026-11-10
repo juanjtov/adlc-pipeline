@@ -7,7 +7,22 @@ because those are frozen copies that only change on a refresh. Your repo's `.adl
 says which release its copies came from, and `.adlc/scripts/adlc-doctor.sh` tells you when
 it differs from the installed plugin.
 
-## Unreleased (on `main` after 0.3.1)
+## 0.4.0
+
+Covers everything on `main` after the v0.3.1 tag (`c7f0b6d`) up to and including this release
+commit: pull request 51 (the 0.3.1 marketplace pin), pull request 53 and pull requests 59 to
+75, the last of them merged as `56c2fbd` on 2026-11-10 (UTC). The reason to ship it now is the
+guard entry below ("Guard: a flag before the gh subcommand no longer hides it"): in 0.3.1 and
+earlier, `gh pr --subject view merge 5` runs a merge that the guard reads as a view. That fix
+ships in the plugin's hook, so it reaches you with the update alone, before any refresh. The
+number is 0.4.0 and not 0.3.2 because the release also adds skills, scripts and labels, and
+tightens things you may notice. With the update alone, where the guard is on: the Analyst and
+the Architect may add only the labels their contract lists (the Analyst can no longer add
+`bug`); the Architect's Edit, Write, MultiEdit and NotebookEdit calls are held to `docs/`, and
+the Analyst and the reviewer may write no file with those tools; and the guard blocks a `gh`
+call with an unquoted variable before the subcommand (`gh -R $REPO pr view 5`; quote it). With
+the refresh: the new `adlc-adr-check.sh` reports an ADR that has the new sections and does not
+name its issue (`**Issue:** none` says there is none).
 
 Tooling refresh needed: **yes** — `adlc-relabel.sh` is new and the lanes call it; the
 `adlc-log-findings.sh` copy gains the backtick-wrapped marker, the per-comment time, the
@@ -42,7 +57,11 @@ gains two rows, `adlc:autopilot` and `adlc:context-budget`; a `docs/adlc/CHARTER
 generated is an existing file, so the wizard shows the difference and asks, and no script reads
 the table. The security-gate, code-review and efficient-runs skills, the retro and cycle-retro
 recipes, the role prompts and the guard hook live in the plugin, which every session loads from
-the installed plugin, so those parts need no refresh.
+the installed plugin, so those parts need no refresh. The `release-ops` skill template changed
+too; the `bug` entry below says what that means for a skill generated earlier. Refresh together
+with the update: the role prompts that arrive with it call scripts only the refresh brings
+(`adlc-relabel.sh`, `adlc-adr-check.sh`, `adlc-chains.sh`), and a 0.3.1 intake lane has no grant
+for the first. A repo that is updated and not yet refreshed has not been run in that state.
 
 - **Docs: a reference page with a test behind it, a developer guide, what Mission Control
   keeps, and the explainer brought up to the code** (issues 18, 19, 20 and 22). The names that
@@ -398,9 +417,9 @@ the installed plugin, so those parts need no refresh.
   it reports Actions as blocked and says the tripwire is not watching; steps that ran mean a
   failing workflow, not a block, and a run it cannot read is reported as possibly blocked.
   Actions turned off for the repo creates no run at all, so neither reader sees that. Mission Control reads the same signal over REST about every two minutes
-  while a page is open and shows a banner. Not in this change, still on the issue: the
-  bootstrap's minutes sizing step, a local-CI marker recipe, and a `blocked` run outcome in
-  `adlc-run-log.sh`.
+  while a page is open and shows a banner. The rest of issue 34 (the
+  bootstrap's minutes sizing step, the local-CI marker and the `blocked` run outcome) is its
+  own entry above.
 
 - **The finding class is a closed list** (issue 28). Reviewers named classes freely, so the
   retro, which ranks by class × frequency, saw one failure under five names as five small
