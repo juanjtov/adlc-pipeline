@@ -607,3 +607,24 @@ g A adlc:builder feat 'git commit -am x && git push -u origin feat/1-x'
 g D adlc:builder feat 'gh pr merge 5'
 g D adlc:qa-release-ops feat 'git push origin main'
 g D general-purpose feat 'gh pr merge 5'
+
+# ── /adlc:autopilot (issue 36): the skill splits each step by who the guard lets do it ────
+g D adlc-adversarial-reviewer feat 'git fetch origin'            # so the orchestrator fetches before the reviews…
+g A adlc-adversarial-reviewer feat 'git diff 1111111..2222222'   # …and the reviewer reads the fix delta
+g D adlc-architect feat 'git checkout feat/1-x'                  # so the orchestrator checks the PR branch out for the amendment…
+g D adlc-architect feat 'git add docs/adr/0007-x.md && git commit -m "docs(adr): amend 0007"'   # …and commits it
+g A adlc-architect feat "gh pr comment 9 --body-file - <<'EOF'
+Conforms to ADR 0007.
+ADLC-ARCH: PASS
+EOF"
+g A - onmain 'git fetch origin && git checkout feat/1-x && git add docs/adr/0007-x.md && git commit -m "docs(adr): amend 0007" && git push origin feat/1-x'
+g A - feat 'gh issue edit 7 --add-label adlc:autopilot && .adlc/scripts/adlc-relabel.sh 7 stage:design'
+g A - feat 'gh pr edit 9 --add-label needs:human && gh pr comment 9 --body "stopped: the cap did not say GO"'
+g A - feat '.adlc/scripts/adlc-fix-cap.sh --pr 9'
+g A - feat 'gh pr list --state open --json number,headRefName,author'
+g A - feat 'gh pr view 9 --json comments --jq ".comments | length"'
+g A - feat 'bodies=$(gh pr view 9 --json comments --jq ".comments[4:][].body"); printf "%s\n" "$bodies" | .adlc/scripts/adlc-verdict.sh ADLC-ADV'
+g A - feat 'gh pr edit 9 --add-label adlc:changes-requested && .adlc/scripts/adlc-fix-cap.sh --pr 9'
+g A - feat 'gh pr edit 9 --remove-label needs:human'
+g A - feat 'git fetch origin && base=$(git merge-base refs/remotes/origin/main refs/remotes/origin/feat/1-x) && d=$(git -c core.quotePath=false diff --numstat --no-renames --raw --ignore-submodules=none "$base" refs/remotes/origin/feat/1-x) && [ -n "$d" ] && printf "%s\n" "$d" | .adlc/scripts/adlc-triage.sh'
+g D adlc-adversarial-reviewer feat '.adlc/scripts/adlc-relabel.sh 7 gate:deploy'   # so on the fast lane the orchestrator moves the issue
