@@ -128,7 +128,7 @@ run several of them as shipped, and you can do the same against the fake `gh`.
 | A script, skill, command or template is added or renamed | the layout tree in the README |
 | An `ADLC_*` setting, a marker or a label | [docs/reference.md](reference.md) (a test fails until you do) |
 | The pipeline's flow, a gate, a lane, a guard | [docs/adlc-pipeline-explained.md](adlc-pipeline-explained.md), and the strings in `docs/adlc-pipeline-diagram.py` |
-| What a release contains, or whether hosts must refresh | `CHANGELOG.md`, under Unreleased |
+| What a release contains, or whether hosts must refresh | `CHANGELOG.md`, under `## Unreleased` at the top (add the heading when the last release took it) |
 | How Mission Control looks | `docs/mission-control-demo.png` (the `--demo` page at 1440×900, dark) and `python3 docs/readme-hero.py --capture` for the README picture |
 
 Two of these need tools that are not in the repo. The diagram's HTML and PNG are built by
