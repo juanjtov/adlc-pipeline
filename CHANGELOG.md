@@ -7,7 +7,20 @@ because those are frozen copies that only change on a refresh. Your repo's `.adl
 says which release its copies came from, and `.adlc/scripts/adlc-doctor.sh` tells you when
 it differs from the installed plugin.
 
-## Unreleased (on `main` after 0.3.1)
+## 0.4.0
+
+Covers everything on `main` after the v0.3.1 tag (`c7f0b6d`) up to and including this release
+commit: pull request 51 (the 0.3.1 marketplace pin), pull request 53 and pull requests 59 to
+75, the last of them merged as `56c2fbd` on 2026-11-10 (UTC). The reason to ship it now is the
+guard entry below ("Guard: a flag before the gh subcommand no longer hides it"): in 0.3.1 and
+earlier, `gh pr --subject view merge 5` runs a merge that the guard reads as a view. That fix
+ships in the plugin's hook, so it reaches you with the update alone, before any refresh. The
+number is 0.4.0 and not 0.3.2 because the release also adds skills, scripts and labels, and
+tightens three things you may notice: where the guard is on, the Analyst, the Architect and
+the reviewer may add only the labels their contract lists (the Analyst can no longer add
+`bug`); `adlc-adr-check.sh` reports an ADR that does not name its issue (`**Issue:** none`
+says there is none); and the guard blocks a `gh` call with an unquoted variable before the
+subcommand (`gh -R $REPO pr view 5`; quote it).
 
 Tooling refresh needed: **yes** — `adlc-relabel.sh` is new and the lanes call it; the
 `adlc-log-findings.sh` copy gains the backtick-wrapped marker, the per-comment time, the
