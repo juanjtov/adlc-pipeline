@@ -231,7 +231,7 @@ c.nogo(BX, 428)
 label(1118, 428, "agents may not merge or push", "lbl-r", size=9)
 # tripwire
 node("flag", 1405, 800, "Tripwire", "alerts on a direct push", size=36, cls="ic-l2", tile="plate", dashed=True,
-     title="adlc-main-tripwire.yml + adlc-tripwire-check.sh: on every push to main, fails and files a bug if a commit arrived without a pull request. Installed for private repos on the free plan, where branch protection is not available; it reports after the fact and cannot stop a merge.")
+     title="adlc-main-tripwire.yml + adlc-tripwire-check.sh: on every push to main, fails and files an alert issue if a commit arrived without a pull request or the branch was force-pushed. Installed for private repos on the free plan, where branch protection is not available; it reports after the fact and cannot stop a merge.")
 flow("M1362,640 C1385,680 1405,720 1405,772", "fl-grey", "arrow-grey")
 label(1392, 704, "watches pushes", "lbl-g", size=9)
 

@@ -72,12 +72,14 @@ templates/                     # what the wizard fills into the host repo
   github/adlc-ci.yml · adlc-diff-scope.yml · adlc-main-tripwire.yml · adlc-retro.yml
   github/ISSUE_TEMPLATE/requirement.yml           # file a requirement → pipeline starts
   scripts/  adlc-diff-scope.sh · adlc-tripwire-check.sh · adlc-fix-cap.sh · adlc-verdict.sh
+            adlc-tripwire-alert.sh                                                     # the tripwire's alert issue, filed once per set of commits
             adlc-log-findings.sh · adlc-doctor.sh · adlc-metrics.sh · adlc-cost.sh
             adlc-cache.sh · adlc-triage.sh · adlc-pr-stage.sh · adlc-branch-issue.sh   # deterministic logic
             adlc-run-log.sh · adlc-cycle.sh                                            # the cycle-retro's two ledgers
             adlc-relabel.sh                                                            # one state per issue: move to a stage:/gate: label in one call
             adlc-adr-check.sh                                                          # an ADR's Scope = its issue's scope file, once that exists; each Guarantees row names a test that exists
             adlc-ci-budget.sh · adlc-local-ci.sh                                       # Actions minutes: will the CI battery fit · the battery run locally, one marker comment on the PR
+            adlc-refresh.sh                                                            # the refresh: per-file diff, skips host-owned copies; runs from the plugin, not copied
             #   adlc-cache.sh        = prompt-cache hit-rate rollup
             #   adlc-run-log.sh      = run ledger: tokens · cost · seconds per agent run (Mission Control / OTel / Actions)
             #   adlc-cycle.sh        = cycle time per stage + fix rounds per issue, from the label timeline; the ranked report
@@ -212,7 +214,11 @@ whatever was last pushed. [CHANGELOG.md](CHANGELOG.md) lists the releases and sa
 whether your repo needs a tooling refresh (run `/adlc-init` again). The refresh is needed
 because `/adlc-init` copies workflows and scripts into your repo as frozen files;
 `.adlc/VERSION` records which release they came from, and `.adlc/scripts/adlc-doctor.sh` tells
-you when it differs from the installed plugin.
+you when it differs from the installed plugin. The refresh copies through the plugin's
+`adlc-refresh.sh`, which prints a diff of each copy that differs and writes only when told to.
+To keep your own version of a script, a workflow, an agent copy or the hook, put
+`adlc: host-owned` in a comment within its first five lines (`# adlc: host-owned`): the script
+then skips that file and lists it, and bringing it up to date with the plugin is yours to do.
 
 To work on the plugin itself, load a checkout instead — `claude --plugin-dir
 /path/to/adlc-pipeline` — and `/reload-plugins` picks up edits. That loads your working
@@ -275,7 +281,7 @@ the exact issue, and files it once you confirm:
 | a full PRD | proposes shippable slices, files the first (one issue = one slice) |
 | an existing GitHub issue | sharpens it in place and labels it |
 | a ticket in Notion / Linear / another tracker | fetches it through that tool's MCP connector (or you paste it) and files an issue that links back |
-| a bug | same flow, plus the `bug` label |
+| a bug | same flow, plus the `bug` label (any defect; `adlc:change-failure` is Ops's, for one it traced to a deploy) |
 | the Analyst's open questions | answers them with you and updates the issue |
 
 Already sharp? Skip the interview: file the **Requirement** issue form (auto-start lane) or
@@ -374,8 +380,8 @@ Pro was only ever about server-side branch protection on private repos:
    the tripwire included, so the wizard sizes the battery first (`adlc-ci-budget.sh`) and
    `adlc-doctor.sh` and Mission Control say when it has happened. Branch protection isn't
    available, so the merge gate is the plugin's guard hook (backed by the `settings.json` deny
-   rules) + `adlc-main-tripwire.yml` (fails + files a bug on any direct push to main) + human
-   Gate 2.
+   rules) + `adlc-main-tripwire.yml` (fails + files an `adlc:tripwire` alert issue on a direct
+   push or a force-push to main) + human Gate 2.
 
 Full automation (either kind) needs two repo secrets: `CLAUDE_CODE_OAUTH_TOKEN`
 (`claude setup-token` — subscription, no API key) and `ADLC_DISPATCH_TOKEN` (a PAT or, better,

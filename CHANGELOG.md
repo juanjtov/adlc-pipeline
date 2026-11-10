@@ -19,11 +19,65 @@ asks before it replaces yours), the RUNBOOK's Stage 4 names the check, and the w
 new `settings.cache.json` into `.claude/settings.json`. From issue 34: `adlc-ci-budget.sh` and
 `adlc-local-ci.sh` are new; the `adlc-cycle.sh` copy gains the `blocked=` figure, the
 `adlc-metrics.sh` copy the `blocked` and `local_ci` lines, the `adlc-run-log.sh` copy the
-`outcome` field, the `adlc-doctor.sh` copy a pointer to the local CI script, the
-`adlc-triage.sh` copy `.adlc/local-ci.txt` on its deny list, and the RUNBOOK template the local
-CI recipe. The security-gate, code-review and efficient-runs skills, the retro
-and cycle-retro recipes, the role prompts and the guard hook live in the plugin, which every
+`outcome` field, the `adlc-doctor.sh` copy a pointer to the local CI script, the `adlc-triage.sh`
+copy `.adlc/local-ci.txt` on its deny list, and the RUNBOOK template the local CI recipe. From
+issues 39 and 21: `adlc-tripwire-alert.sh` is new and the refreshed `adlc-main-tripwire.yml` calls
+it (with the `adlc-tripwire-check.sh` copy's new `range` mode); the `adlc-doctor.sh` copy gains
+the two new labels and the host-owned line, the `adlc-metrics.sh` copy the `change_failures`
+count, and the RUNBOOK template the scope-file section. Re-run `templates/github/labels.sh` as
+well: it creates `adlc:change-failure` and `adlc:tripwire`. The refresh itself now runs through
+`adlc-refresh.sh`, from the plugin. The security-gate, code-review and efficient-runs skills, the
+retro and cycle-retro recipes, the role prompts and the guard hook live in the plugin, which every
 session loads from the installed plugin, so those parts need no refresh.
+
+- **A refresh no longer overwrites what a host changed; the tripwire alerts on a force-push
+  and files an alert once** (issue 39). The refresh copied `templates/scripts/*.sh` over the
+  host's copies with no comparison and no way to keep a file: one host held its upgrade back
+  because the refresh "would offer to undo" its local fixes. New `adlc-refresh.sh [--apply]
+  <host-root>`, which the wizard runs from the plugin: one line per file (`same`, `new`,
+  `changed` with a unified diff, `host-owned (skipped)`), nothing written without `--apply`,
+  and with it only the new and changed files are copied, never one whose first five lines
+  contain `adlc: host-owned`; the output ends with what it skipped. A host with local changes
+  marks those files before it applies a refresh (the dry run's diffs show which they are). Workflows, agent copies and
+  the pre-commit hook are filled before they are copied, so the wizard fills a scratch file and
+  hands it to the same script (`<host-root> <filled-file> <target>`, a fixed list of targets, a
+  leftover `{{PLACEHOLDER}}` refused): the comparison and the marker are the script's, the
+  filling is still the wizard's. The doctor lists host-owned copies on one line (it never
+  compared a copy with the plugin's, so differing was not a defect there). The tripwire: a force-push to the branch
+  (`github.event.forced`) now fails the run and files an alert, without walking a
+  `BEFORE..AFTER` range that a rewrite may leave invalid; the alert moves into
+  `adlc-tripwire-alert.sh`, which ends the body with `ADLC-TRIPWIRE: direct <sorted ids>` (or
+  `forced <before> <after>`) and files nothing while an open `adlc:tripwire` issue carries the
+  same line (one host got the same four commits twice, a minute apart). A failed listing files
+  anyway; a repo without the label gets the alert unlabelled. The RUNBOOK template now says what
+  becomes of `.adlc/scope/<n>.txt`: they stay as the record; after the merge
+  `adlc-adr-check.sh` still compares one with the Scope of each ADR naming its issue, and a
+  later PR tied to the same issue is held to it; pruning is the Principal's, outside the lanes
+  (the diff-scope check refuses a lane PR that touches another issue's scope file), and turns
+  that ADR comparison off.
+  Not done: the script does not fill placeholders itself, `.adlc/VERSION` is restamped also when
+  files were skipped, an alert closed and then re-triggered is filed again, two tripwire runs
+  that list the open alerts at the same moment can still both file, and a force-push's commits
+  are not checked one by one. The duplicate check trusts the line wherever it is: an open
+  alert issue whose body already holds the exact key line holds back a new alert for that set
+  of commits (the run still fails).
+
+- **`bug` means any defect; the change-failure metric counts `adlc:change-failure`** (issue
+  21). Four parts used `bug` and meant different things: `labels.sh` described it as an
+  Ops-filed defect, `adlc-metrics.sh` counted it as the change-failure signal, intake adds it to
+  every bug a person reports, and the tripwire filed its alerts with it, so reported bugs and
+  tripwire alerts raised the change-failure number. Now `bug` is any defect, however reported;
+  the new label `adlc:change-failure` marks a defect Ops traced to a deploy (the QA/Ops prompt
+  and the `release-ops` template file such a defect with both), and `adlc-metrics.sh` counts
+  issues that carry it, printed as `change_failures` (was `bugs_filed`). The tripwire files
+  under the new `adlc:tripwire` label: a direct push is a process breach, not a defect.
+  `labels.sh` creates both, and the doctor reports a repo that lacks `adlc:change-failure`, or
+  `adlc:tripwire` where the tripwire is installed. **For a host:**
+  re-run `labels.sh`; `bug` issues Ops filed before this change are no longer counted unless
+  you add `adlc:change-failure` to them; until the label exists the metric prints
+  `change_failures: 0` with a note saying why; a `release-ops` skill generated earlier keeps its
+  old sentence until you edit it (the role prompt, loaded from the plugin, already has the new
+  one). One `gh label list` call more per metrics run.
 
 - **Actions minutes are sized before the battery is copied, a blocked run is not a failed
   one, and local CI leaves one marker** (issue 34, the rest of it). The bootstrap offered
