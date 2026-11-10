@@ -58,6 +58,28 @@ g D - feat 'gh pr --subject "$S" view 5'                                      # 
 g A - feat 'gh pr --json title view 5'                                        # a flag first, and no word that could make a blocked call
 g A - feat 'gh -R o/r pr view 5 && gh pr view 5 --json title && gh pr list --state open && gh issue view 7 --comments'
 g A - feat 'gh pr --help && gh --help && gh pr view --help'
+g D - feat 'gh pr "" merge 5'                                                 # gh passes over an empty word
+g D - feat 'gh "" pr merge 5'
+g D - feat 'gh pr "" --subject x merge'
+g D - feat 'gh pr "-$X" view merge 5'                                         # a computed flag may take `view` as its value
+g D - feat 'gh alias "$E" set m "pr merge"'                                   # a computed word may be empty, or a flag
+g D - feat 'gh --foo x "$G" merge 5'                                          # …or, after a flag that may take `x`, the group
+g A - feat 'gh pr --repo=o/r view merge && gh pr -Ro/r view merge'            # `--flag=value` and a cluster take nothing: these view the branch `merge`
+g D - feat 'gh pr --subject=$(echo x merge) 5'                                # a word that may split, before the subcommand is settled
+g D - feat 'gh pr -R $(echo o/r merge 5 --body) view'                         # …as -R's value too
+g D - feat 'gh -R $REPO pr view 5'                                            # (which blocks this as well: quote it)
+g D - feat 'gh issue $CMD 7'                                                  # where the subcommand stands it may be several words
+g A - feat 'gh -R "$REPO" pr view 5 && gh pr view $PR --json title'
+g D - feat 'gh pr merg[e] 5'                                                  # a glob or a brace where the command word stands may become `merge`
+g D - feat 'gh pr {merge,view} 5'
+g D - feat 'gh p[r] merge 5'
+g A - feat 'gh issue list --search "fix*" && gh search issues "a?b [x]" && gh browse src/*.py'   # …elsewhere it is an argument
+g D - feat "echo 'gh pr --body \"a;b\" merge 5' | bash"                       # text handed to a shell: a separator inside quotes hides nothing
+g D - feat "echo 'gh pr -b \"fix & ship\" merge 5' | sh"
+g D - feat "\"\$SH\" -c 'gh pr --body \"a|b\" merge 5'"
+g D - feat $'"$SH" <<EOF\ngh pr --body "a;b" merge 5\nEOF'
+g D - feat "echo 'gh pr \"\" merge 5' | bash"
+g A - feat '"$PYTHON" -m pytest -q && echo "ran gh pr checks 5: green, ready to merge"'   # prose beside a computed program is not a call
 g D - feat $'bash <<EOF\ngh pr merge 5\nEOF'
 g D - feat 'echo "gh pr merge 5" | bash'
 g A - feat 'gh pr view 5'
@@ -113,6 +135,8 @@ g D - feat 'git checkout -b hotfix origin/main && git push'                 # tr
 g D - feat 'git checkout - && git push'                                      # previous branch: unknown
 g D - feat 'git checkout "$B" && git push origin HEAD'
 g D - onmain 'gh pr --foo checkout 5 && git push'                            # checked out, or `--foo checkout` was a flag and its value: unknown
+g D - feat 'gh pr --foo checkout 5 && git push'                              # …so no branch is trusted after it, wherever the session was
+g D - onmain 'gh pr --template checkout view 5 --json title && git push'     # reads as a checkout, runs as a view: the push would leave from main
 g A - onmain 'git checkout -b feat/5-login && git add -A && git commit -m "feat: login" && git push -u origin HEAD'
 g A - onmain 'git switch -c feat/6 && git push -u origin feat/6'
 g A - onmain 'git checkout -b feat/7 && git push'
@@ -273,6 +297,15 @@ g D - feat 'gh -XDELETE api repos/o/r/issues/1'
 g D - feat 'gh -f title=x api repos/o/r/issues'
 g D - feat 'gh --input body.json api repos/o/r/issues'
 g A - feat 'gh --jq .name api repos/o/r && gh --hostname github.example.com api repos/o/r/issues'
+g D - feat 'gh api -t api -X DELETE repos/o/r/git/refs/heads/x'               # a flag whose value is the word `api`
+g D - feat 'gh api --template api --method PUT repos/o/r/pulls/5/merge'
+g D - feat 'gh api -q api -f title=x repos/o/r/issues'
+g D - feat 'gh api -p api --jq api -X DELETE repos/o/r/git/refs/heads/x'
+g D - feat 'gh -t api api -X DELETE repos/o/r/git/refs/heads/x'
+g D - feat 'gh api api -X DELETE'
+g A - feat 'gh api --paginate "repos/{owner}/{repo}/pulls/$PR/files?per_page=100" --jq ".[] | .filename"'   # as a shipped workflow calls it
+g A - feat 'gh api --jq .title "repos/$REPO/pulls/5" && gh api -H "Accept: application/vnd.github+json" "repos/$OWNER/$REPO/pulls/$PR"'
+g A - feat 'gh api -X GET "repos/$REPO/issues" -f state=open && gh api --jq api repos/o/r/pulls -t api'
 g D - feat 'gh api repos/o/r/merges -f base=main -f head=feat'
 g D - feat 'gh api repos/o/r/git/refs/heads/main -X PATCH -f sha=abc'
 g D - feat 'gh api -X "$M" repos/o/r/pulls/5/merge'
@@ -465,6 +498,9 @@ g D - feat '$GH api -X DELETE repos/o/r/git/refs/heads/x'
 g D - feat '"$GH" api --method POST repos/o/r/merges -f base=main -f head=x'
 g D - feat '"$GH" -R o/r pr merge 5'
 g D - feat '"$GH" -X DELETE api repos/o/r/git/refs/heads/x'
+g D - feat '"$GH" api -t api -X DELETE repos/o/r/git/refs/heads/x'
+g D - feat '"$GH" -t api api --method PUT repos/o/r/pulls/5/merge'
+g A - feat '"$RUNNER" $OPTS pr view 5'                                        # a program named by a variable: only the blocked calls its words spell out
 g D - feat 'C=${X:-curl}; $C -X DELETE https://api.github.com/repos/o/r/git/refs/heads/x'
 g D - feat '"$GIT" -c core.x=y push origin main'
 g D - feat '$HOME/bin/gh api -X DELETE repos/o/r/git/refs/heads/x'            # the last part is literal: it IS gh
@@ -495,6 +531,10 @@ g D $AN feat 'gh api repos/o/r/issues'
 g D $AN feat 'gh issue --title view close 7'                                  # gh reads this as `gh issue close 7`: a flag before the subcommand can't be checked
 g D $AN feat 'gh --foo label issue delete 7 --yes'
 g A $AN feat 'gh -R o/r issue view 5 && gh issue view 5 --repo o/r'
+g D $AN feat 'gh issue -R $(echo o/r close 7 --comment) view'                 # a word that may split, as -R's value
+g D $AN feat 'gh issue "" close 7'
+g D $AN feat 'gh issue clos[e] 7'
+g A $AN feat 'gh issue view "$N" --json title && gh issue list --search "$Q"'
 g D $AN feat 'git commit -am x'
 g D $AN feat 'git push -u origin feat/1-x'
 g D $AN feat 'git branch newbranch'
@@ -528,6 +568,7 @@ g A $RV feat 'gh issue view 12'
 g A $RV feat 'git diff origin/main...HEAD -- src/ | head -400'
 g D $RV feat 'gh pr review 5 --approve'
 g D $RV feat 'gh pr --body view review 5 --approve'                           # `gh pr review`, behind a flag that takes `view` as its value
+g D $RV feat 'gh pr -R $(echo o/r review 5 --approve --body) view'
 g D $RV feat 'gh pr edit 5 --add-label adlc:changes-requested'
 g D $RV feat 'gh issue edit 12 --add-label stage:qa'
 g D $RV feat '.adlc/scripts/adlc-relabel.sh 12 stage:qa'                      # …so the reviewer may not run it either
