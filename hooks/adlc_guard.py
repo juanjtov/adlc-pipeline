@@ -189,7 +189,7 @@ HEREDOC_ESCAPE = re.compile(r"\\([$`\\])")
 ANSI_C = re.compile(r"\\(x[0-9A-Fa-f]{1,2}|u[0-9A-Fa-f]{1,4}|[0-7]{1,3}|.)", re.S)
 ANSI_C_NAMED = {"n": "\n", "t": "\t", "r": "\r", "a": "\a", "b": "\b", "e": "\x1b", "f": "\f", "v": "\v"}
 RAW_PUSH = re.compile(r"(?<![\w.-])git\b(?:\s+-[cC]\s*\S+|\s+--?[\w-]+(?:=\S+)?)*\s+['\"]?push\b")
-RAW_MERGE = re.compile(r"(?<![\w.-])gh\b[^\n;|&]*?\bpr\b[^\n;|&]*?\bmerge\b")  # `gh pr --subject x merge` too
+RAW_MERGE = re.compile(r"(?<![\w.-])gh\b[^\n;|&]*?\bpr\s+merge\b")
 RAW_API = re.compile(r"(?<![\w.-])gh\b[^\n;|&]*?\bapi\b")
 RAW_HTTP = re.compile(r"^(?=.*(?<![\w.-])(?:curl|wget)\b)(?=.*(?:(?:api|uploads)\.github\.com|GITHUB_(?:API|GRAPHQL)_URL))",
                       re.I | re.M)  # one line naming both, in either order
@@ -889,6 +889,21 @@ class Guard:
                     "%s appears in %s, where its target can't be verified. Run it as a "
                     "plain command of its own." % (what, where)
                 )
+        # The same text read as shell, for the one call a regex can't follow through quotes:
+        # `gh pr --body "a;b" merge 5` is `gh pr merge` to gh, and so is `gh pr "" merge`.
+        try:
+            parser = Parser(text)
+            parser.parse()
+            calls = [cmd.words[k + 1:] for cmd in parser.cmds for k, word in enumerate(cmd.words)
+                     if not word.dynamic and base(word) == "gh"]
+            merges = any(sub is not None and not group.dynamic and not sub.dynamic
+                         and (group.text, sub.text) == ("pr", "merge")
+                         for words in calls for group, sub, _ in self.gh_readings(words)[0])
+        except Exception:  # prose, or text no shell would take: the patterns above have had it
+            return
+        if merges:
+            raise Block("`gh pr merge` appears in %s, where its target can't be verified. Run it "
+                        "as a plain command of its own." % where)
 
     def opaque(self, what, extra="", moves=True, prefix=""):
         """The command runs text it computes. Its literal data is checked once all of it is
@@ -971,6 +986,7 @@ class Guard:
             texts = [a.text for a in args]
             self.opaque("a command whose name is computed", " ".join(texts),
                         moves=any(t in MOVES_HEAD or t.lower().startswith(ROUTES_PUSH) for t in texts))
+            self.data.extend(body for body, _ in cmd.heredocs)  # it may be a shell, and this its script
             # Judge it as the call its arguments make it look like: "$GIT" push …,
             # "$GH" pr merge …, "$GH" api -X DELETE …, "$CURL" -X PUT https://api.github.com/…
             try:
@@ -978,8 +994,10 @@ class Guard:
                     if word in texts:
                         self.check_push(args[texts.index(word) + 1:], self.cwd_of(scope), plumbing=word != "push")
                 for word in ("pr", "api", "alias"):
-                    if word in texts:  # (what stands before the word goes after it: gh reads a flag there too)
-                        self.check_gh(args[texts.index(word):] + args[:texts.index(word)], scope)
+                    if word in texts:
+                        self.check_gh(args[texts.index(word):], scope)
+                if any(word in texts for word in ("pr", "api", "alias")):
+                    self.check_gh_readings(args, scope, strict=False)  # …and with what stands before the word
                 self.check_http("curl", args)
             except Block as b:
                 raise Block("%s (The program here is named by `%s`, so the command is judged as the "
@@ -1496,58 +1514,131 @@ class Guard:
                 raise Block("push to the protected branch `%s`. %s" % (dst, advice))
 
     # -- gh ----------------------------------------------------------------------------
-    def check_gh_early_flag(self, args, k, scope):
-        """args[k] is a `--flag` or `-f` written before the gh subcommand. While gh looks for the
-        command it takes the word after such a flag as the flag's value, unless it knows the flag
-        as a switch at that level: `gh pr --subject view merge 5` is `gh pr merge 5`, and
-        `gh -X DELETE api …` is a DELETE. Which flag gh knows where is not the guard's to guess,
-        so from here ANY bare word of the call may be the group or the subcommand, and the call is
-        judged by all of them. False when no bare word follows the flag (`gh --version`)."""
-        if all(w.text.startswith("-") for w in args[k + 1:]):
-            return False
-        bare = [w for w in args if not w.text.startswith("-")]
-        texts = [w.text for w in bare]
-        why = ("gh may take the word after `%s` as that flag's value, so any word of this call "
-               "may be its subcommand. Put the options after the subcommand: "
-               "`gh pr view 5 --json title`." % args[k].text)
-        if self.role:
-            raise Block("this gh command can't be checked against the %s role's limits: %s" % (self.role, why))
-        if any(w.dynamic for w in bare):
-            raise Block("the gh command can't be verified, a word of it is computed: %s" % why)
-        try:
-            if "pr" in texts and "merge" in texts:
-                self.check_gh([Word("pr"), Word("merge")], scope)
-            for sub in ("set", "import"):
-                if "alias" in texts and sub in texts:
-                    self.check_gh([Word("alias"), Word(sub)], scope)
-            if "api" in texts:
-                self.check_gh_api([w for w in args if w.text != "api"])
-        except Block as b:
-            raise Block("%s (%s)" % (b, why))
-        if "pr" in texts and "checkout" in texts:
-            self.lost = True  # it may have checked a PR out, or may not: no branch is trusted after
-        return True
-
     def check_gh(self, args, scope):
+        """A gh call. It is judged as written, the way the guard always read it, and then by
+        every other way gh itself may read the same words: each one can only add a reason to
+        block, never take one away."""
+        self.check_gh_as_written(args, scope)
+        self.check_gh_readings(args, scope)
+
+    @staticmethod
+    def gh_command_words(words):
+        """Where gh may find its next command word in `words`: the indexes; a word on the way that
+        may split into several (else None); and whether it may find no command at all.
+        While it looks, gh takes the word after `--flag` or `-f` as that flag's value unless it
+        knows the flag as a switch at that level, and which flags those are is not the guard's to
+        guess: both ways are followed (for -R, --repo and --hostname only the value). A
+        `--flag=value` and a cluster (`-abc`) take nothing, an empty word is passed over, and `--`
+        ends the search. A computed word the guard can't read may be any of these."""
+        found, loose, ended, seen, todo = [], None, False, set(), [0]
+        while todo:
+            j = todo.pop()
+            if j in seen:
+                continue
+            seen.add(j)
+            if j >= len(words):
+                ended = True
+                continue
+            word, t, steps = words[j], words[j].text, ()
+            if word.splits or (word.dynamic and t.startswith(EXPANSIONS)):
+                found.append(j)
+                steps = (1, 2)
+            elif t.startswith("-"):
+                if t == "--":
+                    ended = True
+                elif t in ("-R", "--repo", "--hostname"):
+                    steps = (2,)
+                elif "=" not in t and (word.dynamic or t.startswith("--") or len(t) == 2):
+                    steps = (1, 2)
+                else:
+                    steps = (1,)
+            elif t == "":
+                steps = (1,)
+            else:
+                found.append(j)
+            for step in steps:
+                todo.append(j + step)
+                if step == 2 and j + 1 < len(words) and words[j + 1].splits:
+                    loose = loose or words[j + 1]  # a flag's value that may be more words than one
+            if word.splits:
+                loose = loose or word
+        return sorted(found), loose, ended
+
+    def gh_readings(self, args):
+        """Every (group word, subcommand word or None, the call's other words) gh may make of a
+        call, and a word that may split on the way to them (else None). `gh api` has no subcommand."""
+        out = []
+        groups, loose, _ = self.gh_command_words(args)
+        for i in groups:
+            rest = args[:i] + args[i + 1:]
+            if args[i].text == "api" and not args[i].dynamic:
+                out.append((args[i], None, rest))
+                continue
+            subs, more, ended = self.gh_command_words(rest)
+            loose = loose or more
+            out.extend((args[i], rest[j], rest) for j in subs)
+            if ended:
+                out.append((args[i], None, rest))
+        return out, loose
+
+    def check_gh_readings(self, args, scope, strict=True):
+        """Block when ANY reading of the call is one the guard blocks: `gh pr --subject view
+        merge 5` is `gh pr merge 5` to gh, `gh pr "" merge` too, and `gh -X DELETE api …` is a
+        DELETE. A command word nobody can read here — computed, or holding a glob or a brace
+        the shell may expand (`merg[e]`) — may be any command. `strict` is for a call that
+        certainly is gh: a word that may split blocks, and a narrow role's lists apply to every
+        reading. Not strict (a program named by a variable): only the written-out blocked calls."""
+        def unread(word):
+            return word.dynamic or any(c in word.text for c in "*?[{")
+
+        try:
+            readings, loose = self.gh_readings(args)
+        except Exception as e:  # a bug here must not become a way through, nor undo what was read before
+            raise Block("the guard failed to read this gh command (%s). Simplify it." % type(e).__name__)
+        if strict and loose is not None:
+            raise Block("`%s` may split into several words before the gh subcommand is settled, "
+                        "so the command can't be read. Quote it, or write it out." % loose.text)
+        names = set()
+        for group, sub, rest in readings:
+            g, s = group.text, sub.text if sub is not None else ""
+            names.add((g, s))
+            try:
+                if strict and self.role:  # the role's lists, for this reading
+                    groups = ROLE_RULES[self.role]["gh"]
+                    if group.dynamic or g not in groups or (groups[g] is not None and s not in groups[g]):
+                        raise Block("`gh %s` is outside the %s role." % ((g + " " + s).strip(), self.role))
+                    if (g, s) == ("issue", "edit") and ROLE_RULES[self.role]["labels"] is not None:
+                        self.check_labels(args, ROLE_RULES[self.role]["labels"])  # the label list, for this reading too
+                if unread(group) or (g == "pr" and sub is not None and unread(sub)):
+                    if strict:
+                        raise Block("the gh command `%s` can't be verified. Write it literally." % (g + " " + s).strip())
+                elif (g, s) == ("pr", "merge") or (g == "alias" and s in ("set", "import")):
+                    self.check_gh_as_written([Word(g), Word(s)], scope)  # raises, with that block's own words
+                elif g == "api":
+                    self.check_gh_api(rest)
+            except Block as b:
+                raise Block("%s (This is `gh %s` the way gh may read the call: it takes the word after a "
+                            "`--flag` or `-f` written before the subcommand as that flag's value, and "
+                            "passes over an empty word. Put the options after the subcommand.)"
+                            % (b, (g + " " + s).strip()))
+        if ("pr", "checkout") in names and len(names) > 1:
+            self.lost = True  # it may have checked a PR out, or may not: no branch is trusted after
+
+    def check_gh_as_written(self, args, scope):
+        """One reading of a gh call: flags take no value (-R, --repo and --hostname aside), and the
+        first two bare words are the group and the subcommand. check_gh adds the other readings."""
         positional, k = [], 0
         while k < len(args) and len(positional) < 2:
             a = args[k].text
             if a in ("-R", "--repo", "--hostname") and k + 1 < len(args):
                 k += 2
             elif a.startswith("-"):
-                # `--flag` and `-f` (no `=`, not a cluster) are the two shapes that may take the next word
-                if (args[k].dynamic or ("=" not in a and (a.startswith("--") or len(a) == 2))) \
-                        and self.check_gh_early_flag(args, k, scope):
-                    return
                 k += 1
             else:
                 positional.append(args[k])
                 k += 1
         if not positional:
             return
-        if positional[0].text == "api" and args[0] is not positional[0]:
-            # a flag written before `api` is api's flag too: `gh --method=DELETE api …` is a DELETE
-            self.check_gh_api([w for w in args if w is not positional[0]])
         group = positional[0].text
         sub = positional[1].text if len(positional) > 1 else ""
         if self.role:

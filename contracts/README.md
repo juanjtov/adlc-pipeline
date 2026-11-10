@@ -60,7 +60,8 @@ is in, at a path one of the globs matches. With no git work tree there, the writ
   - text fed to a shell that the guard cannot read (`echo "…" | bash`, `source <(…)`): it is
     scanned for the blocks that hold for everyone, not against a role's lists;
   - a brace expansion that produces the option, `{--add-label,x}`: the guard does not expand
-    braces. (In a program's name it refuses them for a narrow role, as it refuses a glob and
+    braces. (In a `gh` group or subcommand word it refuses a brace and a glob for everyone, and
+    in a program's name it refuses them for a narrow role, as it refuses a glob and
     zsh's `=name`.)
   - a filename glob that expands to the option (`--add-labe?`, with a file of that name in the
     directory);

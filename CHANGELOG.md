@@ -465,18 +465,23 @@ the installed plugin, so those parts need no refresh.
   merge 5` runs `gh pr merge 5` and was judged as `gh pr view`, so it passed, for every agent,
   the released 0.3.1 included. The same spelling hid a subcommand outside a narrow role's list
   (`gh pr --body view review 5 --approve` as the reviewer), and a flag written before `api`
-  was not read at all (`gh -X DELETE api …`, `gh --method=DELETE api …`). Now, once a
-  `--flag` or `-f` sits before the subcommand, any bare word of the call may be the group or
-  the subcommand. The call is blocked when `pr` and `merge`, or `alias` and `set`/`import`,
-  are both among those words, when one of them is computed, or when it may be `gh api` and a
-  flag anywhere in it makes a write; a later bare `git push` is not trusted after a
-  `gh pr <flag> checkout`. For the Analyst, the Architect and the reviewer such a call is
-  blocked outright, with a note to put the options after the subcommand. `-R`, `--repo` and
-  `--hostname` with their value are read as before (`gh -R o/r pr view 5` is unchanged), and
-  so is a flag with `=` or a cluster such as `-XPUT`, neither of which takes the next word.
-  The plain-text scan the guard falls back on for text it cannot read (`echo "…" | bash`) now
-  matches `gh … pr … merge` with words in between. Still not seen: a gh alias or extension
-  set up earlier.
+  was not read at all (`gh -X DELETE api …`, `gh --method=DELETE api …`). The guard still
+  judges a `gh` call the way it always read it, and now also by every other way `gh` may read
+  the same words; a further reading can only add a block. In those readings the word after a
+  `--flag` or `-f` written before the subcommand may be that flag's value or the command
+  (`-R`, `--repo` and `--hostname` always take theirs; `--flag=value` and a cluster such as
+  `-XPUT` take nothing), and an empty word is passed over, as `gh` passes over it
+  (`gh pr "" merge`). A call is blocked when any reading is `gh pr merge`, `gh alias set` or
+  `import`, a `gh api` write judged by all of its flags, or, for the Analyst, the Architect
+  and the reviewer, a command outside the role's list or a label outside its label list.
+  Before the subcommand is settled, a word that may split into several blocks (`gh -R $REPO pr
+  view 5` must quote `$REPO`), and so does a computed word, a glob or a brace where the group
+  or a `gh pr` subcommand stands (`gh pr merg[e] 5`). After a `gh pr … checkout` that may be
+  read another way, a later bare `git push` is not trusted. Text handed to a shell
+  (`echo "…" | bash`, a heredoc to a program named by a variable) is now also parsed, so
+  `gh pr --body "a;b" merge 5` inside it is found. Still not seen: a `gh` alias or extension
+  set up outside the commands the guard reads; a brace expansion anywhere else in the call
+  (`gh api {-X,DELETE} …`); and what the guard never read: a script on disk, zsh's `=gh`.
 
 - **One Mission Control shows every adopted repo on the machine, and says so** (issue 52).
   It always could: the hook sends each event with its working directory, the server maps that
