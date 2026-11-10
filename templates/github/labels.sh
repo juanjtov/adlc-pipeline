@@ -27,6 +27,8 @@ create "adlc:change-failure" "B60205" "A defect Ops traced to a deploy, beside b
 create "adlc:tripwire" "D93F0B" "Tripwire alert: a direct push or a force-push reached the default branch"
 create "adlc:changes-requested" "FBCA04" "A review flagged the PR — the fix loop returns it to the Builder"
 create "needs:human"   "E99695" "Fix loop capped out (3 rounds) — a human must step in on this PR"
+create "adlc:follow-up" "C5DEF5" "Follow-up QA filed for a PR's residuals; its body names the parent (ADLC-FOLLOW-UP: #N)"
+create "adlc:accepted-risk" "E99695" "On a chain's root: the Principal accepted its residual risk; QA is told to file no more follow-ups"
 create "lane:fast"     "0FB889" "Marks a fast-lane PR so the full review lane defers to adlc-fast.yml (no collision)"
 
 echo "Done. State machine:"

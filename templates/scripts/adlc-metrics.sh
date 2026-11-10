@@ -141,6 +141,16 @@ else
   echo "change_failures: 0 (this repo has no $CF_LABEL label, so no issue carries it — run the plugin's templates/github/labels.sh)"
 fi
 
+# --- Follow-up share (issue 37): of the issues opened in the window, those LABELLED adlc:follow-up ---
+# (the newest 500 issues are read). The label is what is counted: a follow-up filed before the label
+# existed, or without it, is not in this number (adlc-chains.sh report reads those from their text), and
+# a repo without the label gets a note instead of a bare 0. A high share is a pipeline feeding itself.
+followups=$(gh issue list --state all --limit 500 --json createdAt,labels \
+        --jq "[.[] | select(.createdAt >= \"$SINCE\")] | \"\([.[] | select(any((.labels // [])[]; .name == \"adlc:follow-up\"))] | length) / \(length)\"")
+fu_note=""
+grep -qxF "adlc:follow-up" <<<"$repo_labels" || fu_note=" (this repo has no adlc:follow-up label, so no issue carries it — run the plugin's templates/github/labels.sh)"
+echo "follow_ups_filed: $followups issues opened are labelled adlc:follow-up${fu_note}"
+
 # --- Finding classes (the compounding signal) ---
 if [ -f "$LEDGER" ]; then
   echo "finding_classes (class: count  [top severity]):"

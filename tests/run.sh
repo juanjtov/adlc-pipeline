@@ -458,6 +458,7 @@ case "$*" in
   "auth status"*) [ -e "$DFX/noauth" ] && exit 1; exit 0 ;;
   "label list"*)  here && printf '%s\n' stage:intake gate:stories stage:design stage:build stage:qa gate:deploy
                   here && [ ! -e "$DFX/old-labels" ] && printf '%s\n' adlc:change-failure adlc:tripwire   # old-labels: a repo set up before issue 21
+                  here && [ ! -e "$DFX/no-chain-labels" ] && printf '%s\n' adlc:follow-up adlc:accepted-risk
                   exit 0 ;;
   "repo view"*|"api "*|"issue list"*|"pr list"*|"run "*) here || { echo "fake gh: asked from $PWD, not the fixture root" >&2; exit 1; } ;;
 esac
@@ -545,6 +546,13 @@ GATE=$(DFX="$FIX/fx" DFX_ROOT="$FIX" PATH="$FIX/bin:$PATH" bash "$S/adlc-doctor.
 eq yes "…and says so" "$(says_gate "skipped label check (gh not available/authenticated)")"
 eq 0 "…no listing is made" "$(grep -cE '^(issue|pr) list ' "$FIX/fx/calls")"
 rm -f "$FIX/fx/noauth" "$FIX/fx/fail-issues" "$FIX/fx/issues" "$FIX/fx/prs"
+# the follow-up chain labels (issue 37): a repo set up before them has the six state labels only
+gate true 1 none; touch "$FIX/fx/no-chain-labels"
+GATE=$(DFX="$FIX/fx" DFX_ROOT="$FIX" PATH="$FIX/bin:$PATH" bash "$S/adlc-doctor.sh" "$FIX" 2>&1); check 1 "labels: a repo without the two follow-up chain labels is flagged" $?
+eq yes "…naming adlc:follow-up, and the script that creates it" "$(says_gate "missing GitHub label: adlc:follow-up (follow-up chains; run the plugin's templates/github/labels.sh again")"
+eq yes "…and adlc:accepted-risk" "$(says_gate "missing GitHub label: adlc:accepted-risk")"
+eq no  "…not a state label, which it has" "$(says_gate "missing GitHub label: stage:")"
+rm -f "$FIX/fx/no-chain-labels"
 # is Actions alive? (issue 34): an exhausted budget fails every run within seconds with no step run
 R() { jq -cn --argjson id "$1" --arg c "$2" --argjson s "$3" '{databaseId: $id, status: "completed", conclusion: $c, createdAt: "2026-10-13T02:37:00Z", updatedAt: ("2026-10-13T02:37:00Z" | fromdate + $s | todate)}'; }
 J() { jq -cn --arg c "$1" '{jobs: [{name: "test", conclusion: "failure", steps: (if $c == "" then [] else [{name: "Set up job", conclusion: $c}] end)}]}'; }
@@ -1522,13 +1530,13 @@ That is the local run; the battery is red, so the verdict is CHANGES."
   : > "$MX/calls.args"; mx MX_LABELS="$MX/labels.json" MX_ISSUES="$MX/issues.json"; check 0 "change failures: the script runs to the end" $?
   eq "change_failures: 2" "change failures: the issues in the window, printed as change_failures" "$(printf '%s\n' "$OUT" | grep '^change_failures:')"
   eq 1 "…asked for by the label adlc:change-failure, open and closed alike, in one call" "$(grep -c '^issue list --state all --label adlc:change-failure --limit 200 --json createdAt --jq ' "$MX/calls.args")"
-  eq 1 "…the only issue listing the script makes" "$(grep -c '^issue list ' "$MX/calls.args")"
+  eq 2 "…beside one unfiltered listing, which the follow-up share reads; no other" "$(grep -c '^issue list ' "$MX/calls.args")"
   eq 0 "…and nothing is counted by the bug label any more" "$(grep -c -- '--label bug' "$MX/calls.args")"
   eq 0 "…nor printed as bugs_filed" "$(printf '%s\n' "$OUT" | grep -c '^bugs_filed')"
   echo '[{"name":"bug"},{"name":"adlc:change-failure-old"}]' > "$MX/labels.json"
   : > "$MX/calls.args"; mx MX_LABELS="$MX/labels.json" MX_ISSUES="$MX/issues.json"; check 0 "change failures: a repo without the label does not break the script" $?
   eq "change_failures: 0 (this repo has no adlc:change-failure label, so no issue carries it — run the plugin's templates/github/labels.sh)" "…it prints a zero that says why (a label with a longer name is not the label)" "$(printf '%s\n' "$OUT" | grep '^change_failures:')"
-  eq 0 "…without asking for issues no label could be on" "$(grep -c '^issue list ' "$MX/calls.args")"
+  eq 0 "…without asking for issues no label could be on" "$(grep -c '^issue list .*--label ' "$MX/calls.args")"
   mx MX_LABELS="$MX/no-such-file" MX_ISSUES="$MX/issues.json"; [ $? -ne 0 ] && ok "change failures: a label listing that fails stops the script with an error (no silent zero)" || bad "change failures: a failed label listing must stop the script"
   eq 0 "…and no change_failures line is printed" "$(printf '%s\n' "$OUT" | grep -c '^change_failures:')"
   rm -rf "$MX"
@@ -2723,6 +2731,170 @@ rm "$SCT/.adlc/scope/5.txt"
 SCOUT=$( cd "$SCT" && bash "$S/adlc-adr-check.sh" 2>&1 ); check 0 "…and with the file pruned the check passes" $?
 case "$SCOUT" in *"its Scope is not compared"*) ok "…saying the Scope is not compared" ;; *) bad "adr-check must say the Scope is not compared once the scope file is gone (got: $SCOUT)" ;; esac
 rm -rf "$RF" "$SCT"
+echo "follow-up chains (issue 37; adlc-chains.sh, labels.sh and adlc-metrics.sh against a stub gh):"
+# On one host 91 of 224 issue titles were follow-ups, in chains four to seven issues deep, each issue a pipeline
+# run. A follow-up names its parent on a marker line (older ones in a phrase), adlc-chains.sh builds the chains
+# from one issue list, and a chain three or more deep is put to the Principal as a decision; the label
+# adlc:accepted-risk on a chain's root records it. The fixture holds every way an issue names its parent.
+if command -v jq >/dev/null 2>&1; then
+  CH="$(mktemp -d)"; mkdir -p "$CH/bin" "$CH/fx" "$CH/fx2" "$CH/fx3" "$CH/fx4" "$CH/fx5" "$CH/repo"
+  cat > "$CH/bin/gh" <<'SH'
+#!/usr/bin/env bash
+# stub gh: `issue list` serves $CH_FX/issues.json and `pr list` $CH_FX/prs.json (through the call's --jq when it
+# has one, whole otherwise), `run list` $CH_FX/runs.json; CH_FAIL=issue|pr makes that call fail; every call is logged
+echo "$*" >> "$CH_CALLS"
+case "$1 $2" in
+  "issue list") k=issue ;; "pr list") k=pr ;; "run list") k=run ;;
+  "label create") echo "$3" >> "$CH_CALLS.labels"; exit 0 ;;
+  "label list") [ -f "$CH_FX/labels" ] && cat "$CH_FX/labels"; exit 0 ;;   # the repo's label names, one per line (no file: none, and adlc-metrics.sh prints its notes and goes on)
+  *) exit 2 ;;
+esac
+[ "${CH_FAIL:-}" = "$k" ] && { echo "gh: HTTP 502" >&2; exit 1; }
+f=.; while [ $# -gt 0 ]; do [ "$1" = "--jq" ] && f="$2"; shift; done
+jq -r "$f" "$CH_FX/${k}s.json"
+SH
+  chmod +x "$CH/bin/gh"
+  # <number> <title> <body> <state> [labels…] → one issue object, as `gh issue list --json` gives it
+  chi() { jq -cn --argjson n "$1" --arg t "$2" --arg b "$3" --arg s "$4" --arg at "$CH_AT" '{number: $n, title: $t, body: $b, state: $s, createdAt: $at, labels: ($ARGS.positional | map({name: .}))}' --args "${@:5}"; }
+  CH_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  {
+    chi 34  "Migration guard" "Forbid the statements." CLOSED
+    chi 67  "Follow-up of #34: two more statements" "" CLOSED                          # a phrase in the title
+    chi 68  "Guard: lock timeout" "$(printf 'From the QA of the guard PR.\nADLC-FOLLOW-UP: #34\n- [ ] one\n- [ ] two')" CLOSED adlc:follow-up   # the marker line
+    chi 69  "Guard: comments" "Residuals of #34, batched." CLOSED                      # a phrase in the body only
+    chi 85  "Residuals from QA of #67 (from PR #70)" "" CLOSED                         # the first phrase names the issue; the PR is not asked for
+    chi 116 "Guard: quoted identifiers" "$(printf 'Same area as the follow-up of #34.\n**ADLC-FOLLOW-UP:** #85')" OPEN adlc:follow-up   # the marker wins over a phrase, bold or not
+    chi 60  "Perf guard" "" CLOSED adlc:accepted-risk
+    chi 88  "QA of #60: slow path" "" CLOSED
+    chi 118 "Perf guard: cold start (from PR #90)" "" CLOSED                           # PR 90 closes #88
+    chi 215 "Perf guard again" "follow-up to issue #118" OPEN
+    chi 40  "Export" "" CLOSED
+    chi 41  "Export: empty file" "ADLC-FOLLOW-UP: #40" OPEN adlc:follow-up
+    chi 10  "A" "follow-up of #11" CLOSED                                              # A follows B follows A
+    chi 11  "B" "follow-up of #10" CLOSED
+    chi 5   "Names itself" "ADLC-FOLLOW-UP: #5" CLOSED
+    chi 7   "A plain request" "Nothing about any other issue; see #34 for context." OPEN
+    chi 300 "Follow-up of #999" "" OPEN                                                # no such issue, no such PR
+    chi 301 "Tidy (from PR #91)" "" OPEN                                               # PR 91 closes nothing
+    chi 400 "Login" "" CLOSED
+    chi 401 "Login: lockout" "ADLC-FOLLOW-UP: #95" OPEN adlc:follow-up                 # QA wrote the PR's number: PR 95 fixes #400
+  } | jq -s . > "$CH/fx/issues.json"
+  jq -n '[{number: 90, body: "Closes #88\n\nThe slow path."}, {number: 91, body: "A tidy-up; see #34."}, {number: 95, body: "What changed.\n\nfixes: #400"}, {number: 70, body: "Closes #67"}]' > "$CH/fx/prs.json"
+  # fx2: markers only, every number an issue → no pull request is needed; its one deep chain is decided
+  { chi 1 "Root" "" CLOSED adlc:accepted-risk; chi 2 "r2" "ADLC-FOLLOW-UP: #1" CLOSED; chi 3 "r3" "ADLC-FOLLOW-UP: #2" OPEN; chi 4 "Alone" "" OPEN; } | jq -s . > "$CH/fx2/issues.json"
+  echo '{"message":"Bad credentials"}' > "$CH/fx3/issues.json"
+  chains() { # [ENV=val …] -- <args…> : runs the script; stdout → CH_OUT, stderr → $CH/err, the gh calls → $CH/calls
+    local envs=(); while [ "$1" != -- ]; do envs+=("$1"); shift; done; shift
+    : > "$CH/calls"
+    CH_OUT=$(env PATH="$CH/bin:$PATH" CH_FX="$CH/fx" CH_CALLS="$CH/calls" ${envs[@]+"${envs[@]}"} bash "$S/adlc-chains.sh" "$@" 2>"$CH/err"); CH_RC=$?
+  }
+  chains -- report; check 0 "report: exits 0" $CH_RC
+  eq "depth=4  #34 → #67 → #85 → #116  (issues: 6, open: 1)" "report: the one undecided chain of depth 3 or more — marker links and phrase links (title, body, a bold marker over a phrase); a parent with three follow-ups is ONE chain: its longest path, and the issues in the chain counted, the root included" "$(printf '%s\n' "$CH_OUT" | grep '^depth=')"
+  eq "decided  depth=4  #60 → #88 → #118 → #215  (issues: 4, open: 1)  root carries adlc:accepted-risk" "report: a chain whose root carries adlc:accepted-risk is listed apart as decided (one link resolved through the PR that closes the parent)" "$(printf '%s\n' "$CH_OUT" | grep '^decided')"
+  eq 0 "report: a chain two deep is not flagged at the default depth" "$(printf '%s\n' "$CH_OUT" | grep -c '#40')"
+  eq "issue list --state all --limit 1000 --json number,title,body,labels,state|pr list --state all --limit 1000 --json number,body|" "report: ONE issue list call (1000 issues by default), and one pr list call because a reference names a number that is not an issue" "$(tr '\n' '|' < "$CH/calls")"
+  eq 4 "report: every reference that gave no parent is named on stderr" "$(grep -c 'no link made' "$CH/err")"
+  eq 1 "…the newer issue of a pair that name each other" "$(grep -c '#10 names #11, which is not older than it' "$CH/err")"
+  eq 1 "…the issue that names itself" "$(grep -c '#5 names #5' "$CH/err")"
+  eq 1 "…a number that is no issue and no PR" "$(grep -c '#300 names #999, which is neither a listed issue nor a pull request whose body closes one' "$CH/err")"
+  eq 1 "…a PR that closes nothing (a bare #34 in its body is not a closing reference)" "$(grep -c '#301 names #91' "$CH/err")"
+  chains -- report 2; check 0 "report 2: exits 0 (two issues that name each other do not loop)" $CH_RC
+  eq "depth=4  #34 → #67 → #85 → #116  (issues: 6, open: 1)|depth=2  #10 → #11  (issues: 2, open: 0)|depth=2  #40 → #41  (issues: 2, open: 1)|depth=2  #400 → #401  (issues: 2, open: 1)|" "report 2: deepest first, then by root; of the pair the older issue is the root; a marker that names the PR resolves to the issue the PR closes" "$(printf '%s\n' "$CH_OUT" | grep '^depth=' | tr '\n' '|')"
+  chains -- root 85;  eq "0 root=#34 depth=4 open" "root: a middle issue → its chain's root, the chain's depth, open" "$CH_RC $CH_OUT"
+  eq "" "…and says nothing about other issues' references" "$(cat "$CH/err")"
+  chains -- root 34;  eq "0 root=#34 depth=4 open" "root: the root itself" "$CH_RC $CH_OUT"
+  chains -- root 68;  eq "0 root=#34 depth=4 open" "root: an issue on a shorter branch reports the same chain" "$CH_RC $CH_OUT"
+  chains -- root 215; eq "0 root=#60 depth=4 accepted-risk" "root: a chain the Principal decided → accepted-risk" "$CH_RC $CH_OUT"
+  chains -- root 7;   eq "0 root=#7 depth=1 open" "root: an issue in no chain is its own root, depth 1 (a bare #N in its body is no link)" "$CH_RC $CH_OUT"
+  chains -- root 11;  eq "0 root=#10 depth=2 open" "root: in a pair that name each other, the older one" "$CH_RC $CH_OUT"
+  chains -- root 999; check 1 "root: a number that is not among the issues read exits 1" $CH_RC
+  eq "" "…with nothing on stdout (never read as 'open')" "$CH_OUT"
+  eq 1 "…and says so" "$(grep -c '#999 is not among the 20 issues read' "$CH/err")"
+  chains -- root 90;  check 1 "root: a pull request's number exits 1 too" $CH_RC
+  chains CH_FAIL=issue -- report; check 1 "a failed issue read exits 1" $CH_RC
+  eq "" "…with nothing on stdout (never 'no chain')" "$CH_OUT"
+  eq 1 "…and says so, after gh's own error" "$(grep -c 'could not list the issues' "$CH/err")"
+  chains CH_FAIL=issue -- root 85; eq "1 " "…for root too: no line that could be read as 'open'" "$CH_RC $CH_OUT"
+  chains CH_FAIL=pr -- report;     eq "1 " "a failed pull request read, when one is needed, exits 1 with nothing on stdout" "$CH_RC $CH_OUT"
+  chains CH_FX="$CH/fx3" -- report; eq "1 " "an answer that is not a JSON list exits 1" "$CH_RC $CH_OUT"
+  chains CH_FX="$CH/fx2" -- report; check 0 "markers only: exits 0" $CH_RC
+  eq "issue list --state all --limit 1000 --json number,title,body,labels,state|" "…and makes no pr list call when every reference names an issue" "$(tr '\n' '|' < "$CH/calls")"
+  eq 1 "…says there is no undecided chain when the only deep one is decided" "$(printf '%s\n' "$CH_OUT" | grep -c '^no undecided chain of depth >= 3$')"
+  eq "decided  depth=3  #1 → #2 → #3  (issues: 3, open: 1)  root carries adlc:accepted-risk" "…and still lists the decided one" "$(printf '%s\n' "$CH_OUT" | grep '^decided')"
+  eq "" "…with nothing on stderr" "$(cat "$CH/err")"
+  # fx4: one fixture line per rule the header states (each fails when the rule is taken out of the script), newest first
+  # as gh lists them: the marker counts only at the start of a line; a phrase in the title wins over one in the body; a
+  # PR resolves to the FIRST issue its body closes; of two paths of the same length the lower numbers are shown.
+  { chi 5 "Cache: cold start (from PR #20)" "" OPEN
+    chi 4 "Docs: the marker" "Say that QA writes ADLC-FOLLOW-UP: #2 in a follow-up's body." OPEN
+    chi 3 "Follow-up of #1: empty input" "Not a follow-up of #2." CLOSED
+    chi 2 "Search" "" CLOSED; chi 1 "Cache" "" CLOSED; } | jq -s . > "$CH/fx4/issues.json"
+  jq -n '[{number: 20, body: "Closes #1\n\nAlso fixes #2 on the way."}]' > "$CH/fx4/prs.json"
+  chains CH_FX="$CH/fx4" -- report 2
+  eq "depth=2  #1 → #3  (issues: 3, open: 1)|" "report: issues = the issues in the chain, the root included; of two paths of the same length the lower numbers are shown, whatever order gh lists them in" "$(printf '%s\n' "$CH_OUT" | grep '^depth=' | tr '\n' '|')"
+  eq 1 "…and the header line says what 'issues' counts" "$(printf '%s\n' "$CH_OUT" | grep -c 'issues = the issues in the chain, the root included')"
+  chains CH_FX="$CH/fx4" -- root 3; eq "0 root=#1 depth=2 open" "a phrase in the title wins over one in the body" "$CH_RC $CH_OUT"
+  chains CH_FX="$CH/fx4" -- root 4; eq "0 root=#4 depth=1 open" "the marker in the middle of a line is prose, not a link" "$CH_RC $CH_OUT"
+  chains CH_FX="$CH/fx4" -- root 5; eq "0 root=#1 depth=2 open" "a PR resolves to the first issue its body closes, not a later one" "$CH_RC $CH_OUT"
+  # the chains cannot be built (the pull request list is not a list): exit 1, never an empty report read as "no chain"
+  cp "$CH/fx/issues.json" "$CH/fx5/issues.json"; echo '{"message":"Bad credentials"}' > "$CH/fx5/prs.json"
+  chains CH_FX="$CH/fx5" -- report; eq "1 " "a pull request answer that is not a list exits 1 with nothing on stdout" "$CH_RC $CH_OUT"
+  eq 1 "…and says the chains could not be built" "$(grep -c 'could not build the chains' "$CH/err")"
+  chains CH_FX="$CH/fx5" -- root 85; eq "1 " "…for root too" "$CH_RC $CH_OUT"
+  chains ADLC_CHAINS_LIMIT=20 -- root 7; check 0 "ADLC_CHAINS_LIMIT: exits 0" $CH_RC
+  eq 1 "…is the --limit of the read" "$(grep -c '^issue list --state all --limit 20 ' "$CH/calls")"
+  eq 1 "…and a list that comes back full is reported: older issues may not have been read" "$(grep -c 'read 20 issues, the limit' "$CH/err")"
+  for bad in "" "bogus" "report 1" "report x" "report 3 4" "root" "root abc" "root 12 13"; do
+    chains -- $bad; check 2 "bad arguments are an error: adlc-chains.sh $bad" $CH_RC
+    eq "" "…and no gh call is made" "$(cat "$CH/calls")"
+  done
+  chains ADLC_CHAINS_LIMIT=0 -- report; check 2 "a limit of 0 is an error" $CH_RC
+  chains ADLC_CHAINS_LIMIT=all -- report; check 2 "a limit that is not a number is an error" $CH_RC
+  # labels.sh creates the two labels the chains rest on (the description limit is checked in the labels.sh section)
+  : > "$CH/calls.labels"
+  env PATH="$CH/bin:$PATH" CH_FX="$CH/fx" CH_CALLS="$CH/calls" bash "$ROOT/templates/github/labels.sh" >/dev/null 2>&1; check 0 "labels.sh runs to the end against this stub" $?
+  for l in adlc:follow-up adlc:accepted-risk; do
+    eq 1 "labels.sh creates $l" "$(grep -cx "$l" "$CH/calls.labels")"
+  done
+  # adlc-metrics.sh: the share of the window's issues that carry adlc:follow-up (fx: 4 of 20, all opened just now; no merged PR).
+  # What is counted is the LABEL: the line says so, and on a repo without the label it says that instead of a bare 0.
+  echo '[]' > "$CH/fx/prs.json"; echo '[]' > "$CH/fx/runs.json"; printf '%s\n' bug adlc:follow-up > "$CH/fx/labels"
+  OUT=$( cd "$CH/repo" && env PATH="$CH/bin:$PATH" CH_FX="$CH/fx" CH_CALLS="$CH/calls" bash "$S/adlc-metrics.sh" 30 2>/dev/null )
+  eq "follow_ups_filed: 4 / 20 issues opened are labelled adlc:follow-up" "metrics: the issues labelled adlc:follow-up against all issues opened in the window (16 of the 20 are in a chain; the phrase-linked ones carry no label and are not counted)" "$(printf '%s\n' "$OUT" | grep '^follow_ups_filed:')"
+  jq '.[0].createdAt = "2000-01-01T00:00:00Z" | .[2].createdAt = "2000-01-01T00:00:00Z"' "$CH/fx/issues.json" > "$CH/fx/i2" && mv "$CH/fx/i2" "$CH/fx/issues.json"
+  OUT=$( cd "$CH/repo" && env PATH="$CH/bin:$PATH" CH_FX="$CH/fx" CH_CALLS="$CH/calls" bash "$S/adlc-metrics.sh" 30 2>/dev/null )
+  eq "follow_ups_filed: 3 / 18 issues opened are labelled adlc:follow-up" "…an issue opened before the window counts on neither side" "$(printf '%s\n' "$OUT" | grep '^follow_ups_filed:')"
+  : > "$CH/calls"; printf 'bug\n' > "$CH/fx/labels"; jq 'map(.labels = [])' "$CH/fx/issues.json" > "$CH/fx/i2" && mv "$CH/fx/i2" "$CH/fx/issues.json"
+  OUT=$( cd "$CH/repo" && env PATH="$CH/bin:$PATH" CH_FX="$CH/fx" CH_CALLS="$CH/calls" bash "$S/adlc-metrics.sh" 30 2>/dev/null )
+  eq "follow_ups_filed: 0 / 18 issues opened are labelled adlc:follow-up (this repo has no adlc:follow-up label, so no issue carries it — run the plugin's templates/github/labels.sh)" "…a repo without the label: the 0 comes with the reason, not bare" "$(printf '%s\n' "$OUT" | grep '^follow_ups_filed:')"
+  eq 1 "…from the one label list call the change_failures line already makes" "$(grep -c '^label list ' "$CH/calls")"
+  rm -rf "$CH"
+else
+  echo "  · skipped the follow-up chain checks (no jq here)"
+fi
+# The prompts that file, look up and present: static, as for every other skill text.
+QA="$ROOT/skills/role-qa-release-ops/SKILL.md"
+for t in 'ONE follow-up issue per PR' 'labelled `adlc:follow-up`' '`ADLC-FOLLOW-UP: #<the issue this PR closes>`' '.adlc/scripts/adlc-chains.sh root <that issue>' '`accepted-risk`' 'file nothing' 'a Low stays a' 'The lookup fails, or `gh` refuses' 'file anyway (without the label if the repo lacks it) and say so on the card' 'Your only label action on the issue under QA is'; do
+  grep -qF -- "$t" "$QA" && ok "QA prompt: $t" || bad "QA prompt must say: $t"
+done
+grep -F '| **Medium** |' "$ROOT/skills/security-gate/SKILL.md" | grep -F 'adlc:follow-up' | grep -qF 'adlc:accepted-risk' && ok "security-gate: the Medium row (where the follow-up rule lives) names both labels" || bad "security-gate: the Medium row must name adlc:follow-up and adlc:accepted-risk"
+for f in retro cycle-retro; do
+  for t in '.adlc/scripts/adlc-chains.sh report' '`adlc:accepted-risk`' 'redesign' '`decided`'; do
+    grep -qF -- "$t" "$ROOT/skills/$f/SKILL.md" && ok "$f: $t" || bad "$f must say: $t"
+  done
+  grep -qiE 'decision(\*\*)? for the Principal' "$ROOT/skills/$f/SKILL.md" && ok "$f: a deep chain is a decision for the Principal" || bad "$f: must present a deep chain as a decision for the Principal"
+done
+# nothing here asks a role the guard limits to run the script: it calls `gh issue list` (and `gh pr list`), which the
+# adversarial reviewer may not, and the guard cannot see inside a script
+for f in role-adversarial-reviewer role-product-analyst role-architect role-builder code-review; do
+  grep -q 'adlc-chains' "$ROOT/skills/$f/SKILL.md" && bad "$f: must not be told to run adlc-chains.sh" || ok "$f is not told to run adlc-chains.sh"
+done
+grep -q 'adlc-chains.sh' "$ROOT/README.md" && ok "README names adlc-chains.sh" || bad "README: the layout tree must name adlc-chains.sh"
+grep -q 'QA is told to file no more follow-ups' "$ROOT/templates/github/labels.sh" && ok "the accepted-risk label describes a prompt rule as one (QA is told), not as a fact" || bad "labels.sh: adlc:accepted-risk must not state the prompt rule as a fact"
+for f in retro cycle-retro; do
+  grep -q 'counts only the issues' "$ROOT/skills/$f/SKILL.md" && grep -q 'labelled `adlc:follow-up`' "$ROOT/skills/$f/SKILL.md" && ok "$f: follow_ups_filed is the labelled issues, not every follow-up" || bad "$f: must say follow_ups_filed counts only the labelled issues"
+done
+grep -q "ADLC-FOLLOW-UP: #" "$ROOT/templates/github/labels.sh" && ok "the label's description names the marker the script reads" || bad "labels.sh: adlc:follow-up should name the marker"
 
 echo ""
 echo "== $pass passed, $fail failed =="

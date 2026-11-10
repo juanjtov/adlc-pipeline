@@ -22,6 +22,7 @@ mkdir -p .adlc/metrics
 .adlc/scripts/adlc-cycle.sh issues "${DAYS:-30}"  > .adlc/metrics/cycle.jsonl     # stage dwell + rounds per issue, from the label timeline
 .adlc/scripts/adlc-cycle.sh report "${DAYS:-30}"                                   # the ranked tables
 .adlc/scripts/adlc-metrics.sh "${DAYS:-30}"                                        # first-pass rate, iterations-to-green
+.adlc/scripts/adlc-chains.sh report                                                # follow-up chains 3+ issues deep
 ```
 
 - **`runs.jsonl`** — one row per agent run: stage, agent, seconds, input/output/cache tokens,
@@ -66,6 +67,14 @@ From the report, name the top three of:
 
 A pattern must hold across **several issues** in the window. One expensive run is a story, not a
 trend — leave it.
+
+**Follow-up chains are not ranked: list every one.** Each `depth=` line of `adlc-chains.sh report`
+is one area that took that many pipeline runs, each fix drawing the next follow-up
+(`follow_ups_filed` in the metrics counts only the issues labelled `adlc:follow-up`). Put each
+in the PR body (with no PR, in what you say) as a **decision for the Principal**: accept the risk (label the
+chain's root issue `adlc:accepted-risk`; QA is then told to file no more follow-ups in it) or
+redesign (one issue that replaces the approach). Never propose another follow-up for it. A line that starts
+`decided` already carries the label: leave it out.
 
 ## Step 2 — Propose (cheapest structural lever first)
 
