@@ -59,7 +59,7 @@ the table. The security-gate, code-review and efficient-runs skills, the retro a
 recipes, the role prompts and the guard hook live in the plugin, which every session loads from
 the installed plugin, so those parts need no refresh. The `release-ops` skill template changed
 too; the `bug` entry below says what that means for a skill generated earlier. Refresh together
-with the update: the role prompts that arrive with it name scripts only the refresh brings
+with the update: the role prompts that arrive with it call scripts only the refresh brings
 (`adlc-relabel.sh`, `adlc-adr-check.sh`, `adlc-chains.sh`), and a 0.3.1 intake lane has no grant
 for the first. A repo that is updated and not yet refreshed has not been run in that state.
 
