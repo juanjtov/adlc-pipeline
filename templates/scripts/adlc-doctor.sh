@@ -179,7 +179,7 @@ if [ -z "${ADLC_DOCTOR_SKIP_LABELS:-}" ] && command -v gh >/dev/null 2>&1 && gh 
   if [ -n "$doubles" ]; then
     note "an open issue or PR carries more than one stage:/gate: label (the state machine has one state per issue):"
     printf '%s\n' "$doubles" | sed 's/^/      /'
-    echo "    fix: keep the label it reached last and remove the rest — gh issue edit <n> --remove-label <label> (gh pr edit <n> for a PR; one --remove-label per extra label)"
+    echo "    fix: keep the label it reached last and remove the rest — .adlc/scripts/adlc-relabel.sh <n> <that label> (one call; a PR: gh pr edit <n> --remove-label <label>)"
   elif [ "$listed" -eq 2 ]; then
     ok "no open issue or PR carries more than one stage:/gate: label"
   fi

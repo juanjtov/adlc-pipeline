@@ -74,6 +74,7 @@ templates/                     # what the wizard fills into the host repo
             adlc-log-findings.sh · adlc-doctor.sh · adlc-metrics.sh · adlc-cost.sh
             adlc-cache.sh · adlc-triage.sh · adlc-pr-stage.sh · adlc-branch-issue.sh   # deterministic logic
             adlc-run-log.sh · adlc-cycle.sh                                            # the cycle-retro's two ledgers
+            adlc-relabel.sh                                                            # one state per issue: move to a stage:/gate: label in one call
             #   adlc-cache.sh        = prompt-cache hit-rate rollup
             #   adlc-run-log.sh      = run ledger: tokens · cost · seconds per agent run (Mission Control / OTel / Actions)
             #   adlc-cycle.sh        = cycle time per stage + fix rounds per issue, from the label timeline; the ranked report

@@ -191,7 +191,7 @@ Create/write:
 
 8b. `.adlc/scripts/` + the local guard — copy `templates/scripts/*.sh` to `.adlc/scripts/`
    (chmod +x). These are the **deterministic guardrails** (`adlc-diff-scope`, `adlc-tripwire-check`,
-   `adlc-fix-cap`, `adlc-verdict`, `adlc-metrics`, `adlc-run-log`, `adlc-cycle`, `adlc-doctor`) that the workflows and the local
+   `adlc-fix-cap`, `adlc-verdict`, `adlc-relabel`, `adlc-metrics`, `adlc-run-log`, `adlc-cycle`, `adlc-doctor`) that the workflows and the local
    hook call — one unit-tested source of truth, not prose. Also write the plugin's version to
    `.adlc/VERSION` (one line): read `.version` from `${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json`.
    That stamp says which plugin release these frozen copies came from, so `adlc-doctor.sh` can tell

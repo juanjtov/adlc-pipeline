@@ -149,7 +149,7 @@ class PipelineRules(unittest.TestCase):
         builder = pipeline.read_agent(PLUGIN, 'builder')['lanes']
         self.assertEqual(sorted(l['lane'] for l in builder), ['builder', 'fast', 'fix'])
         self.assertTrue(all('Bash' in l['tools'] for l in builder))
-        self.assertEqual(pipeline.read_agent(PLUGIN, 'analyst')['lanes'][0]['tools'][-1], '.adlc/scripts/adlc-triage.sh')
+        self.assertEqual(pipeline.read_agent(PLUGIN, 'analyst')['lanes'][0]['tools'][-2:], ['.adlc/scripts/adlc-triage.sh', '.adlc/scripts/adlc-relabel.sh'])
 
     def test_without_the_guard_the_limits_are_marked_unknown(self):
         root = tempfile.mkdtemp()

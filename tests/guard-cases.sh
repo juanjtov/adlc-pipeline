@@ -491,6 +491,8 @@ g D $AN feat 'gh issue develop 7 --name hotfix --base main'                  # c
 g D $AN feat 'gh issue create --title x --body y'
 g D $AN feat 'gh label delete stage:build --yes'
 g D $AN feat 'gh label create shiny'
+g A $AN feat '.adlc/scripts/adlc-relabel.sh 5 gate:stories'                  # the relabel script is `gh issue edit` by another name
+g A $AN feat 'bash .adlc/scripts/adlc-relabel.sh 5 gate:stories'
 
 # ── adversarial-reviewer: gh pr view|diff|comment, gh issue view, read-only git ───────────
 g A $RV feat 'gh pr diff 5 && gh pr view 5 --json comments,body'
@@ -500,12 +502,22 @@ g A $RV feat 'git diff origin/main...HEAD -- src/ | head -400'
 g D $RV feat 'gh pr review 5 --approve'
 g D $RV feat 'gh pr edit 5 --add-label adlc:changes-requested'
 g D $RV feat 'gh issue edit 12 --add-label stage:qa'
+g D $RV feat '.adlc/scripts/adlc-relabel.sh 12 stage:qa'                      # …so the reviewer may not run it either
+g D $RV feat '/w/.adlc/scripts/adlc-relabel.sh 12 stage:qa'
+g D $RV feat 'bash .adlc/scripts/adlc-relabel.sh 12 stage:qa'
+g D $RV feat 'bash -o pipefail .adlc/scripts/adlc-relabel.sh 12 stage:qa'      # an option's value is not the script
+g D $RV feat 'bash +x .adlc/scripts/adlc-relabel.sh 12 stage:qa'               # `+x` is an option too
+g D $RV feat 'bash "$S/adlc-relabel.sh" 12 stage:qa'                           # a computed prefix, a literal script name
+g D $RV feat 'bash $S/adlc-relabel.sh 12 stage:qa'
+g D $RV feat 'bash "$PWD/.adlc/scripts/adlc-relabel.sh" 12 stage:qa'
+g A $RV feat 'bash -n .adlc/scripts/adlc-relabel.sh'                           # a syntax check runs nothing
 g D $RV feat 'git stash'
 g D $RV feat 'git checkout main'
 
 # ── architect: gh issue view|comment|edit|list, gh pr view|diff|comment|review, read-only git ──
 g A $AR feat 'gh issue list --label stage:build --state open'
 g A $AR feat 'gh issue edit 5 --remove-label stage:design --add-label stage:build'
+g A $AR feat '.adlc/scripts/adlc-relabel.sh 5 stage:build'
 g A $AR feat 'gh pr review 5 --request-changes --body x'
 g D $AR feat 'gh pr create --title x'
 g D $AR feat 'git commit -m adr'
@@ -519,6 +531,8 @@ g A adlc-architect feat 'gh issue edit 5 --remove-label stage:design --add-label
 g A adlc-builder feat 'git commit -am x && git push -u origin feat/1-x'
 g D adlc-builder feat 'gh pr merge 5'
 g D adlc-qa-release-ops feat 'git push origin main'
+g A adlc-qa-release-ops feat '.adlc/scripts/adlc-relabel.sh 12 gate:deploy'     # QA moves the issue to its terminal gate
+g A - feat '.adlc/scripts/adlc-relabel.sh 12 gate:deploy'
 g A adlc-other feat 'git commit -am x'                          # not one of the narrow roles: universal blocks only
 g A other:architect feat 'git commit -am x'
 g A adlc:builder feat 'git commit -am x && git push -u origin feat/1-x'

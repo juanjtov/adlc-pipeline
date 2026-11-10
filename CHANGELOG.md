@@ -9,10 +9,26 @@ it differs from the installed plugin.
 
 ## Unreleased (on `main` after 0.3.1)
 
-Tooling refresh needed: **yes** — the `adlc-log-findings.sh` copy gains the backtick-wrapped
+Tooling refresh needed: **yes** — `adlc-relabel.sh` is new and the lanes call it; the `adlc-log-findings.sh` copy gains the backtick-wrapped
 marker, the per-comment time, the skipped-line report and the closed class list below, the `adlc-cycle.sh` copy the
-verdict-based round count, and the `adlc-metrics.sh` copy the `infra_failed` line. The retro and cycle-retro recipes live in the plugin skills,
+verdict-based round count and the next-label end of a stage interval, the `adlc-doctor.sh` copy the Actions check, and the `adlc-metrics.sh` copy the `infra_failed` line. The retro and cycle-retro recipes, the role prompts and the guard hook live in the plugin,
 which every session loads from the installed plugin, so those parts need no refresh.
+
+- **One state per issue: `adlc-relabel.sh`, and the cycle clock ends a stage at the next
+  label** (issue 38, the rest of it; PR 46 added the doctor check). Every lane and role prompt
+  spelled out its own label pair, and the pairs drifted: QA's said "add `gate:deploy`" and
+  nothing took `stage:qa` off, so on one host 25 issues ended wearing `stage:qa` + `gate:deploy`
+  and six more `stage:fast` + `gate:deploy`, two states each for the cycle clock, Mission
+  Control's station view and any lane keyed on the older label. New `adlc-relabel.sh <issue>
+  <stage:…|gate:…>` reads the issue's labels and, in one `gh issue edit`, removes every other
+  `stage:`/`gate:` label and adds the new one; the intake, design, review and fast lanes, the
+  RUNBOOK's fast lane and QA step, and the Analyst, Architect and QA prompts (role skills and
+  lane prompts alike) call it instead of a pair, and the doctor's fix line names it. The guard hook judges the script as the `gh issue edit` it is,
+  so the adversarial reviewer, which may not move labels, may not run it either. `adlc-cycle.sh`
+  now ends a label's dwell when the next `stage:`/`gate:` label is put on, not only when the old
+  one is removed, so an issue left with two labels no longer reads as a stage that ran to its
+  close; a label superseded that way is the state again from the moment the newer one is taken
+  off (a Gate 2 rejection), and a close is never counted past the issue's close.
 
 - **The doctor and Mission Control say when GitHub has stopped running the workflows** (issue
   34, the detection half). When a private repo's included Actions minutes or its spending limit
