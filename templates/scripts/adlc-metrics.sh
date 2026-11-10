@@ -35,16 +35,52 @@ echo "first_pass_approved: $firstpass / $merged"
 # iterations = the ADLC CI runs its branch took after the PR was opened; failed_first = those PRs
 # that did not go green on the first run. High values ⇒ flaky tests or vague specs (the cycle-retro's
 # business, not a code finding). Two merged PRs that reused one branch name share its runs.
+#
+# A run that failed before any test ran is not a test signal. One `gh run view --json jobs` call
+# per red run (green runs need none) finds the first failed step across the run's failed jobs, in
+# the API's order (a fail-fast matrix lists cancelled legs beside the one that failed; those have
+# no failed step and are passed over); when that step's name matches ADLC_SETUP_STEPS (a regex,
+# case-insensitive) the run is `infra_failed` and leaves the iterations count: it neither adds a
+# run nor makes its PR failed_first. Both numbers are printed, so the retro sees the test reds and
+# the cycle-retro the provisioning reds. A run whose jobs cannot be read, or none of whose failed
+# jobs names a failed step (cancelled, timed out), stays a plain failure. Runs are matched to a PR
+# by branch and date, so a red run on no merged PR's branch is never looked up.
+# The default regex is a heuristic on step names, anchored at the start of the name where a word
+# is common in test steps too: the runner's own "Set up job" and "Post Run actions/…", checkout,
+# installs, setup actions, caches, registry logins, provisioning, and creating an ephemeral
+# database or branch anywhere in the name. "Login flow tests" or "Test cache invalidation" are not
+# matched; a host whose test step starts with one of those words ("Install and test") sets its own.
+ADLC_SETUP_STEPS="${ADLC_SETUP_STEPS:-^(set up |post run |run actions/|checkout|install|setup|provision|(restore |save )?cache|docker log ?in|log ?in to |create .*(branch|database|db))|ephemeral}"
 oldest=$(echo "$prs" | jq -r '[.[].createdAt] | min // empty')
-runs=$(gh run list --limit 500 --json workflowName,headBranch,status,conclusion,createdAt \
+runs=$(gh run list --limit 500 --json databaseId,workflowName,headBranch,status,conclusion,createdAt \
         --jq "[.[] | select(.status == \"completed\" and .createdAt >= \"${oldest:-$SINCE}\" and (.workflowName | test(\"CI\"; \"i\")))]")
+# the red runs on a merged PR's branch, after that PR was opened: the only ones whose steps matter
+red_ids=$(jq -rn --slurpfile runs <(echo "$runs") --slurpfile prs <(echo "$prs") '
+  $runs[0] as $runs | $prs[0] as $prs
+  | [$prs[] as $p | $runs[] | select(.headBranch == $p.headRefName and .createdAt >= $p.createdAt and .conclusion != "success") | .databaseId] | unique[]')
+infra='[]'
+for id in $red_ids; do
+  step=$(gh run view "$id" --json jobs --jq '[.jobs[] | select(.conclusion == "failure" or .conclusion == "timed_out")
+           | .steps[]? | select(.conclusion == "failure")] | first | .name // empty' 2>/dev/null) || step=""
+  if [ -n "$step" ] && printf '%s' "$step" | grep -qiE "$ADLC_SETUP_STEPS"; then
+    infra=$(jq -cn --argjson a "$infra" --argjson id "$id" '$a + [$id]')
+  fi
+done
 # Both lists go in through file descriptors: 200 PRs with their comments overflow an argument.
-jq -rn --slurpfile runs <(echo "$runs") --slurpfile prs <(echo "$prs") '
+jq -rn --slurpfile runs <(echo "$runs") --slurpfile prs <(echo "$prs") --argjson infra "$infra" '
   $runs[0] as $runs | $prs[0] as $prs
   | [$prs[] as $p | ($runs | map(select(.headBranch == $p.headRefName and .createdAt >= $p.createdAt))) | select(length > 0)
-   | {n: length, red: ([.[] | select(.conclusion != "success")] | length)}] as $per
+   | {all: length,
+      infra: ([.[] | select(.databaseId as $i | $infra | index($i))] | length),
+      n: ([.[] | select(.databaseId as $i | $infra | index($i) | not)] | length),
+      red: ([.[] | select(.conclusion != "success" and (.databaseId as $i | $infra | index($i) | not))] | length)}] as $per
+  | ($per | map(.all) | add // 0) as $all | ($per | map(.infra) | add // 0) as $inf
+  | ([$per[] | select(.n > 0)]) as $counted
   | if ($per | length) == 0 then "iterations_to_green: no CI runs found for the merged PRs of the window"
-    else "iterations_to_green: avg \(($per | map(.n) | add) / ($per | length) * 10 | round / 10) CI runs per merged PR; failed_first: \([$per[] | select(.red > 0)] | length) / \($per | length)"
+    elif ($counted | length) == 0 then "iterations_to_green: every CI run of the window\u0027s merged PRs failed in a setup step (\($inf) runs); no test signal",
+         "infra_failed: \($inf) / \($all) CI runs died in a setup step (ADLC_SETUP_STEPS), before any test ran"
+    else "iterations_to_green: avg \(($counted | map(.n) | add) / ($counted | length) * 10 | round / 10) CI runs per merged PR; failed_first: \([$counted[] | select(.red > 0)] | length) / \($counted | length)",
+         "infra_failed: \($inf) / \($all) CI runs died in a setup step (ADLC_SETUP_STEPS), before any test ran; not counted above"
     end'
 
 # --- Change failure signal (bugs filed by Ops after a deploy) ---
