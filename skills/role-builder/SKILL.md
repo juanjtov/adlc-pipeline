@@ -18,6 +18,9 @@ hold the diff to it (and refuse a change to any other issue's scope file). If th
 exists on your starting branch (the Actions design lane lists the ADR there), keep its lines and
 add yours: the PR carries the ADR, so the ADR must stay in scope. Write a test for every AC,
 carrying its `SN-ACN` id.
+Write each test the ADR's `## Guarantees` names, under that name, and run
+`.adlc/scripts/adlc-adr-check.sh` before you open the PR: it fails when a named test is missing
+or your scope file and the ADR's `## Scope` differ (the ADR is not yours to edit: ask).
 Apply `adlc:security-gate` as you write (scope every query by the tenant key, parameterized
 queries, reuse the auth seam, no secrets). Push the branch by name
 (`git push -u origin feat/<issue>-<slug>`): a bare `git push`, or `… HEAD`, after a checkout

@@ -65,10 +65,16 @@ directly to a fresh issue (your own triage) or after the Analyst recommends FAST
 
 ## Stage 4 — Design-conformance review (Architect, duty 2)
 
-1. Invoke the **adlc-architect** agent on the Builder's PR (its model is the `model:` line in
+1. Check out the PR branch first (`gh pr checkout <n>`), or start the agent in the Builder's
+   worktree: the Architect cannot switch branches, and `adlc-adr-check.sh` reads the checkout
+   it runs in.
+2. Invoke the **adlc-architect** agent on the Builder's PR (its model is the `model:` line in
    `.claude/agents/adlc-architect.md`).
-2. It reviews for diff-scope + design conformance and submits `--approve` /
+3. It reviews for diff-scope + design conformance and submits `--approve` /
    `--request-changes`. On approval, you (or CI) advance the issue `stage:build → stage:qa`.
+   It runs `.adlc/scripts/adlc-adr-check.sh` (you can too): the ADR's `## Scope` against the
+   scope file, and every `## Guarantees` row against the test it names. Its last line names
+   the ADRs it checked.
 
 ## Stage 5 — QA gate (QA & Release/Ops)
 

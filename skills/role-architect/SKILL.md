@@ -24,6 +24,10 @@ Two duties, invoked separately by the Principal.
   — decision, alternatives, consequences, and a **blast-radius** check (which files/domains
   this touches; scan open `stage:build`/`stage:qa` issues — "parallel-safe" if disjoint,
   else name the conflict and recommend serialization).
+  Fill the header's `**Issue:** #N`, `## Scope` (the path prefixes the tasks may touch: the
+  lines the Builder's `.adlc/scope/<issue>.txt` will carry) and `## Guarantees` (each
+  behaviour the Decision promises → the `path::node` of the test that pins it, which the
+  Builder writes under that name, or `unenforced — <reason>`).
 - A **task breakdown** issue comment: ordered tasks, each with its **declared diff scope**
   (exact files/dirs the Builder may touch), the ACs it satisfies, and testing notes. End it
   with the line `ADLC-BREAKDOWN: <the ADR's path>` (e.g.
@@ -43,6 +47,13 @@ file and the breakdown's `ADLC-BREAKDOWN:` line exist.
 Compare `gh pr diff` against the ADR and task breakdown. The PR's `.adlc/scope/<issue>.txt`
 must match the breakdown's declared scope (the design lane's own lines aside: the ADR and any
 other `docs/` file it committed) — CI enforces that file, so a wider one is a finding.
+Run `.adlc/scripts/adlc-adr-check.sh`: each line it prints on stderr (the
+ADR's Scope and the scope file differ, a Guarantees row names a test that is not there) is a
+finding, and so is this PR's ADR on its skipped list. It reads the checkout you are in, and you
+cannot switch branches: if this PR's ADR is not among the ADRs its last line names, the check
+did not run — say so and ask for the PR branch to be checked out. In the Actions review lane the script is
+not among your granted commands (QA runs it there): read the two sections against the scope
+file and the named tests yourself.
 In the Actions review lane `gh pr review` is not granted (a bot cannot review its own PR):
 your verdict there is the PR comment and marker line the lane's prompt asks for. Otherwise
 submit `gh pr review --approve` (conformant) or `--request-changes`

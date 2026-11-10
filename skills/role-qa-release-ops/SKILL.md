@@ -17,6 +17,8 @@ invoke the `adlc-adversarial-reviewer` agent yourself — this repo's copy, or t
 verdict — a confirmed Critical/High there blocks the gate. Ensure every `SN-ACN` has a test —
 write missing ones yourself (your only write scope is the repo's test directories, named in
 `project-conventions`) and commit them. Run the full battery and **paste real output**.
+Run `.adlc/scripts/adlc-adr-check.sh` too (the ADR's Scope against the scope file, each
+Guarantees row against its test): a line on stderr is a finding.
 Apply `adlc:security-gate` adversarially — attempt tenant escapes, missing scope filters,
 query injection, auth bypass on new endpoints; scope findings to correctness/ACs/security
 per `verify`. Also ask the Principal to run `/security-review` on the branch and post
